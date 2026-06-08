@@ -56,7 +56,7 @@ const GET_CHAT_TITLE_SCRIPT = `(() => {
  * Returns: { found: boolean, x: number, y: number }
  */
 const FIND_PAST_CONVERSATIONS_BUTTON_SCRIPT = `(() => {
-    const isVisible = (el) => !!el && el instanceof HTMLElement && el.offsetParent !== null;
+    const isVisible = (el) => { if (!el) return false; const rect = el.getBoundingClientRect(); if (rect.width === 0 || rect.height === 0) return false; const style = window.getComputedStyle(el); return style.display !== 'none' && style.visibility !== 'hidden'; };
     const getRect = (el) => {
         const rect = el.getBoundingClientRect();
         return { found: true, x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
@@ -94,7 +94,7 @@ const FIND_PAST_CONVERSATIONS_BUTTON_SCRIPT = `(() => {
  * Returns: { sessions: SessionListItem[] }
  */
 const SCRAPE_PAST_CONVERSATIONS_SCRIPT = `(() => {
-    const isVisible = (el) => !!el && el instanceof HTMLElement && el.offsetParent !== null;
+    const isVisible = (el) => { if (!el) return false; const rect = el.getBoundingClientRect(); if (rect.width === 0 || rect.height === 0) return false; const style = window.getComputedStyle(el); return style.display !== 'none' && style.visibility !== 'hidden'; };
     const normalize = (text) => (text || '').trim();
 
     const items = [];
@@ -150,7 +150,7 @@ const SCRAPE_PAST_CONVERSATIONS_SCRIPT = `(() => {
  * Returns: { found: boolean, x: number, y: number }
  */
 const FIND_SHOW_MORE_BUTTON_SCRIPT = `(() => {
-    const isVisible = (el) => !!el && el instanceof HTMLElement && el.offsetParent !== null;
+    const isVisible = (el) => { if (!el) return false; const rect = el.getBoundingClientRect(); if (rect.width === 0 || rect.height === 0) return false; const style = window.getComputedStyle(el); return style.display !== 'none' && style.visibility !== 'hidden'; };
     const els = Array.from(document.querySelectorAll('div, span'));
     for (const el of els) {
         if (!isVisible(el)) continue;
@@ -177,7 +177,7 @@ function buildActivateChatByTitleScript(title: string): string {
 
         const panel = document.querySelector('.antigravity-agent-side-panel') || document;
         const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
-        const isVisible = (el) => !!el && el instanceof HTMLElement && el.offsetParent !== null;
+        const isVisible = (el) => { if (!el) return false; const rect = el.getBoundingClientRect(); if (rect.width === 0 || rect.height === 0) return false; const style = window.getComputedStyle(el); return style.display !== 'none' && style.visibility !== 'hidden'; };
         const clickTarget = (el) => {
             const clickable = el.closest('button, [role="button"], a, li, [data-testid*="conversation"]') || el;
             if (!(clickable instanceof HTMLElement)) return false;
@@ -235,7 +235,7 @@ function buildActivateViaPastConversationsScript(title: string): string {
         const wantedLoose = normalizeLoose(wantedRaw || '');
         if (!wanted) return { ok: false, error: 'Empty target title' };
 
-        const isVisible = (el) => !!el && el instanceof HTMLElement && el.offsetParent !== null;
+        const isVisible = (el) => { if (!el) return false; const rect = el.getBoundingClientRect(); if (rect.width === 0 || rect.height === 0) return false; const style = window.getComputedStyle(el); return style.display !== 'none' && style.visibility !== 'hidden'; };
         const asArray = (nodeList) => Array.from(nodeList || []);
         const getLabelText = (el) => {
             if (!el || !(el instanceof Element)) return '';
