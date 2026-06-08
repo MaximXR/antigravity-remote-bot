@@ -3,6 +3,8 @@ import { InlineKeyboard } from 'grammy';
 import { CdpService } from '../services/cdpService';
 import { escapeHtml } from '../utils/telegramFormatter';
 
+import { AVAILABLE_MODELS } from '../services/modelService';
+
 export interface ModelsUiDeps {
     getCurrentCdp: () => CdpService | null;
     fetchQuota: () => Promise<any[]>;
@@ -17,11 +19,12 @@ export async function buildModelsUI(
     cdp: CdpService,
     fetchQuota: () => Promise<any[]>,
 ): Promise<ModelsUiPayload | null> {
-    const models = await cdp.getUiModels();
+    let models = await cdp.getUiModels();
+    if (models.length === 0) {
+        models = [...AVAILABLE_MODELS];
+    }
     const currentModel = await cdp.getCurrentModel();
     const quotaData = await fetchQuota();
-
-    if (models.length === 0) return null;
 
     function formatQuota(mName: string, current: boolean) {
         if (!mName) return `${current ? '✅' : '⬜'} Unknown`;

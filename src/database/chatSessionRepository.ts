@@ -125,11 +125,17 @@ export class ChatSessionRepository {
         return (row?.max_num ?? 0) + 1;
     }
 
-    /**
-     * Update session display name and set is_renamed to true
-     */
     public updateDisplayName(channelId: string, displayName: string): boolean {
         const result = this.stmtUpdateDisplayName.run(displayName, channelId);
+        return result.changes > 0;
+    }
+
+    /**
+     * Reset session display name and set is_renamed to false
+     */
+    public resetSession(channelId: string): boolean {
+        const stmt = this.db.prepare('UPDATE chat_sessions SET display_name = NULL, is_renamed = 0 WHERE channel_id = ?');
+        const result = stmt.run(channelId);
         return result.changes > 0;
     }
 

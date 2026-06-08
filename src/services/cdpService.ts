@@ -49,7 +49,7 @@ export interface UiSyncResult {
 /** Antigravity UI DOM selector constants */
 const SELECTORS = {
     /** Chat input box: textbox excluding xterm */
-    CHAT_INPUT: 'div[role="textbox"]:not(.xterm-helper-textarea)',
+    CHAT_INPUT: 'div[role="textbox"]:not(.xterm-helper-textarea), div[role="combobox"]:not(.xterm-helper-textarea)',
     /** Submit button search target tag */
     SUBMIT_BUTTON_CONTAINER: 'button',
     /** Submit icon SVG class candidates */
@@ -435,6 +435,12 @@ export class CdpService extends EventEmitter {
             return true;
         }
 
+        // 2.5 Single active workbench page fallback
+        if (workbenchPages.length === 1) {
+            logger.warn(`[CdpService] Workspace "${projectName}" not matched by title/probe, but exactly one active workbench page was found. Reusing it.`);
+            return this.connectToPage(workbenchPages[0], projectName);
+        }
+
         // 3. If not found by probe either, launch a new window
         return this.launchAndConnectWorkspace(workspacePath, projectName);
     }
@@ -549,6 +555,21 @@ export class CdpService extends EventEmitter {
                 const bodyUri = document.body?.getAttribute('data-uri') || '';
                 if (bodyUri) return { found: true, source: 'data-uri', value: bodyUri };
                 
+                // Method 5: Check status bar items for Git repo or workspace indicator
+                const statusbarItems = Array.from(document.querySelectorAll('[aria-label*="git" i], [aria-label*="workspace" i], [class*="statusbar"]'));
+                const statusTexts = statusbarItems.map(el => {
+                    const text = el.textContent || '';
+                    const aria = el.getAttribute('aria-label') || '';
+                    const title = el.getAttribute('title') || '';
+                    return [text, aria, title].join(' ');
+                }).filter(Boolean);
+                if (statusTexts.length > 0) return { found: true, source: 'statusbar', value: statusTexts.join(' | ') };
+
+                // Method 6: Check vscode.process.cwd()
+                if (typeof vscode !== 'undefined' && vscode.process && typeof vscode.process.cwd === 'function') {
+                    return { found: true, source: 'process-cwd', value: vscode.process.cwd() };
+                }
+
                 return { found: false };
             })()`;
 
@@ -623,8 +644,8 @@ export class CdpService extends EventEmitter {
                 logger.warn(`[CdpService] CLI launch failed, falling back to open -a: ${error?.message || String(error)}`);
                 await this.runCommand('open', ['-a', 'Antigravity', '--args', `--remote-debugging-port=${cdpPort}`, workspacePath]);
             } else {
-                logger.warn(`[CdpService] CLI launch failed: ${error?.message || String(error)}`);
-                throw error;
+                logger.warn(`[CdpService] CLI launch returned non-zero code or failed (might be non-fatal on Windows): ${error?.message || String(error)}`);
+                // Do not throw on Windows, as VS Code launcher processes often exit with non-zero code when delegating to an existing instance.
             }
         }
 
@@ -1036,10 +1057,17 @@ export class CdpService extends EventEmitter {
             const normalize = (v) => (v || '').toLowerCase();
             const hasImageAccept = (input) => {
                 const accept = normalize(input.getAttribute('accept'));
-                return !accept || accept.includes('image') || accept.includes('*/*');
+                if (!accept) return true;
+                if (accept.includes('image') || accept.includes('*/*')) return true;
+                const imageExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+                return imageExtensions.some(ext => accept.includes(ext));
             };
+            
+            const panel = document.querySelector('.antigravity-agent-side-panel');
+            const scope = panel || document;
+            
             const findInput = () => {
-                const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
+                const inputs = Array.from(scope.querySelectorAll('input[type="file"]'));
                 const visibleInput = inputs.find(i => visible(i) && hasImageAccept(i));
                 if (visibleInput) return visibleInput;
                 return inputs.find(hasImageAccept) || null;
@@ -1048,7 +1076,7 @@ export class CdpService extends EventEmitter {
             let input = findInput();
             if (!input) {
                 const triggerKeywords = ['attach', 'upload', 'image', 'file', 'paperclip', 'plus'];
-                const triggers = Array.from(document.querySelectorAll('button, [role="button"]'))
+                const triggers = Array.from(scope.querySelectorAll('button, [role="button"]'))
                     .filter(visible)
                     .filter((el) => {
                         const text = normalize(el.textContent);
@@ -1545,13 +1573,37 @@ export class CdpService extends EventEmitter {
             throw new Error('Not connected to CDP.');
         }
 
-        // Antigravity 1.21.6+ uses <button> elements; older versions use <div>.
-        // Use tag-agnostic class-based selector to support both.
         const expression = `(async () => {
-            return Array.from(document.querySelectorAll('button, div'))
-                .filter(e => e.className.includes('px-2 py-1') && e.className.includes('w-full') && e.className.includes('items-center') && e.className.includes('justify-between'))
-                .map(e => (e.textContent || '').trim().replace(/New$/, '').trim())
+            const getItems = () => Array.from(document.querySelectorAll('button, div'))
+                .filter(e => e.className.includes('px-2 py-1') && e.className.includes('w-full') && e.className.includes('items-center') && e.className.includes('justify-between'));
+
+            let opened = false;
+            let items = getItems();
+            if (items.length === 0) {
+                const panel = document.querySelector('.antigravity-agent-side-panel') || document;
+                const btn = Array.from(panel.querySelectorAll('button')).find(b => {
+                    const text = (b.textContent || '').trim();
+                    return /^(?:Gemini|Claude|GPT-OSS)/i.test(text);
+                });
+                if (btn) {
+                    btn.click();
+                    await new Promise(r => setTimeout(r, 200));
+                    items = getItems();
+                    opened = true;
+                }
+            }
+            const result = items.map(e => (e.textContent || '').trim().replace(/New$/, '').trim())
                 .filter(t => t.length > 0 && t.length < 60);
+
+            if (opened) {
+                const panel = document.querySelector('.antigravity-agent-side-panel') || document;
+                const btn = Array.from(panel.querySelectorAll('button')).find(b => {
+                    const text = (b.textContent || '').trim();
+                    return /^(?:Gemini|Claude|GPT-OSS)/i.test(text);
+                });
+                if (btn) btn.click();
+            }
+            return result;
         })()`;
 
         try {
@@ -1566,7 +1618,6 @@ export class CdpService extends EventEmitter {
             const res = await this.call('Runtime.evaluate', callParams);
             const value = res?.result?.value;
             if (Array.isArray(value) && value.length > 0) {
-                // remove duplicates
                 return Array.from(new Set(value));
             }
             return [];
@@ -1583,11 +1634,13 @@ export class CdpService extends EventEmitter {
         if (!this.isConnectedFlag || !this.ws) {
             return null;
         }
-        // Antigravity 1.21.6+ uses <button> elements; older versions use <div>.
         const expression = `(() => {
-            var selected = Array.from(document.querySelectorAll('button, div'))
-                .find(e => e.className.includes('px-2 py-1') && e.className.includes('w-full') && e.className.includes('items-center') && e.className.includes('justify-between') && e.className.includes('bg-gray-500/20') && !e.className.includes('hover:bg-gray-500/20'));
-            return selected ? (selected.textContent || '').trim().replace(/New$/, '').trim() : null;
+            const panel = document.querySelector('.antigravity-agent-side-panel') || document;
+            const btn = Array.from(panel.querySelectorAll('button')).find(b => {
+                const text = (b.textContent || '').trim();
+                return /^(?:Gemini|Claude|GPT-OSS)/i.test(text);
+            });
+            return btn ? (btn.textContent || '').trim().replace(/New$/, '').trim() : null;
         })()`;
         try {
             const contextId = this.getPrimaryContextId();
@@ -1612,44 +1665,64 @@ export class CdpService extends EventEmitter {
             throw new Error('Not connected to CDP. Call connect() first.');
         }
 
-        // Antigravity 1.21.6+ uses <button> elements; older versions use <div>.
-        // Tag-agnostic class-based selector supports both versions.
-        // textContent may have "New" suffix on newly added models.
         const safeModel = JSON.stringify(modelName);
         const expression = `(async () => {
             const targetModel = ${safeModel};
 
-            // Get all items in the model list (button in 1.21.6+, div in older)
-            const modelItems = Array.from(document.querySelectorAll('button, div'))
+            const getItems = () => Array.from(document.querySelectorAll('button, div'))
                 .filter(e => e.className.includes('px-2 py-1') && e.className.includes('w-full') && e.className.includes('items-center') && e.className.includes('justify-between'));
+
+            let modelItems = getItems();
+            let opened = false;
+            if (modelItems.length === 0) {
+                const panel = document.querySelector('.antigravity-agent-side-panel') || document;
+                const btn = Array.from(panel.querySelectorAll('button')).find(b => {
+                    const text = (b.textContent || '').trim();
+                    return /^(?:Gemini|Claude|GPT-OSS)/i.test(text);
+                });
+                if (btn) {
+                    btn.click();
+                    await new Promise(r => setTimeout(r, 250));
+                    modelItems = getItems();
+                    opened = true;
+                }
+            }
 
             if (modelItems.length === 0) {
                 return { ok: false, error: 'Model list not found. The dropdown may not be open.' };
             }
 
-            // Match target model by name (compare after removing New suffix)
             const targetItem = modelItems.find(el => {
                 const text = (el.textContent || '').trim().replace(/New$/, '').trim();
                 return text === targetModel || text.toLowerCase() === targetModel.toLowerCase();
             });
 
             if (!targetItem) {
+                // Close the dropdown if we opened it and didn't find the model
+                if (opened) {
+                    const panel = document.querySelector('.antigravity-agent-side-panel') || document;
+                    const btn = Array.from(panel.querySelectorAll('button')).find(b => {
+                        const text = (b.textContent || '').trim();
+                        return /^(?:Gemini|Claude|GPT-OSS)/i.test(text);
+                    });
+                    if (btn) btn.click();
+                }
                 const available = modelItems.map(el => (el.textContent || '').trim().replace(/New$/, '').trim()).join(', ');
                 return { ok: false, error: 'Model "' + targetModel + '" not found. Available: ' + available };
             }
 
-            // Check if already selected
             if (targetItem.className.includes('bg-gray-500/20') && !targetItem.className.includes('hover:bg-gray-500/20')) {
+                // Already selected, but we might need to close the dropdown if we opened it
+                if (opened) {
+                    targetItem.click(); // Clicking selected item usually closes it, or we can click dropdown btn
+                }
                 return { ok: true, model: targetModel, alreadySelected: true };
             }
 
-            // Click to select model
             targetItem.click();
             await new Promise(r => setTimeout(r, 500));
 
-            // Verify selection was applied
-            const updatedItems = Array.from(document.querySelectorAll('button, div'))
-                .filter(e => e.className.includes('px-2 py-1') && e.className.includes('w-full') && e.className.includes('items-center') && e.className.includes('justify-between'));
+            const updatedItems = getItems();
             const selectedItem = updatedItems.find(el => {
                 const text = (el.textContent || '').trim().replace(/New$/, '').trim();
                 return text === targetModel || text.toLowerCase() === targetModel.toLowerCase();
@@ -1659,7 +1732,6 @@ export class CdpService extends EventEmitter {
                 return { ok: true, model: targetModel, verified: true };
             }
 
-            // Click succeeded but verification failed
             return { ok: true, model: targetModel, verified: false };
         })()`;
 

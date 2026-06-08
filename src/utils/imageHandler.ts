@@ -2,6 +2,9 @@ import { InputFile } from 'grammy';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
+import * as https from 'https';
+// @ts-ignore
+import fetch from 'node-fetch';
 
 import { ExtractedResponseImage } from '../services/cdpService';
 import { logger } from './logger';
@@ -77,8 +80,27 @@ export async function downloadTelegramImages(
             const filePath = file.file_path;
             if (!filePath) continue;
 
-            const url = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
-            const response = await fetch(url);
+            let url = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
+            let init: any = {};
+            const fallbackIpsRaw = process.env.TELEGRAM_FALLBACK_IPS || '';
+            const fallbackIps = fallbackIpsRaw.split(',').map(ip => ip.trim()).filter(Boolean);
+            if (fallbackIps.length > 0) {
+                const ip = fallbackIps[0];
+                url = `https://${ip}/file/bot${botToken}/${filePath}`;
+                process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+                const agent = new https.Agent({
+                    keepAlive: true,
+                    rejectUnauthorized: false,
+                    servername: 'api.telegram.org',
+                });
+                init = {
+                    agent,
+                    headers: {
+                        'Host': 'api.telegram.org',
+                    },
+                };
+            }
+            const response = await fetch(url, init);
             if (!response.ok) {
                 logger.warn(`[ImageBridge] Telegram image download failed (status=${response.status})`);
                 continue;

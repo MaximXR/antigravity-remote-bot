@@ -11,6 +11,9 @@ export function isSessionSelectId(customId: string): boolean {
     return customId.startsWith(SESSION_SELECT_ID + ':') || customId === SESSION_SELECT_ID;
 }
 
+// Cache of buttonId -> fullSessionTitle
+export const sessionTitleCache = new Map<string, string>();
+
 export function buildSessionPickerUI(
     sessions: SessionListItem[],
 ): { text: string; keyboard: InlineKeyboard } {
@@ -31,7 +34,12 @@ export function buildSessionPickerUI(
         const label = session.isActive
             ? `✅ ${session.title.slice(0, 40)}`
             : session.title.slice(0, 40);
-        keyboard.text(label, `${SESSION_SELECT_ID}:${session.title.slice(0, 49)}`).row();
+            
+        // Generate a short unique key for the title
+        const buttonId = Math.random().toString(36).substring(2, 9);
+        sessionTitleCache.set(buttonId, session.title);
+        
+        keyboard.text(label, `${SESSION_SELECT_ID}:${buttonId}`).row();
     }
 
     return { text, keyboard };

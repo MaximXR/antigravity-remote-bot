@@ -1,7 +1,10 @@
 import { Bot, Context, InlineKeyboard, InputFile } from 'grammy';
 import Database from 'better-sqlite3';
+import * as https from 'https';
+// @ts-ignore
+import fetch from 'node-fetch';
 
-import { t } from '../utils/i18n';
+import { t, initI18n, Language } from '../utils/i18n';
 import { logger } from '../utils/logger';
 import type { LogLevel } from '../utils/logger';
 import { loadConfig, resolveResponseDeliveryMode } from '../utils/config';
@@ -48,6 +51,7 @@ import {
 import { classifyAssistantSegments, extractAssistantSegmentsPayloadScript } from '../services/assistantDomExtractor';
 import { buildModeModelLines, splitForEmbedDescription } from '../utils/streamMessageFormatter';
 import { formatForTelegram, splitOutputAndLogs, escapeHtml, splitTelegramHtml } from '../utils/telegramFormatter';
+import { htmlToTelegramHtml } from '../utils/htmlToTelegramMarkdown';
 import {
     buildPromptWithAttachmentUrls,
     cleanupInboundImageAttachments,
@@ -62,8 +66,8 @@ import { buildModelsUI, sendModelsUI } from '../ui/modelsUi';
 import { sendTemplateUI, TEMPLATE_BTN_PREFIX, parseTemplateButtonId } from '../ui/templateUi';
 import { sendAutoAcceptUI, AUTOACCEPT_BTN_ON, AUTOACCEPT_BTN_OFF, AUTOACCEPT_BTN_REFRESH } from '../ui/autoAcceptUi';
 import { handleScreenshot } from '../ui/screenshotUi';
-import { buildProjectListUI, PROJECT_SELECT_ID, PROJECT_PAGE_PREFIX, parseProjectPageId } from '../ui/projectListUi';
-import { buildSessionPickerUI, SESSION_SELECT_ID, isSessionSelectId } from '../ui/sessionPickerUi';
+import { buildProjectListUI, PROJECT_SELECT_ID, PROJECT_PAGE_PREFIX, parseProjectPageId, projectPathCache } from '../ui/projectListUi';
+import { buildSessionPickerUI, SESSION_SELECT_ID, isSessionSelectId, sessionTitleCache } from '../ui/sessionPickerUi';
 import {
     PLAN_VIEW_BTN, PLAN_PROCEED_BTN, PLAN_EDIT_BTN, PLAN_REFRESH_BTN, PLAN_PAGE_PREFIX,
     buildPlanNotificationUI, buildPlanContentUI, paginatePlanContent,
@@ -179,12 +183,13 @@ async function sendPromptToAntigravity(
     const enqueueResponse = createSerialTaskQueue('response', monitorTraceId);
     const enqueueActivity = createSerialTaskQueue('activity', monitorTraceId);
 
-    const sendMsg = async (text: string): Promise<number | null> => {
+    const sendMsg = async (text: string, replyMarkup?: any): Promise<number | null> => {
         try {
             const truncated = text.length > TELEGRAM_MSG_LIMIT ? text.slice(0, TELEGRAM_MSG_LIMIT - 20) + '\n...(truncated)' : text;
             const msg = await api.sendMessage(channel.chatId, truncated, {
                 parse_mode: 'HTML',
                 message_thread_id: channel.threadId,
+                reply_markup: replyMarkup,
             });
             return msg.message_id;
         } catch (e) {
@@ -193,11 +198,14 @@ async function sendPromptToAntigravity(
         }
     };
 
-    const editMsg = async (msgId: number, text: string, maxRetries = 3): Promise<void> => {
+    const editMsg = async (msgId: number, text: string, replyMarkup?: any, maxRetries = 3): Promise<void> => {
         const truncated = text.length > TELEGRAM_MSG_LIMIT ? text.slice(0, TELEGRAM_MSG_LIMIT - 20) + '\n...(truncated)' : text;
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                await api.editMessageText(channel.chatId, msgId, truncated, { parse_mode: 'HTML' });
+                await api.editMessageText(channel.chatId, msgId, truncated, {
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup,
+                });
                 break;
             } catch (e: any) {
                 const desc = e?.description || e?.message || '';
@@ -277,11 +285,17 @@ async function sendPromptToAntigravity(
     const currentModel = (await cdp.getCurrentModel()) || modelService.getCurrentModel();
     const modelLabel = `${currentModel}`;
 
+    const stopKeyboard = new InlineKeyboard().text('⏹️ Stop', 'stop_generation');
+
     // Initialize live progress message (replaces separate "Sending" embed)
     let liveActivityMsgId: number | null = null;
     try {
         const sendingText = `<b>${PHASE_ICONS.sending} ${escapeHtml(modeName)} · ${escapeHtml(modelLabel)}</b>\n\n<i>Sending...</i>`;
-        const sendingMsg = await api.sendMessage(channel.chatId, sendingText, { parse_mode: 'HTML', message_thread_id: channel.threadId });
+        const sendingMsg = await api.sendMessage(channel.chatId, sendingText, {
+            parse_mode: 'HTML',
+            message_thread_id: channel.threadId,
+            reply_markup: stopKeyboard,
+        });
         liveActivityMsgId = sendingMsg.message_id;
     } catch (e) { logger.error('[sendPrompt] Failed to send initial status:', e); }
 
@@ -403,10 +417,11 @@ async function sendPromptToAntigravity(
             if (bodySnap === lastLiveActivityKey && liveActivityMsgId) return;
             lastLiveActivityKey = bodySnap;
 
+            const keyboard = isFinalized ? undefined : stopKeyboard;
             if (liveActivityMsgId) {
-                await editMsg(liveActivityMsgId, text);
+                await editMsg(liveActivityMsgId, text, keyboard);
             } else {
-                liveActivityMsgId = await sendMsg(text);
+                liveActivityMsgId = await sendMsg(text, keyboard);
             }
         }, 'upsert-activity');
 
@@ -416,9 +431,9 @@ async function sendPromptToAntigravity(
             if (opts?.expectedVersion !== undefined && opts.expectedVersion !== liveActivityUpdateVersion) return;
             lastLiveActivityKey = htmlContent.slice(0, 200);
             if (liveActivityMsgId) {
-                await editMsg(liveActivityMsgId, htmlContent);
+                await editMsg(liveActivityMsgId, htmlContent, undefined);
             } else {
-                liveActivityMsgId = await sendMsg(htmlContent);
+                liveActivityMsgId = await sendMsg(htmlContent, undefined);
             }
         }, 'upsert-activity');
 
@@ -843,6 +858,9 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     const config = loadConfig();
     logger.setLogLevel(cliLogLevel ?? config.logLevel);
 
+    const lang = (process.env.LANGUAGE as Language) || 'ru';
+    initI18n(lang);
+
     const dbPath = process.env.NODE_ENV === 'test' ? ':memory:' : ConfigLoader.getDefaultDbPath();
     const db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
@@ -912,7 +930,36 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     const slashCommandHandler = new SlashCommandHandler(templateRepo);
     const cleanupHandler = new CleanupCommandHandler(chatSessionRepo, workspaceBindingRepo);
 
-    const bot = new Bot(config.telegramBotToken);
+    let botConfig: any = {};
+    const fallbackIpsRaw = process.env.TELEGRAM_FALLBACK_IPS || '';
+    const fallbackIps = fallbackIpsRaw.split(',').map(ip => ip.trim()).filter(Boolean);
+    if (fallbackIps.length > 0) {
+        process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+        const agent = new https.Agent({
+            keepAlive: true,
+            rejectUnauthorized: false,
+            servername: 'api.telegram.org',
+        });
+        const customFetch = (url: any, init: any) => {
+            const headers = {
+                ...(init?.headers || {}),
+                'Host': 'api.telegram.org',
+            };
+            return fetch(url, {
+                ...init,
+                agent,
+                headers,
+            });
+        };
+        botConfig = {
+            client: {
+                apiRoot: `https://${fallbackIps[0]}`,
+                fetch: customFetch as any,
+            },
+        };
+        logger.warn(`[Bot] Using Telegram fallback IP: ${fallbackIps[0]} with Host header and SNI mapping via custom fetch.`);
+    }
+    const bot = new Bot(config.telegramBotToken, botConfig);
     bridge.botApi = bot.api;
 
     // Notify user on WebSocket connection lifecycle events
@@ -995,37 +1042,39 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     bot.command('start', async (ctx) => {
         await replyHtml(ctx,
             `<b>Remoat Online</b>\n\n` +
-            `Use /help for available commands.\n` +
-            `Send any text message to forward it to Antigravity.`
+            t('Use /help for available commands.') + `\n` +
+            t('Send any text message to forward it to Antigravity.')
         );
     });
 
     // /help command
     bot.command('help', async (ctx) => {
         await replyHtml(ctx,
-            `<b>📖 Remoat Commands</b>\n\n` +
-            `<b>💬 Chat</b>\n` +
-            `/new — Start a new chat session\n` +
-            `/chat — Show current session info\n\n` +
-            `<b>⏹️ Control</b>\n` +
-            `/stop — Interrupt active LLM generation\n` +
-            `/screenshot — Capture Antigravity screen\n` +
-            `/close — Terminate active Antigravity session\n\n` +
-            `<b>⚙️ Settings</b>\n` +
-            `/mode — Display and change execution mode\n` +
-            `/model — Display and change LLM model\n\n` +
-            `<b>📁 Projects</b>\n` +
-            `/project — Display project list\n\n` +
-            `<b>📝 Templates</b>\n` +
-            `/template — Show templates\n` +
-            `/template_add — Register a template\n` +
-            `/template_delete — Delete a template\n\n` +
-            `<b>🔧 System</b>\n` +
-            `/status — Display overall bot status\n` +
-            `/autoaccept — Toggle auto-approve mode\n` +
-            `/cleanup [days] — Clean up inactive sessions\n` +
-            `/ping — Check latency\n\n` +
-            `<i>Text messages are sent directly to Antigravity</i>`
+            `<b>📖 ` + t('Remoat Commands') + `</b>\n\n` +
+            `<b>💬 ` + t('Chat') + `</b>\n` +
+            `/new — ` + t('Start a new chat session') + `\n` +
+            `/chat — ` + t('Current session info') + `\n` +
+            `/chats — ` + t('List and select chats') + `\n` +
+            `/history — ` + t('Load history of the active session') + `\n\n` +
+            `<b>⏹️ ` + t('Control') + `</b>\n` +
+            `/stop — ` + t('Interrupt active generation') + `\n` +
+            `/screenshot — ` + t('Capture Antigravity screen') + `\n` +
+            `/close — ` + t('Terminate active Antigravity session') + `\n\n` +
+            `<b>⚙️ ` + t('Settings') + `</b>\n` +
+            `/mode — ` + t('Change execution mode') + `\n` +
+            `/model — ` + t('Change LLM model') + `\n\n` +
+            `<b>📁 ` + t('Projects') + `</b>\n` +
+            `/project — ` + t('Select a project') + `\n\n` +
+            `<b>📝 ` + t('Templates') + `</b>\n` +
+            `/template — ` + t('Show templates') + `\n` +
+            `/template_add — ` + t('Register a template') + `\n` +
+            `/template_delete — ` + t('Delete a template') + `\n\n` +
+            `<b>🔧 ` + t('System') + `</b>\n` +
+            `/status — ` + t('Bot status overview') + `\n` +
+            `/autoaccept — ` + t('Toggle auto-approve mode') + `\n` +
+            `/cleanup — ` + t('Clean up inactive sessions') + `\n` +
+            `/ping — ` + t('Check latency') + `\n\n` +
+            `<i>` + t('Text messages are sent directly to Antigravity') + `</i>`
         );
     });
 
@@ -1279,6 +1328,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         try {
             const chatResult = await chatSessionService.startNewChat(cdp);
             if (chatResult.ok) {
+                chatSessionRepo.resetSession(key);
                 await replyHtml(ctx, `<b>💬 New Chat Started</b>\nSend your message now.`);
             } else {
                 await ctx.reply(`⚠️ Could not start new chat: ${chatResult.error}`);
@@ -1326,6 +1376,30 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         );
     });
 
+    // /chats command
+    bot.command('chats', async (ctx) => {
+        const ch = getChannel(ctx);
+        const resolved = await resolveWorkspaceAndCdp(ch);
+        if (!resolved.ok) {
+            await ctx.reply(resolved.message);
+            return;
+        }
+
+        const statusMsg = await ctx.reply('🔍 Scanning sessions in Antigravity...');
+        try {
+            const sessions = await chatSessionService.listAllSessions(resolved.cdp);
+            const { text, keyboard } = buildSessionPickerUI(sessions);
+
+            // Delete scanning status message
+            await bot.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
+
+            await replyHtml(ctx, text, keyboard);
+        } catch (e: any) {
+            await bot.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
+            await ctx.reply(`❌ Failed to list sessions: ${e.message}`);
+        }
+    });
+
     // /ping command
     bot.command('ping', async (ctx) => {
         const start = Date.now();
@@ -1334,6 +1408,60 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         await bot.api.editMessageText(ctx.chat!.id, msg.message_id, `🏓 Pong! Latency: <b>${latency}ms</b>`, { parse_mode: 'HTML' });
     });
 
+    // /history command
+    bot.command('history', async (ctx) => {
+        const ch = getChannel(ctx);
+        const resolved = await resolveWorkspaceAndCdp(ch);
+        if (!resolved.ok) {
+            await ctx.reply(resolved.message);
+            return;
+        }
+
+        const countArg = (ctx.match || '').trim();
+        let count = 5;
+        if (countArg) {
+            const parsed = parseInt(countArg, 10);
+            if (!isNaN(parsed)) {
+                count = Math.max(1, Math.min(20, parsed));
+            }
+        }
+
+        const statusMsg = await ctx.reply('🔍 ' + t('Scanning sessions in Antigravity...'));
+        try {
+            const history = await chatSessionService.getChatHistory(resolved.cdp, count);
+            
+            // Delete status message
+            await bot.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
+
+            if (history.length === 0) {
+                await replyHtml(ctx, t('No messages found in history.'));
+                return;
+            }
+
+            // Construct formatted HTML output
+            const formattedTurns = history.map(turn => {
+                if (turn.role === 'user') {
+                    return `👤 <b>${t('You')}:</b>\n${escapeHtml(turn.text || '')}`;
+                } else {
+                    return `🤖 <b>${t('Assistant')}:</b>\n${htmlToTelegramHtml(turn.html || '')}`;
+                }
+            });
+
+            // Join turns and send
+            const fullHtml = formattedTurns.join('\n\n---\n\n');
+            const chunks = splitTelegramHtml(fullHtml, TELEGRAM_MSG_LIMIT);
+            for (const chunk of chunks) {
+                if (chunk.trim()) {
+                    await replyHtml(ctx, chunk);
+                }
+            }
+        } catch (e: any) {
+            await bot.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
+            await ctx.reply(`❌ Failed to retrieve history: ${e.message}`);
+        }
+    });
+
+
     // =============================================================================
     // Callback query handler (inline keyboard buttons)
     // =============================================================================
@@ -1341,6 +1469,33 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     bot.on('callback_query:data', async (ctx) => {
         const data = ctx.callbackQuery.data;
         const ch = getChannelFromCb(ctx);
+
+        // Stop generation button click
+        if (data === 'stop_generation') {
+            const resolved = await resolveWorkspaceAndCdp(ch);
+            const cdp = (resolved.ok ? resolved.cdp : null) ?? getCurrentCdp(bridge);
+            if (!cdp) {
+                await ctx.answerCallbackQuery({ text: 'Not connected to CDP.' });
+                return;
+            }
+            try {
+                const contextId = cdp.getPrimaryContextId();
+                const callParams: Record<string, unknown> = { expression: RESPONSE_SELECTORS.CLICK_STOP_BUTTON, returnByValue: true, awaitPromise: false };
+                if (contextId !== null) callParams.contextId = contextId;
+                const result = await cdp.call('Runtime.evaluate', callParams);
+                const value = result?.result?.value;
+
+                if (value?.ok) {
+                    userStopRequestedChannels.add(channelKey(ch));
+                    await ctx.answerCallbackQuery({ text: 'Stopping Antigravity generation...' });
+                } else {
+                    await ctx.answerCallbackQuery({ text: value?.error || 'Stop button not found in IDE.', show_alert: true });
+                }
+            } catch (e: any) {
+                await ctx.answerCallbackQuery({ text: `Error: ${e.message}`, show_alert: true });
+            }
+            return;
+        }
 
         // Mode selection
         if (data.startsWith('mode_select:')) {
@@ -1412,7 +1567,21 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
         // Project selection
         if (data.startsWith(`${PROJECT_SELECT_ID}:`)) {
-            const workspacePath = data.replace(`${PROJECT_SELECT_ID}:`, '');
+            const shortId = data.replace(`${PROJECT_SELECT_ID}:`, '');
+            let workspacePath = projectPathCache.get(shortId);
+            if (!workspacePath) {
+                const workspaces = workspaceService.scanWorkspaces();
+                if (shortId.startsWith('p')) {
+                    const idx = parseInt(shortId.slice(1), 10);
+                    if (!isNaN(idx) && idx >= 0 && idx < workspaces.length) {
+                        workspacePath = workspaces[idx];
+                    }
+                }
+                if (!workspacePath) {
+                    workspacePath = shortId;
+                }
+            }
+
             if (!workspaceService.exists(workspacePath)) {
                 await ctx.answerCallbackQuery({ text: `Project "${workspacePath}" not found.` });
                 return;
@@ -1501,7 +1670,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
         // Session selection
         if (isSessionSelectId(data)) {
-            const selectedTitle = data.replace(`${SESSION_SELECT_ID}:`, '');
+            const buttonId = data.replace(`${SESSION_SELECT_ID}:`, '');
+            const selectedTitle = sessionTitleCache.get(buttonId) || buttonId;
             const key = channelKey(ch);
             const binding = workspaceBindingRepo.findByChannelId(key);
             if (!binding) { await ctx.answerCallbackQuery({ text: 'No project bound.' }); return; }
@@ -1510,6 +1680,28 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 const cdp = await bridge.pool.getOrConnect(workspacePath);
                 const activateResult = await chatSessionService.activateSessionByTitle(cdp, selectedTitle);
                 if (activateResult.ok) {
+                    // Update database mapping or create one if it doesn't exist
+                    let session = chatSessionRepo.findByChannelId(key);
+                    if (!session) {
+                        const maxNum = chatSessionRepo.getNextSessionNumber(key);
+                        chatSessionRepo.create({
+                            channelId: key,
+                            categoryId: key,
+                            workspacePath: binding.workspacePath,
+                            sessionNumber: maxNum,
+                            guildId: String(ctx.chat!.id),
+                        });
+                        session = chatSessionRepo.findByChannelId(key);
+                    }
+                    if (session) {
+                        chatSessionRepo.updateDisplayName(key, selectedTitle);
+                    }
+
+                    const projectName = bridge.pool.extractProjectName(workspacePath);
+                    if (projectName) {
+                        registerApprovalSessionChannel(bridge, projectName, selectedTitle, ch);
+                    }
+
                     await ctx.editMessageText(`<b>🔗 Joined Session</b>\n\n<b>${escapeHtml(selectedTitle)}</b>`, { parse_mode: 'HTML' });
                 } else {
                     await ctx.answerCallbackQuery({ text: `Failed: ${activateResult.error}` });
@@ -1984,6 +2176,80 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }).catch((e) => logger.error('[textMsg] dispatch failed:', e));
     });
 
+    // Media group (album) aggregator
+    interface PendingMediaGroup {
+        timer: NodeJS.Timeout;
+        ch: TelegramChannel;
+        photos: Array<{ file_id: string; file_size?: number }>;
+        documents: Array<{ file_id: string; file_size?: number; mime_type?: string; file_name?: string }>;
+        captions: string[];
+        messageIds: number[];
+        ctx: Context;
+    }
+
+    const pendingMediaGroups = new Map<string, PendingMediaGroup>();
+
+    const handleMediaGroup = async (mediaGroupId: string, ch: TelegramChannel, ctx: Context) => {
+        const group = pendingMediaGroups.get(mediaGroupId);
+        if (!group) return;
+        pendingMediaGroups.delete(mediaGroupId);
+
+        const caption = group.captions.filter(Boolean).join('\n') || 'Please review the attached images and respond accordingly.';
+        const resolved = await resolveWorkspaceAndCdp(group.ch);
+        if (!resolved.ok) { await group.ctx.reply(resolved.message); return; }
+
+        const allItems = [...group.photos, ...group.documents];
+        const inboundImages = await downloadTelegramImages(
+            bot.api,
+            config.telegramBotToken,
+            allItems,
+            String(group.messageIds[0]),
+        );
+
+        // ── Concurrency gate ────────────────────────────────────────────────
+        const wsKey = promptDispatcher.getWorkspaceKey(group.ch, resolved.cdp);
+        const interruptKey = safeCallbackKey(wsKey);
+        if (promptDispatcher.isBusy(group.ch, resolved.cdp) && !consumeBypass(interruptKey)) {
+            const position = addPendingInterrupt(interruptKey, {
+                prompt: caption,
+                channel: group.ch,
+                cdp: resolved.cdp,
+                inboundImages,
+                options: { chatSessionService, chatSessionRepo, topicManager, titleGenerator },
+            });
+
+            if (position === null) {
+                await cleanupInboundImageAttachments(inboundImages);
+                await group.ctx.reply(`⚠️ Queue full (${MAX_QUEUE_DEPTH} messages pending). Please wait or /stop the current task.`);
+                return;
+            }
+
+            if (position === 1) {
+                const keyboard = new InlineKeyboard()
+                    .text('📥 Queue', `interrupt:queue:${interruptKey}`)
+                    .text('⚡ Stop & Send Now', `interrupt:now:${interruptKey}`)
+                    .text('🗑 Discard', `interrupt:discard:${interruptKey}`);
+                await replyHtml(group.ctx,
+                    `⏳ <b>AI is still generating a response…</b>\n\n🖼️ Photo message queued.`,
+                    keyboard,
+                );
+            } else {
+                await group.ctx.reply(`📥 Photo message queued (#${position} in line)`);
+            }
+            return;
+        }
+        // ── End concurrency gate ────────────────────────────────────────────
+
+        promptDispatcher.send({
+            channel: group.ch,
+            prompt: caption,
+            cdp: resolved.cdp,
+            inboundImages,
+            options: { chatSessionService, chatSessionRepo, topicManager, titleGenerator },
+        }).catch((e) => logger.error('[mediaGroup] dispatch failed:', e))
+         .finally(() => cleanupInboundImageAttachments(inboundImages).catch(() => {}));
+    };
+
     // Photo message handler
     bot.on('message:photo', async (ctx) => {
         const ch = getChannel(ctx);
@@ -1991,7 +2257,30 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         if (!photos || photos.length === 0) return;
 
         const largest = photos[photos.length - 1];
-        const caption = ctx.message.caption?.trim() || 'Please review the attached images and respond accordingly.';
+        const caption = ctx.message.caption?.trim() || '';
+
+        const mediaGroupId = ctx.message.media_group_id;
+        if (mediaGroupId) {
+            let group = pendingMediaGroups.get(mediaGroupId);
+            if (!group) {
+                group = {
+                    timer: null as any,
+                    ch,
+                    photos: [],
+                    documents: [],
+                    captions: [],
+                    messageIds: [],
+                    ctx,
+                };
+                pendingMediaGroups.set(mediaGroupId, group);
+            }
+            group.photos.push(largest);
+            if (caption) group.captions.push(caption);
+            group.messageIds.push(ctx.message.message_id);
+            if (group.timer) clearTimeout(group.timer);
+            group.timer = setTimeout(() => handleMediaGroup(mediaGroupId, ch, ctx), 800);
+            return;
+        }
 
         const resolved = await resolveWorkspaceAndCdp(ch);
         if (!resolved.ok) { await ctx.reply(resolved.message); return; }
@@ -2008,7 +2297,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         const interruptKey = safeCallbackKey(wsKey);
         if (promptDispatcher.isBusy(ch, resolved.cdp) && !consumeBypass(interruptKey)) {
             const position = addPendingInterrupt(interruptKey, {
-                prompt: caption,
+                prompt: caption || 'Please review the attached images and respond accordingly.',
                 channel: ch,
                 cdp: resolved.cdp,
                 inboundImages,
@@ -2040,11 +2329,101 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         // Fire-and-forget; cleanup images after dispatch completes (not immediately)
         promptDispatcher.send({
             channel: ch,
-            prompt: caption,
+            prompt: caption || 'Please review the attached images and respond accordingly.',
             cdp: resolved.cdp,
             inboundImages,
             options: { chatSessionService, chatSessionRepo, topicManager, titleGenerator },
         }).catch((e) => logger.error('[photoMsg] dispatch failed:', e))
+         .finally(() => cleanupInboundImageAttachments(inboundImages).catch(() => {}));
+    });
+
+    // Document (file) message handler - handle uncompressed images
+    bot.on('message:document', async (ctx) => {
+        const doc = ctx.message.document;
+        if (!doc) return;
+
+        // Check if the document is an image
+        if (!isImageAttachment(doc.mime_type, doc.file_name)) {
+            return;
+        }
+
+        const ch = getChannel(ctx);
+        const caption = ctx.message.caption?.trim() || '';
+
+        const mediaGroupId = ctx.message.media_group_id;
+        if (mediaGroupId) {
+            let group = pendingMediaGroups.get(mediaGroupId);
+            if (!group) {
+                group = {
+                    timer: null as any,
+                    ch,
+                    photos: [],
+                    documents: [],
+                    captions: [],
+                    messageIds: [],
+                    ctx,
+                };
+                pendingMediaGroups.set(mediaGroupId, group);
+            }
+            group.documents.push(doc);
+            if (caption) group.captions.push(caption);
+            group.messageIds.push(ctx.message.message_id);
+            if (group.timer) clearTimeout(group.timer);
+            group.timer = setTimeout(() => handleMediaGroup(mediaGroupId, ch, ctx), 800);
+            return;
+        }
+
+        const resolved = await resolveWorkspaceAndCdp(ch);
+        if (!resolved.ok) { await ctx.reply(resolved.message); return; }
+
+        const inboundImages = await downloadTelegramImages(
+            bot.api,
+            config.telegramBotToken,
+            [doc],
+            String(ctx.message.message_id),
+        );
+
+        // ── Concurrency gate ────────────────────────────────────────────────
+        const wsKey = promptDispatcher.getWorkspaceKey(ch, resolved.cdp);
+        const interruptKey = safeCallbackKey(wsKey);
+        if (promptDispatcher.isBusy(ch, resolved.cdp) && !consumeBypass(interruptKey)) {
+            const position = addPendingInterrupt(interruptKey, {
+                prompt: caption || 'Please review the attached images and respond accordingly.',
+                channel: ch,
+                cdp: resolved.cdp,
+                inboundImages,
+                options: { chatSessionService, chatSessionRepo, topicManager, titleGenerator },
+            });
+
+            if (position === null) {
+                await cleanupInboundImageAttachments(inboundImages);
+                await ctx.reply(`⚠️ Queue full (${MAX_QUEUE_DEPTH} messages pending). Please wait or /stop the current task.`);
+                return;
+            }
+
+            if (position === 1) {
+                const keyboard = new InlineKeyboard()
+                    .text('📥 Queue', `interrupt:queue:${interruptKey}`)
+                    .text('⚡ Stop & Send Now', `interrupt:now:${interruptKey}`)
+                    .text('🗑 Discard', `interrupt:discard:${interruptKey}`);
+                await replyHtml(ctx,
+                    `⏳ <b>AI is still generating a response…</b>\n\n🖼️ Photo message queued.`,
+                    keyboard,
+                );
+            } else {
+                await ctx.reply(`📥 Photo message queued (#${position} in line)`);
+            }
+            return;
+        }
+        // ── End concurrency gate ────────────────────────────────────────────
+
+        promptDispatcher.send({
+            channel: ch,
+            prompt: caption || 'Please review the attached images and respond accordingly.',
+            cdp: resolved.cdp,
+            inboundImages,
+            options: { chatSessionService, chatSessionRepo, topicManager, titleGenerator },
+        }).catch((e) => logger.error('[documentMsg] dispatch failed:', e))
          .finally(() => cleanupInboundImageAttachments(inboundImages).catch(() => {}));
     });
 
@@ -2168,25 +2547,15 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             logger.info(`Bot started as @${botInfo.username} | extractionMode=${config.extractionMode}`);
             try {
                 await bot.api.setMyCommands([
-                    { command: 'start', description: 'Welcome message' },
-                    { command: 'help', description: 'Show all commands' },
-                    { command: 'project', description: 'Select a project' },
-                    { command: 'new', description: 'Start a new chat session' },
-                    { command: 'chat', description: 'Current session info' },
-                    { command: 'mode', description: 'Change execution mode' },
-                    { command: 'model', description: 'Change LLM model' },
-                    { command: 'stop', description: 'Interrupt active generation' },
-                    { command: 'screenshot', description: 'Capture Antigravity screen' },
-                    { command: 'close', description: 'Terminate active Antigravity session' },
-                    { command: 'template', description: 'Show prompt templates' },
-                    { command: 'template_add', description: 'Register a template' },
-                    { command: 'template_delete', description: 'Delete a template' },
-                    { command: 'allow', description: 'Approve pending IDE confirmation dialog' },
-                    { command: 'allow_chat', description: 'Always-allow pending IDE confirmation dialog' },
-                    { command: 'deny', description: 'Deny pending IDE confirmation dialog' },
-                    { command: 'autoaccept', description: 'Toggle auto-approve mode' },
-                    { command: 'status', description: 'Bot status overview' },
-                    { command: 'ping', description: 'Check latency' },
+                    { command: 'new', description: t('Start a new chat session') },
+                    { command: 'chat', description: t('Current session info') },
+                    { command: 'chats', description: t('List and select chats') },
+                    { command: 'history', description: t('Load history of the active session') },
+                    { command: 'screenshot', description: t('Capture Antigravity screen') },
+                    { command: 'stop', description: t('Interrupt active generation') },
+                    { command: 'project', description: t('Select a project') },
+                    { command: 'status', description: t('Bot status overview') },
+                    { command: 'help', description: t('Show all commands') },
                 ]);
                 logger.info('Telegram command menu registered successfully');
             } catch (err) {

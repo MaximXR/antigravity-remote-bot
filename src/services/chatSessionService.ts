@@ -168,7 +168,8 @@ const FIND_SHOW_MORE_BUTTON_SCRIPT = `(() => {
  */
 function buildActivateChatByTitleScript(title: string): string {
     const safeTitle = JSON.stringify(title);
-    return `(() => {
+    return `(async () => {
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         const wantedRaw = ${safeTitle};
         const wanted = (wantedRaw || '').toLowerCase().replace(/\\s+/g, ' ').trim();
         if (!wanted) return { ok: false, error: 'Empty target title' };
@@ -181,6 +182,43 @@ function buildActivateChatByTitleScript(title: string): string {
             if (!(clickable instanceof HTMLElement)) return false;
             clickable.click();
             return true;
+        };
+
+        const getActiveTitle = () => {
+            const sidePanel = document.querySelector('.antigravity-agent-side-panel');
+            if (!sidePanel) return '';
+            const header = sidePanel.querySelector('div[class*="border-b"]');
+            if (!header) return '';
+            const titleEl = header.querySelector('div[class*="text-ellipsis"]');
+            return (titleEl ? titleEl.textContent : '') || '';
+        };
+
+        const resolveQuickPick = async () => {
+            for (let i = 0; i < 15; i++) {
+                const currentTitle = normalize(getActiveTitle());
+                if (currentTitle === wanted) {
+                    return true;
+                }
+                const widget = document.querySelector('.quick-input-widget');
+                if (widget && isVisible(widget)) {
+                    const text = (widget.textContent || '').toLowerCase();
+                    if (text.includes('open the conversation') || text.includes('where to open')) {
+                        const rows = Array.from(widget.querySelectorAll('.monaco-list-row, [role="option"], [role="button"]'));
+                        for (const row of rows) {
+                            if (row instanceof HTMLElement && isVisible(row)) {
+                                const rowText = (row.textContent || '').toLowerCase();
+                                if (rowText.includes('current window') || rowText.includes('current workspace')) {
+                                    row.click();
+                                    await wait(300);
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                await wait(100);
+            }
+            return false;
         };
 
         const nodes = Array.from(panel.querySelectorAll('button, [role="button"], a, li, div, span'))
@@ -207,6 +245,9 @@ function buildActivateChatByTitleScript(title: string): string {
         const target = pick(exact) || pick(includes);
         if (!target) return { ok: false, error: 'Chat title not found in side panel' };
         if (!clickTarget(target)) return { ok: false, error: 'Matched element is not clickable' };
+        
+        await wait(200);
+        await resolveQuickPick();
         return { ok: true };
     })()`;
 }
@@ -428,6 +469,46 @@ function buildActivateViaPastConversationsScript(title: string): string {
             if (!selected) {
                 return { ok: false, error: 'Conversation not found in Past Conversations' };
             }
+
+            const getActiveTitle = () => {
+                const sidePanel = document.querySelector('.antigravity-agent-side-panel');
+                if (!sidePanel) return '';
+                const header = sidePanel.querySelector('div[class*="border-b"]');
+                if (!header) return '';
+                const titleEl = header.querySelector('div[class*="text-ellipsis"]');
+                return (titleEl ? titleEl.textContent : '') || '';
+            };
+
+            const resolveQuickPick = async () => {
+                for (let i = 0; i < 15; i++) {
+                    const currentTitle = normalize(getActiveTitle());
+                    if (currentTitle === wanted || currentTitle === wantedLoose) {
+                        return true;
+                    }
+                    const widget = document.querySelector('.quick-input-widget');
+                    if (widget && isVisible(widget)) {
+                        const text = (widget.textContent || '').toLowerCase();
+                        if (text.includes('open the conversation') || text.includes('where to open')) {
+                            const rows = Array.from(widget.querySelectorAll('.monaco-list-row, [role="option"], [role="button"]'));
+                            for (const row of rows) {
+                                if (row instanceof HTMLElement && isVisible(row)) {
+                                    const rowText = (row.textContent || '').toLowerCase();
+                                    if (rowText.includes('current window') || rowText.includes('current workspace')) {
+                                        row.click();
+                                        await wait(300);
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    await wait(100);
+                }
+                return false;
+            };
+
+            await wait(200);
+            await resolveQuickPick();
             return { ok: true };
         })();
     })()`;
@@ -756,7 +837,7 @@ export class ChatSessionService {
         cdpService: CdpService,
         title: string,
     ): Promise<{ ok: boolean; error?: string }> {
-        return this.tryActivateWithScript(cdpService, buildActivateChatByTitleScript(title), false);
+        return this.tryActivateWithScript(cdpService, buildActivateChatByTitleScript(title), true);
     }
 
     private async tryActivateByPastConversations(
@@ -817,4 +898,105 @@ export class ChatSessionService {
         }
         return { found: false, enabled: false, x: 0, y: 0 };
     }
+
+    /**
+     * Extract the chat history of the active session.
+     * 
+     * @param cdpService CdpService instance to use
+     * @param maxMessages Maximum number of turns to extract
+     * @returns Array of history turns
+     */
+    async getChatHistory(
+        cdpService: CdpService,
+        maxMessages = 10,
+    ): Promise<Array<{ role: 'user' | 'assistant'; text?: string; html?: string }>> {
+        const script = `(() => {
+            const panel = document.querySelector('.antigravity-agent-side-panel');
+            const scope = panel || document;
+            
+            const turns = scope.querySelectorAll('[role="article"][aria-label="User message"], [role="article"][aria-label="Agent response"]');
+            const history = [];
+            
+            const startIdx = Math.max(0, turns.length - ${maxMessages});
+            for (let i = startIdx; i < turns.length; i++) {
+                const turn = turns[i];
+                const isUser = turn.getAttribute('aria-label') === 'User message';
+                if (isUser) {
+                    const textEl = turn.querySelector('.whitespace-pre-wrap') || turn.querySelector('[style*="word-break"]');
+                    const text = textEl ? (textEl.textContent || '').trim() : (turn.textContent || '').trim();
+                    if (text) {
+                        history.push({ role: 'user', text });
+                    }
+                } else {
+                    const bodyEl = turn.querySelector('.leading-relaxed.select-text') || turn.querySelector('.rendered-markdown') || turn.querySelector('.prose');
+                    if (bodyEl) {
+                        const clone = bodyEl.cloneNode(true);
+                        
+                        const pres = clone.querySelectorAll('pre');
+                        for (let pi = 0; pi < pres.length; pi++) {
+                            const pre = pres[pi];
+                            const langDiv = pre.querySelector('.font-sans.text-sm, [class*="text-sm"][class*="opacity"]');
+                            const lang = langDiv ? (langDiv.textContent || '').trim() : '';
+
+                            const styles = pre.querySelectorAll('style');
+                            for (let si = 0; si < styles.length; si++) {
+                                styles[si].parentNode.removeChild(styles[si]);
+                            }
+
+                            const headerBar = pre.querySelector('[class*="rounded-t"][class*="border-b"]');
+                            if (headerBar) headerBar.parentNode.removeChild(headerBar);
+
+                            const codeLines = pre.querySelectorAll('.code-line, [class*="code-line"]');
+                            let codeText;
+                            if (codeLines.length > 0) {
+                                const lineTexts = [];
+                                for (let cli = 0; cli < codeLines.length; cli++) {
+                                    lineTexts.push(codeLines[cli].textContent || '');
+                                }
+                                codeText = lineTexts.join('\\\n');
+                            } else {
+                                codeText = (pre.innerText || '').trim();
+                                if (lang && codeText.startsWith(lang)) {
+                                    codeText = codeText.slice(lang.length).trim();
+                                }
+                            }
+                            codeText = codeText.replace(/\\nCopy$/i, '').replace(/\\ncopy code$/i, '').trim();
+                            
+                            const newPre = document.createElement('pre');
+                            const newCode = document.createElement('code');
+                            if (lang) newCode.setAttribute('class', 'language-' + lang);
+                            newCode.textContent = codeText;
+                            newPre.appendChild(newCode);
+                            pre.parentNode.replaceChild(newPre, pre);
+                        }
+                        
+                        const topStyles = clone.querySelectorAll('style');
+                        for (let tsi = 0; tsi < topStyles.length; tsi++) {
+                            topStyles[tsi].parentNode.removeChild(topStyles[tsi]);
+                        }
+                        
+                        history.push({ role: 'assistant', html: clone.innerHTML });
+                    }
+                }
+            }
+            return history;
+        })()`;
+
+        const contexts = cdpService.getContexts();
+        for (const ctx of contexts) {
+            try {
+                const result = await cdpService.call('Runtime.evaluate', {
+                    expression: script,
+                    returnByValue: true,
+                    contextId: ctx.id,
+                });
+                const value = result?.result?.value;
+                if (Array.isArray(value) && value.length > 0) {
+                    return value;
+                }
+            } catch (_) { /* try next context */ }
+        }
+        return [];
+    }
 }
+

@@ -19,9 +19,9 @@ export function getAntigravityCliPath(): string {
     if (process.platform === 'win32') {
         const localAppData = process.env.LOCALAPPDATA;
         if (localAppData) {
-            return `${localAppData}\\Programs\\Antigravity\\Antigravity.exe`;
+            return `${localAppData}\\Programs\\Antigravity IDE\\Antigravity IDE.exe`;
         }
-        return 'Antigravity.exe'; // Fallback if LOCALAPPDATA is undefined
+        return 'Antigravity IDE.exe'; // Fallback if LOCALAPPDATA is undefined
     }
 
     // Default for Linux or any unknown OS, assuming 'antigravity' is in the system PATH
