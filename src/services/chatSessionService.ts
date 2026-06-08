@@ -1,4 +1,5 @@
 import { CdpService } from './cdpService';
+import { logger } from '../utils/logger';
 
 /** Session list item from the side panel */
 export interface SessionListItem {
@@ -184,43 +185,6 @@ function buildActivateChatByTitleScript(title: string): string {
             return true;
         };
 
-        const getActiveTitle = () => {
-            const sidePanel = document.querySelector('.antigravity-agent-side-panel');
-            if (!sidePanel) return '';
-            const header = sidePanel.querySelector('div[class*="border-b"]');
-            if (!header) return '';
-            const titleEl = header.querySelector('div[class*="text-ellipsis"]');
-            return (titleEl ? titleEl.textContent : '') || '';
-        };
-
-        const resolveQuickPick = async () => {
-            for (let i = 0; i < 15; i++) {
-                const currentTitle = normalize(getActiveTitle());
-                if (currentTitle === wanted) {
-                    return true;
-                }
-                const widget = document.querySelector('.quick-input-widget');
-                if (widget && isVisible(widget)) {
-                    const text = (widget.textContent || '').toLowerCase();
-                    if (text.includes('open the conversation') || text.includes('where to open')) {
-                        const rows = Array.from(widget.querySelectorAll('.monaco-list-row, [role="option"], [role="button"]'));
-                        for (const row of rows) {
-                            if (row instanceof HTMLElement && isVisible(row)) {
-                                const rowText = (row.textContent || '').toLowerCase();
-                                if (rowText.includes('current window') || rowText.includes('current workspace')) {
-                                    row.click();
-                                    await wait(300);
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                }
-                await wait(100);
-            }
-            return false;
-        };
-
         const nodes = Array.from(panel.querySelectorAll('button, [role="button"], a, li, div, span'))
             .filter(isVisible);
 
@@ -246,8 +210,6 @@ function buildActivateChatByTitleScript(title: string): string {
         if (!target) return { ok: false, error: 'Chat title not found in side panel' };
         if (!clickTarget(target)) return { ok: false, error: 'Matched element is not clickable' };
         
-        await wait(200);
-        await resolveQuickPick();
         return { ok: true };
     })()`;
 }
@@ -470,45 +432,6 @@ function buildActivateViaPastConversationsScript(title: string): string {
                 return { ok: false, error: 'Conversation not found in Past Conversations' };
             }
 
-            const getActiveTitle = () => {
-                const sidePanel = document.querySelector('.antigravity-agent-side-panel');
-                if (!sidePanel) return '';
-                const header = sidePanel.querySelector('div[class*="border-b"]');
-                if (!header) return '';
-                const titleEl = header.querySelector('div[class*="text-ellipsis"]');
-                return (titleEl ? titleEl.textContent : '') || '';
-            };
-
-            const resolveQuickPick = async () => {
-                for (let i = 0; i < 15; i++) {
-                    const currentTitle = normalize(getActiveTitle());
-                    if (currentTitle === wanted || currentTitle === wantedLoose) {
-                        return true;
-                    }
-                    const widget = document.querySelector('.quick-input-widget');
-                    if (widget && isVisible(widget)) {
-                        const text = (widget.textContent || '').toLowerCase();
-                        if (text.includes('open the conversation') || text.includes('where to open')) {
-                            const rows = Array.from(widget.querySelectorAll('.monaco-list-row, [role="option"], [role="button"]'));
-                            for (const row of rows) {
-                                if (row instanceof HTMLElement && isVisible(row)) {
-                                    const rowText = (row.textContent || '').toLowerCase();
-                                    if (rowText.includes('current window') || rowText.includes('current workspace')) {
-                                        row.click();
-                                        await wait(300);
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    await wait(100);
-                }
-                return false;
-            };
-
-            await wait(200);
-            await resolveQuickPick();
             return { ok: true };
         })();
     })()`;
@@ -798,6 +721,9 @@ export class ChatSessionService {
             };
         }
 
+        // Try to resolve VS Code QuickPick "Select where to open the conversation" if it appears in the main context
+        await this.resolveQuickPickDialog(cdpService);
+
         // Wait briefly for DOM state transition and verify destination chat.
         await new Promise((resolve) => setTimeout(resolve, 500));
         const after = await this.getCurrentSessionInfo(cdpService);
@@ -809,6 +735,7 @@ export class ChatSessionService {
         if (!usedPastConversations) {
             const viaPast = await this.tryActivateByPastConversations(cdpService, title);
             if (viaPast.ok) {
+                await this.resolveQuickPickDialog(cdpService);
                 await new Promise((resolve) => setTimeout(resolve, 500));
                 const afterPast = await this.getCurrentSessionInfo(cdpService);
                 if (afterPast.title.trim().toLowerCase() === title.trim().toLowerCase()) {
@@ -874,6 +801,63 @@ export class ChatSessionService {
             }
         }
         return { ok: false, error: lastError };
+    }
+
+    /**
+     * Resolve the VS Code QuickInput dropdown if it appears in any execution context.
+     * Selects "Open in current window" option.
+     */
+    private async resolveQuickPickDialog(cdpService: CdpService): Promise<boolean> {
+        const script = `(() => {
+            const isVisible = (el) => !!el && el instanceof HTMLElement && el.offsetParent !== null;
+            const widget = document.querySelector('.quick-input-widget');
+            if (widget && isVisible(widget)) {
+                const text = (widget.textContent || '').toLowerCase();
+                if (text.includes('open the conversation') || text.includes('where to open')) {
+                    const rows = Array.from(widget.querySelectorAll('.monaco-list-row, [role="option"], [role="button"]'));
+                    for (const row of rows) {
+                        if (row instanceof HTMLElement && isVisible(row)) {
+                            const rowText = (row.textContent || '').toLowerCase();
+                            if (rowText.includes('current window') || rowText.includes('current workspace')) {
+                                const events = ['pointerdown', 'mousedown', 'mouseup', 'click'];
+                                for (const type of events) {
+                                    row.dispatchEvent(new MouseEvent(type, {
+                                        bubbles: true,
+                                        cancelable: true,
+                                        view: window
+                                    }));
+                                }
+                                return { resolved: true, clicked: rowText };
+                            }
+                        }
+                    }
+                }
+            }
+            return { resolved: false };
+        })()`;
+
+        const started = Date.now();
+        const maxWaitMs = 600; // wait up to 600ms for it to appear
+        while (Date.now() - started < maxWaitMs) {
+            const contexts = cdpService.getContexts();
+            for (const ctx of contexts) {
+                try {
+                    const res = await cdpService.call('Runtime.evaluate', {
+                        expression: script,
+                        returnByValue: true,
+                        contextId: ctx.id,
+                    });
+                    if (res?.result?.value?.resolved) {
+                        logger.debug(`[ChatSessionService] QuickPick resolved in context ${ctx.id}: ${res.result.value.clicked}`);
+                        return true;
+                    }
+                } catch (_) {
+                    // ignore
+                }
+            }
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        return false;
     }
 
     /**
