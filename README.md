@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/optimistengineer/Remoat/blob/main/LICENSE"><img src="https://img.shields.io/github/license/optimistengineer/Remoat?style=flat-square" alt="License" /></a>
+  <a href="https://github.com/MaximXR/antigravity-remote-bot/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MaximXR/antigravity-remote-bot?style=flat-square" alt="License" /></a>
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square&logo=node.js" alt="Node.js" />
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square" alt="Platform" />
 </p>
@@ -52,17 +52,12 @@ You can verify they're installed with `xcode-select -p`.
 
 </details>
 
-### 1. Install Remoat
+### 1. Clone and Install from source
 
 ```bash
-npm install -g remoat
-```
-
-Or with Homebrew (macOS/Linux):
-
-```bash
-brew tap optimistengineer/remoat
-brew install remoat
+git clone https://github.com/MaximXR/antigravity-remote-bot.git
+cd antigravity-remote-bot
+npm install
 ```
 
 ### 2. Run the setup wizard
@@ -126,8 +121,8 @@ This pulls `base.en` (~140 MB). Requires `cmake` (`brew install cmake` on macOS,
 ### From source
 
 ```bash
-git clone https://github.com/optimistengineer/Remoat.git
-cd Remoat
+git clone https://github.com/MaximXR/antigravity-remote-bot.git
+cd antigravity-remote-bot
 npm install
 cp .env.example .env
 ```
@@ -292,8 +287,8 @@ locales/        i18n translations (en, ja)
 Contributions are welcome — whether it's a bug fix, a new feature, documentation improvements, or test coverage.
 
 ```bash
-git clone https://github.com/optimistengineer/Remoat.git
-cd Remoat
+git clone https://github.com/MaximXR/antigravity-remote-bot.git
+cd antigravity-remote-bot
 npm install
 cp .env.example .env  # fill in your values
 npm run dev           # start with auto-reload
@@ -302,9 +297,6 @@ npm test              # run the test suite
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide — code style, commit conventions, PR process, and project architecture.
 
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=optimistengineer/remoat&type=date&legend=top-left)](https://www.star-history.com/#optimistengineer/remoat&type=date&legend=top-left)
 
 ## License
 
@@ -312,4 +304,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide — code style, commit
 
 ## Acknowledgements
 
-Based on [LazyGravity](https://github.com/tokyoweb3/LazyGravity), a Discord bot for remotely controlling Antigravity via CDP. Remoat ports the core architecture to Telegram and adds features like Forum Topics, voice input, and structured DOM extraction.
+Based on the original [Remoat](https://github.com/optimistengineer/remoat) project and [LazyGravity](https://github.com/tokyoweb3/LazyGravity), a Discord bot for remotely controlling Antigravity via CDP.
