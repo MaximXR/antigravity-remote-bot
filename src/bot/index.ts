@@ -2424,7 +2424,13 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         const approvalAction = parseApprovalCustomId(data);
         if (approvalAction) {
             const projectName = approvalAction.projectName ?? bridge.lastActiveWorkspace;
-            const detector = projectName ? bridge.pool.getApprovalDetector(projectName) : undefined;
+            let detector = projectName ? bridge.pool.getApprovalDetector(projectName) : undefined;
+            if (!detector) {
+                const resolved = await resolveWorkspaceAndCdp(ch);
+                if (resolved.ok) {
+                    detector = bridge.pool.getApprovalDetector(resolved.projectName);
+                }
+            }
             if (!detector) { await ctx.answerCallbackQuery({ text: 'Approval detector not found.' }); return; }
 
             let success = false;
@@ -2438,6 +2444,19 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 // the DOM buttons actually disappear. This keeps the keyboard visible for
                 // retry if the CDP click was dispatched but Antigravity did not act on it.
                 await ctx.answerCallbackQuery({ text: `${actionLabel} sent — waiting for IDE response…` });
+
+                const cdp = (projectName ? bridge.pool.getConnected(projectName) : null) ?? getCurrentCdp(bridge);
+                if (cdp && !promptDispatcher.isBusy(ch, cdp)) {
+                    logger.info(`[ApprovalCallback] Starting passive monitoring for workspace ${projectName}`);
+                    const mirrorPromise = mirrorResponseToTelegram(bridge, ch, cdp, `${actionLabel} action`, {
+                        chatSessionService,
+                        chatSessionRepo,
+                        topicManager,
+                        titleGenerator,
+                        modelService
+                    });
+                    promptDispatcher.acquireLock(ch, cdp, mirrorPromise);
+                }
             } else {
                 await ctx.answerCallbackQuery({ text: 'Button not found in IDE. Use /allow or /deny to retry.' });
             }
@@ -2448,7 +2467,13 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         const planningAction = parsePlanningCustomId(data);
         if (planningAction) {
             const projectName = planningAction.projectName ?? bridge.lastActiveWorkspace;
-            const detector = projectName ? bridge.pool.getPlanningDetector(projectName) : undefined;
+            let detector = projectName ? bridge.pool.getPlanningDetector(projectName) : undefined;
+            if (!detector) {
+                const resolved = await resolveWorkspaceAndCdp(ch);
+                if (resolved.ok) {
+                    detector = bridge.pool.getPlanningDetector(resolved.projectName);
+                }
+            }
             if (!detector) { await ctx.answerCallbackQuery({ text: 'Planning detector not found.' }); return; }
 
             if (planningAction.action === 'open') {
@@ -2484,7 +2509,13 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         if (data.startsWith(PLAN_VIEW_BTN + ':')) {
             const suffix = data.substring(PLAN_VIEW_BTN.length + 1);
             const [projectName] = suffix.split(':');
-            const detector = projectName ? bridge.pool.getPlanningDetector(projectName) : undefined;
+            let detector = projectName ? bridge.pool.getPlanningDetector(projectName) : undefined;
+            if (!detector) {
+                const resolved = await resolveWorkspaceAndCdp(ch);
+                if (resolved.ok) {
+                    detector = bridge.pool.getPlanningDetector(resolved.projectName);
+                }
+            }
             if (!detector) { await ctx.answerCallbackQuery({ text: 'Planning detector not found.' }); return; }
 
             const clicked = await detector.clickOpenButton();
@@ -2515,7 +2546,13 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         if (data.startsWith(PLAN_PROCEED_BTN + ':')) {
             const suffix = data.substring(PLAN_PROCEED_BTN.length + 1);
             const [projectName] = suffix.split(':');
-            const detector = projectName ? bridge.pool.getPlanningDetector(projectName) : undefined;
+            let detector = projectName ? bridge.pool.getPlanningDetector(projectName) : undefined;
+            if (!detector) {
+                const resolved = await resolveWorkspaceAndCdp(ch);
+                if (resolved.ok) {
+                    detector = bridge.pool.getPlanningDetector(resolved.projectName);
+                }
+            }
             if (!detector) { await ctx.answerCallbackQuery({ text: 'Planning detector not found.' }); return; }
 
             const clicked = await detector.clickProceedButton();
@@ -2539,7 +2576,13 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         if (data.startsWith(PLAN_REFRESH_BTN + ':')) {
             const suffix = data.substring(PLAN_REFRESH_BTN.length + 1);
             const [projectName, targetChannelStr] = suffix.split(':');
-            const detector = projectName ? bridge.pool.getPlanningDetector(projectName) : undefined;
+            let detector = projectName ? bridge.pool.getPlanningDetector(projectName) : undefined;
+            if (!detector) {
+                const resolved = await resolveWorkspaceAndCdp(ch);
+                if (resolved.ok) {
+                    detector = bridge.pool.getPlanningDetector(resolved.projectName);
+                }
+            }
             if (!detector) { await ctx.answerCallbackQuery({ text: 'Planning detector not found.' }); return; }
 
             const info = detector.getLastDetectedInfo();
@@ -2562,7 +2605,13 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             const pages = planContentCache.get(chKey);
             if (!pages || isNaN(page)) { await ctx.answerCallbackQuery({ text: 'Page not found.' }); return; }
 
-            const detector = projectName ? bridge.pool.getPlanningDetector(projectName) : undefined;
+            let detector = projectName ? bridge.pool.getPlanningDetector(projectName) : undefined;
+            if (!detector) {
+                const resolved = await resolveWorkspaceAndCdp(ch);
+                if (resolved.ok) {
+                    detector = bridge.pool.getPlanningDetector(resolved.projectName);
+                }
+            }
             const lastInfo = detector?.getLastDetectedInfo();
 
             const { text: pageText, keyboard: pageKeyboard } = buildPlanContentUI(pages, page, projectName, targetChannelStr || String(ch.chatId), lastInfo?.planTitle ?? undefined, lastInfo?.proceedText ?? undefined);
@@ -2575,7 +2624,13 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         const errorAction = parseErrorPopupCustomId(data);
         if (errorAction) {
             const projectName = errorAction.projectName ?? bridge.lastActiveWorkspace;
-            const detector = projectName ? bridge.pool.getErrorPopupDetector(projectName) : undefined;
+            let detector = projectName ? bridge.pool.getErrorPopupDetector(projectName) : undefined;
+            if (!detector) {
+                const resolved = await resolveWorkspaceAndCdp(ch);
+                if (resolved.ok) {
+                    detector = bridge.pool.getErrorPopupDetector(resolved.projectName);
+                }
+            }
             if (!detector) { await ctx.answerCallbackQuery({ text: 'Error popup detector not found.' }); return; }
 
             if (errorAction.action === 'dismiss') {
@@ -3236,6 +3291,82 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             options: { chatSessionService, chatSessionRepo, topicManager, titleGenerator },
         }).catch((e) => logger.error('[voiceMsg] dispatch failed:', e));
     });
+
+    // Proactively connect to all existing workspace bindings on startup
+    try {
+        const bindings = workspaceBindingRepo.findAll();
+        logger.info(`[startup] Found ${bindings.length} workspace binding(s). Connecting proactively...`);
+        for (const binding of bindings) {
+            const workspacePath = workspaceService.getWorkspacePath(binding.workspacePath);
+            const channel: TelegramChannel = {
+                chatId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[0]) : Number(binding.channelId),
+                threadId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[1]) : undefined,
+            };
+            
+            bridge.pool.getOrConnect(workspacePath).then((cdp) => {
+                logger.info(`[startup] Proactively connected to workspace: ${binding.workspacePath}`);
+                
+                bridge.lastActiveWorkspace = binding.workspacePath;
+                bridge.lastActiveChannel = channel;
+                registerApprovalWorkspaceChannel(bridge, binding.workspacePath, channel);
+                ensureApprovalDetector(bridge, cdp, binding.workspacePath);
+                ensureErrorPopupDetector(bridge, cdp, binding.workspacePath);
+                ensurePlanningDetector(bridge, cdp, binding.workspacePath);
+                
+                const onUserMessageCallback = (info: any) => {
+                    logger.info(`[UserMessageDetector:${binding.workspacePath}] Detected user message from IDE: "${info.text.slice(0, 50)}..."`);
+                    
+                    if (promptDispatcher.isBusy(channel, cdp)) {
+                        logger.debug(`[UserMessageDetector:${binding.workspacePath}] Workspace is busy, skipping user message mirror.`);
+                        return;
+                    }
+
+                    const userMsgText = `👤 [IDE]: ${info.text}`;
+                    bot.api.sendMessage(channel.chatId, userMsgText, {
+                        message_thread_id: channel.threadId,
+                    }).catch(e => logger.error('[UserMessageDetector] Failed to send user message to TG:', e));
+
+                    const mirrorPromise = mirrorResponseToTelegram(bridge, channel, cdp, info.text, {
+                        chatSessionService,
+                        chatSessionRepo,
+                        topicManager,
+                        titleGenerator,
+                        modelService
+                    });
+
+                    promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
+                };
+                ensureUserMessageDetector(bridge, cdp, binding.workspacePath, onUserMessageCallback);
+
+                // Detect if a run is already in progress and start passive monitoring
+                cdp.call('Runtime.evaluate', {
+                    expression: RESPONSE_SELECTORS.STOP_BUTTON,
+                    returnByValue: true,
+                }).then((res: any) => {
+                    const isGenerating = res?.result?.value?.isGenerating;
+                    if (isGenerating) {
+                        logger.info(`[startup] Detected active run in progress for workspace ${binding.workspacePath}. Starting passive monitoring.`);
+                        const lastUserMsg = 'Activity in IDE'; 
+                        const mirrorPromise = mirrorResponseToTelegram(bridge, channel, cdp, lastUserMsg, {
+                            chatSessionService,
+                            chatSessionRepo,
+                            topicManager,
+                            titleGenerator,
+                            modelService
+                        });
+                        promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
+                    }
+                }).catch(err => {
+                    logger.debug(`[startup] Stop button probe failed for ${binding.workspacePath}:`, err);
+                });
+
+            }).catch((err) => {
+                logger.warn(`[startup] Failed proactive connection for ${binding.workspacePath}:`, err?.message || err);
+            });
+        }
+    } catch (e: any) {
+        logger.error('[startup] Proactive workspace connections failed:', e?.message || e);
+    }
 
     logger.info('Starting Remoat Telegram bot...');
 
