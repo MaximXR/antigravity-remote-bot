@@ -1028,6 +1028,38 @@ export class ChatSessionService {
                     if (val && val.found && typeof val.x === 'number' && typeof val.y === 'number') {
                         logger.info(`[ChatSessionService] Clicking Undo button at x=${val.x}, y=${val.y} in context ${ctx.id}`);
                         await this.cdpMouseClick(cdpService, val.x, val.y);
+
+                        // Wait 350ms for the Confirm Undo modal to open
+                        await new Promise((resolve) => setTimeout(resolve, 350));
+
+                        // Execute confirmation click
+                        const confirmScript = `(() => {
+                            const buttons = Array.from(document.querySelectorAll('button'));
+                            const confirmBtn = buttons.find(b => {
+                                const text = (b.textContent || '').trim().toLowerCase();
+                                return text === 'confirm' || text === 'confirm undo' || text === 'yes';
+                            });
+                            if (confirmBtn) {
+                                confirmBtn.click();
+                                return { clicked: true };
+                            }
+                            return { clicked: false };
+                        })()`;
+                        try {
+                            const confirmRes = await cdpService.call('Runtime.evaluate', {
+                                expression: confirmScript,
+                                returnByValue: true,
+                                contextId: ctx.id,
+                            });
+                            if (confirmRes?.result?.value?.clicked) {
+                                logger.info('[ChatSessionService] Automatically confirmed Undo dialog.');
+                            } else {
+                                logger.info('[ChatSessionService] No confirmation dialog found or clicked.');
+                            }
+                        } catch (e: any) {
+                            logger.warn('[ChatSessionService] Failed to auto-confirm Undo dialog:', e.message);
+                        }
+
                         return { ok: true };
                     }
                 } catch (_) {

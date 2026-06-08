@@ -87,5 +87,6 @@
   "Last changes successfully rolled back in IDE.": "Last changes successfully rolled back in IDE.",
   "Undo button not found": "Undo button not found",
   "Failed to rollback": "Failed to rollback",
-  "Rolling back last changes...": "Rolling back last changes..."
+  "Rolling back last changes...": "Rolling back last changes...",
+  "Change workspace base directory": "Change workspace base directory"
 }

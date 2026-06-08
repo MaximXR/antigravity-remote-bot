@@ -38,7 +38,7 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
         '常に許可',
         'この会話を許可',
     ];
-    const ALLOW_PATTERNS = ['allow', 'permit', 'run', 'execute', '許可', '承認', '確認', '実行'];
+    const ALLOW_PATTERNS = ['allow', 'permit', 'run', 'execute', 'accept', 'approve', '許可', '承認', '確認', '実行'];
     const DENY_PATTERNS = ['deny', 'reject', '拒否', 'decline', '却下'];
 
     const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();

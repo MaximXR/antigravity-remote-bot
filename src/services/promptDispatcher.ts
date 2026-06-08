@@ -114,4 +114,33 @@ export class PromptDispatcher {
             this.deps.onTaskComplete?.(req.channel, lockKey);
         }
     }
+
+    /**
+     * Manually acquire the lock for a workspace/channel with an external promise.
+     * Used for mirroring IDE messages where generation is initiated externally.
+     */
+    acquireLock(ch: TelegramChannel, cdp: CdpService, current: Promise<void>): void {
+        const chKey = this.channelKey(ch);
+        const wsName = cdp.getCurrentWorkspaceName();
+        const wsKey = wsName ? `ws:${wsName}` : null;
+        const lockKey = wsKey ?? chKey;
+
+        const previous = this.workspaceLocks.get(lockKey) ?? Promise.resolve();
+        const serialized = previous.then(() => current).catch(() => {});
+
+        this.workspaceLocks.set(lockKey, serialized);
+        this.channelLocks.set(chKey, serialized);
+        logger.debug(`[PromptDispatcher] Lock ACQUIRED manually: ${lockKey} (total: ${this.workspaceLocks.size})`);
+
+        serialized.finally(() => {
+            if (this.workspaceLocks.get(lockKey) === serialized) {
+                this.workspaceLocks.delete(lockKey);
+                logger.debug(`[PromptDispatcher] Lock RELEASED manually: ${lockKey} (total: ${this.workspaceLocks.size})`);
+            }
+            if (this.channelLocks.get(chKey) === serialized) {
+                this.channelLocks.delete(chKey);
+            }
+            this.deps.onTaskComplete?.(ch, lockKey);
+        });
+    }
 }

@@ -35,6 +35,7 @@ import {
     ensureApprovalDetector,
     ensureErrorPopupDetector,
     ensurePlanningDetector,
+    ensureUserMessageDetector,
     getCurrentCdp,
     initCdpBridge,
     registerApprovalSessionChannel,
@@ -857,6 +858,594 @@ async function sendPromptToAntigravity(
     }
 }
 
+async function mirrorResponseToTelegram(
+    bridge: CdpBridge,
+    channel: TelegramChannel,
+    cdp: CdpService,
+    userPrompt: string,
+    options: {
+        chatSessionService: ChatSessionService;
+        chatSessionRepo: ChatSessionRepository;
+        topicManager: TelegramTopicManager;
+        titleGenerator: TitleGeneratorService;
+        modelService: ModelService;
+    }
+): Promise<void> {
+    const api = bridge.botApi!;
+    const monitorTraceId = channelKey(channel);
+    const enqueueGeneral = createSerialTaskQueue('general', monitorTraceId);
+    const enqueueResponse = createSerialTaskQueue('response', monitorTraceId);
+    const enqueueActivity = createSerialTaskQueue('activity', monitorTraceId);
+
+    const sendMsg = async (text: string, replyMarkup?: any): Promise<number | null> => {
+        try {
+            const truncated = text.length > TELEGRAM_MSG_LIMIT ? text.slice(0, TELEGRAM_MSG_LIMIT - 20) + '\n...(truncated)' : text;
+            const msg = await api.sendMessage(channel.chatId, truncated, {
+                parse_mode: 'HTML',
+                message_thread_id: channel.threadId,
+                reply_markup: replyMarkup,
+            });
+            return msg.message_id;
+        } catch (e) {
+            logger.error('[mirror:sendMsg] Failed:', e);
+            return null;
+        }
+    };
+
+    const editMsg = async (msgId: number, text: string, replyMarkup?: any, maxRetries = 3): Promise<void> => {
+        const truncated = text.length > TELEGRAM_MSG_LIMIT ? text.slice(0, TELEGRAM_MSG_LIMIT - 20) + '\n...(truncated)' : text;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                await api.editMessageText(channel.chatId, msgId, truncated, {
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup,
+                });
+                break;
+            } catch (e: any) {
+                const desc = e?.description || e?.message || '';
+                if (desc.includes('message is not modified')) {
+                    break;
+                }
+                const retryAfter = e?.parameters?.retry_after;
+                if (retryAfter) {
+                    logger.error(`[mirror:editMsg] Too Many Requests: retry after ${retryAfter}s (attempt ${attempt}/${maxRetries})`);
+                    if (attempt < maxRetries) {
+                        await new Promise(r => setTimeout(r, retryAfter * 1000));
+                        continue;
+                    }
+                }
+                logger.error('[mirror:editMsg] Failed:', desc);
+                break;
+            }
+        }
+    };
+
+    const sendEmbed = (title: string, description: string): Promise<void> => enqueueGeneral(async () => {
+        const text = `<b>${escapeHtml(title)}</b>\n\n${escapeHtml(description)}`;
+        await sendMsg(text);
+    }, 'send-embed');
+
+    const sendChunkedResponse = async (title: string, footer: string, rawBody: string, isAlreadyHtml: boolean, replyMarkup?: any): Promise<void> => {
+        const formattedBody = isAlreadyHtml ? rawBody : formatForTelegram(rawBody);
+        const titleLine = title ? `<b>${escapeHtml(title)}</b>\n\n` : '';
+        const footerLine = footer ? `\n\n<i>${escapeHtml(footer)}</i>` : '';
+        const fullMsg = `${titleLine}${formattedBody}${footerLine}`;
+
+        if (fullMsg.length <= TELEGRAM_MSG_LIMIT) {
+            await upsertLiveResponse(title, rawBody, footer, { expectedVersion: liveResponseUpdateVersion, isAlreadyHtml, skipTruncation: true, replyMarkup });
+            return;
+        }
+
+        const bodyChunks = splitTelegramHtml(formattedBody, TELEGRAM_MSG_LIMIT - 200);
+        const inlineCount = Math.min(bodyChunks.length, MAX_INLINE_CHUNKS);
+        const hasFile = bodyChunks.length > MAX_INLINE_CHUNKS;
+        const total = hasFile ? inlineCount : bodyChunks.length;
+
+        for (let pi = 0; pi < inlineCount; pi++) {
+            const partLabel = hasFile ? `(${pi + 1}/${inlineCount}+file)` : `(${pi + 1}/${total})`;
+            const isLast = (pi === inlineCount - 1);
+            const currentMarkup = isLast && !hasFile ? replyMarkup : undefined;
+            if (pi === 0) {
+                const firstTitle = title ? `${title} ${partLabel}` : partLabel;
+                await upsertLiveResponse(firstTitle, bodyChunks[pi], footer, { expectedVersion: liveResponseUpdateVersion, isAlreadyHtml: true, skipTruncation: true, replyMarkup: currentMarkup });
+            } else {
+                const partFooter = footer ? `${escapeHtml(footer)} ${partLabel}` : partLabel;
+                await sendMsg(`${bodyChunks[pi]}\n\n<i>${partFooter}</i>`, currentMarkup);
+            }
+        }
+
+        if (hasFile) {
+            try {
+                const fileContent = stripHtmlForFile(formattedBody);
+                const buf = Buffer.from(fileContent, 'utf-8');
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+                await api.sendDocument(channel.chatId, new InputFile(buf, `response-${timestamp}.md`), {
+                    caption: `📄 Full response (${rawBody.length} chars)`,
+                    message_thread_id: channel.threadId,
+                    reply_markup: replyMarkup,
+                });
+            } catch (e) { logger.error('[mirror] Failed to send response file:', e); }
+        }
+    };
+
+    if (!cdp.isConnected()) {
+        await sendEmbed(
+            `${PHASE_ICONS.error} Connection Error`,
+            `Not connected to Antigravity.`,
+        );
+        return;
+    }
+
+    const currentModel = (await cdp.getCurrentModel()) || options.modelService.getCurrentModel();
+    const modelLabel = `${currentModel}`;
+    const stopKeyboard = new InlineKeyboard().text('⏹️ Stop', 'stop_generation');
+
+    let liveActivityMsgId: number | null = null;
+    try {
+        const generatingText = `<b>${PHASE_ICONS.thinking} [IDE] · ${escapeHtml(modelLabel)}</b>\n\n<i>Generating...</i>`;
+        const generatingMsg = await api.sendMessage(channel.chatId, generatingText, {
+            parse_mode: 'HTML',
+            message_thread_id: channel.threadId,
+            reply_markup: stopKeyboard,
+        });
+        liveActivityMsgId = generatingMsg.message_id;
+    } catch (e) { logger.error('[mirror] Failed to send initial status:', e); }
+
+    let isFinalized = false;
+    let elapsedTimer: ReturnType<typeof setInterval> | null = null;
+    let lastProgressText = '';
+    const LIVE_RESPONSE_MAX_LEN = 3800;
+    const MAX_PROGRESS_BODY = 3500;
+    const MAX_PROGRESS_ENTRIES = 60;
+    let liveResponseMsgId: number | null = null;
+    let lastLiveResponseKey = '';
+    let lastLiveActivityKey = '';
+    let liveResponseUpdateVersion = 0;
+    let liveActivityUpdateVersion = 0;
+
+    interface ProgressEntry { kind: 'thought' | 'thought-content' | 'activity'; text: string; }
+    const progressLog: ProgressEntry[] = [];
+    let thinkingActive = false;
+    const thinkingContentParts: string[] = [];
+    let lastThoughtLabel = '';
+
+    const isJunkEntry = (text: string): boolean => {
+        const t = text.trim();
+        if (t.length < 5) return true;
+        if (/^\d+$/.test(t)) return true;
+        if (!/\s/.test(t) && t.length < 8) return true;
+        return false;
+    };
+
+    const formatActivityLine = (raw: string): string => {
+        const collapsed = (raw || '').replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+        if (!collapsed || isJunkEntry(collapsed)) return '';
+        return escapeHtml(collapsed.slice(0, 120));
+    };
+
+    const trimProgressLog = (): void => {
+        while (progressLog.length > MAX_PROGRESS_ENTRIES) progressLog.shift();
+    };
+
+    const buildProgressBody = (): string => {
+        const lines: string[] = [];
+        for (const e of progressLog) {
+            switch (e.kind) {
+                case 'thought':
+                    lines.push(`💭 <i>${escapeHtml(e.text)}</i>`);
+                    break;
+                case 'thought-content':
+                    lines.push(`<i>${escapeHtml(e.text)}</i>`);
+                    break;
+                case 'activity':
+                    lines.push(e.text);
+                    break;
+            }
+        }
+        if (thinkingActive) {
+            lines.push('💭 <i>Thinking...</i>');
+        }
+        let body = lines.join('\n\n');
+        if (body.length > MAX_PROGRESS_BODY) {
+            body = '...\n\n' + body.slice(-MAX_PROGRESS_BODY + 5);
+        }
+        return body || '<i>Generating...</i>';
+    };
+
+    const buildProgressMessage = (title: string, footer: string): string => {
+        const body = buildProgressBody();
+        const footerLine = footer ? `\n\n<i>${escapeHtml(footer)}</i>` : '';
+        return `<b>${escapeHtml(title)}</b>\n\n${body}${footerLine}`;
+    };
+
+    const buildLiveResponseText = (title: string, rawText: string, footer: string, isAlreadyHtml = false, skipTruncation = false): string => {
+        const normalized = (rawText || '').trim();
+        const body = normalized
+            ? (isAlreadyHtml ? normalized : formatForTelegram(normalized))
+            : t('Generating...');
+        const truncated = (!skipTruncation && body.length > LIVE_RESPONSE_MAX_LEN)
+            ? '...(beginning truncated)\n' + body.slice(-LIVE_RESPONSE_MAX_LEN + 30)
+            : body;
+        const titleLine = title ? `<b>${escapeHtml(title)}</b>\n\n` : '';
+        const footerLine = footer ? `\n\n<i>${escapeHtml(footer)}</i>` : '';
+        return `${titleLine}${truncated}${footerLine}`;
+    };
+
+    const upsertLiveResponse = (title: string, rawText: string, footer: string, opts?: { expectedVersion?: number; skipWhenFinalized?: boolean; isAlreadyHtml?: boolean; skipTruncation?: boolean; replyMarkup?: any }): Promise<void> =>
+        enqueueResponse(async () => {
+            if (opts?.skipWhenFinalized && isFinalized) return;
+            if (opts?.expectedVersion !== undefined && opts.expectedVersion !== liveResponseUpdateVersion) return;
+            const text = buildLiveResponseText(title, rawText, footer, opts?.isAlreadyHtml, opts?.skipTruncation);
+            const renderKey = `${title}|${rawText.slice(0, 200)}|${footer}|${opts?.replyMarkup ? 'with-markup' : 'no-markup'}`;
+            if (renderKey === lastLiveResponseKey && liveResponseMsgId) return;
+            lastLiveResponseKey = renderKey;
+
+            if (liveResponseMsgId) {
+                await editMsg(liveResponseMsgId, text, opts?.replyMarkup);
+            } else {
+                liveResponseMsgId = await sendMsg(text, opts?.replyMarkup);
+            }
+        }, 'upsert-response');
+
+    const refreshProgress = (title: string, footer: string, opts?: { expectedVersion?: number; skipWhenFinalized?: boolean }): Promise<void> =>
+        enqueueActivity(async () => {
+            if (opts?.skipWhenFinalized && isFinalized) return;
+            if (opts?.expectedVersion !== undefined && opts.expectedVersion !== liveActivityUpdateVersion) return;
+            const text = buildProgressMessage(title, footer);
+            const bodySnap = progressLog.length + '|' + thinkingActive + '|' + title + '|' + footer;
+            if (bodySnap === lastLiveActivityKey && liveActivityMsgId) return;
+            lastLiveActivityKey = bodySnap;
+
+            const keyboard = isFinalized ? undefined : stopKeyboard;
+            if (liveActivityMsgId) {
+                await editMsg(liveActivityMsgId, text, keyboard);
+            } else {
+                liveActivityMsgId = await sendMsg(text, keyboard);
+            }
+        }, 'upsert-activity');
+
+    const setProgressMessage = (htmlContent: string, opts?: { expectedVersion?: number }): Promise<void> =>
+        enqueueActivity(async () => {
+            if (opts?.expectedVersion !== undefined && opts.expectedVersion !== liveActivityUpdateVersion) return;
+            lastLiveActivityKey = htmlContent.slice(0, 200);
+            if (liveActivityMsgId) {
+                await editMsg(liveActivityMsgId, htmlContent, undefined);
+            } else {
+                liveActivityMsgId = await sendMsg(htmlContent, undefined);
+            }
+        }, 'upsert-activity');
+
+    const sendGeneratedImages = async (responseText: string): Promise<void> => {
+        const imageIntentPattern = /(image|images|png|jpg|jpeg|gif|webp|illustration|diagram|render)/i;
+        const imageUrlPattern = /https?:\/\/\S+\.(png|jpg|jpeg|gif|webp)/i;
+        if (!imageIntentPattern.test(userPrompt) && !responseText.includes('![') && !imageUrlPattern.test(responseText)) return;
+
+        const extracted = await cdp.extractLatestResponseImages(MAX_OUTBOUND_GENERATED_IMAGES);
+        if (extracted.length === 0) return;
+
+        for (let i = 0; i < extracted.length; i++) {
+            const file = await toTelegramInputFile(extracted[i], i);
+            if (file) {
+                try {
+                    await api.sendPhoto(channel.chatId, new InputFile(file.buffer, file.name), {
+                        caption: `🖼️ Generated image (${i + 1}/${extracted.length})`,
+                        message_thread_id: channel.threadId,
+                    });
+                } catch (e) { logger.error('[mirror:sendImages] Failed:', e); }
+            }
+        }
+    };
+
+    const tryEmergencyExtractText = async (): Promise<string> => {
+        try {
+            const contextId = cdp.getPrimaryContextId();
+            const expression = `(() => {
+                const panel = document.querySelector('.antigravity-agent-side-panel');
+                const scope = panel || document;
+                const candidateSelectors = ['.rendered-markdown', '.leading-relaxed.select-text', '.flex.flex-col.gap-y-3', '[data-message-author-role="assistant"]', '[data-message-role="assistant"]', '[class*="assistant-message"]', '[class*="message-content"]', '[class*="markdown-body"]', '.prose'];
+                const looksLikeActivity = (text) => { const n = (text || '').trim().toLowerCase(); if (!n) return true; return /^(?:analy[sz]ing|reading|writing|running|searching|planning|thinking|processing|loading|executing|testing|debugging|analyzed|read|wrote|ran)/i.test(n) && n.length <= 220; };
+                const clean = (text) => (text || '').replace(/\\r/g, '').replace(/\\n{3,}/g, '\\n\\n').trim();
+                const candidates = []; const seen = new Set();
+                for (const selector of candidateSelectors) { const nodes = scope.querySelectorAll(selector); for (const node of nodes) { if (!node || seen.has(node)) continue; seen.add(node); candidates.push(node); } }
+                for (let i = candidates.length - 1; i >= 0; i--) { const node = candidates[i]; const text = clean(node.innerText || node.textContent || ''); if (!text || text.length < 20) continue; if (looksLikeActivity(text)) continue; if (/^(good|bad)$/i.test(text)) continue; return text; }
+                return '';
+            })()`;
+            const callParams: Record<string, unknown> = { expression, returnByValue: true, awaitPromise: true };
+            if (contextId !== null) callParams.contextId = contextId;
+            const res = await cdp.call('Runtime.evaluate', callParams);
+            const value = res?.result?.value;
+            return typeof value === 'string' ? value.trim() : '';
+        } catch (e) { logger.debug('[mirror:emergency] Failed:', e); return ''; }
+    };
+
+    let monitor: ResponseMonitor | null = null;
+    let resolveMonitorDone!: () => void;
+    const monitorDone = new Promise<void>(resolve => { resolveMonitorDone = resolve; });
+
+    try {
+        const startTime = Date.now();
+        const progressTitle = () => `🧠 [IDE] · ${modelLabel}`;
+        const progressFooter = () => `⏱️ ${Math.round((Date.now() - startTime) / 1000)}s`;
+
+        let lastProgressTrigger = 0;
+        let progressTriggerTimeout: NodeJS.Timeout | null = null;
+
+        const triggerProgressRefresh = (): void => {
+            const now = Date.now();
+            if (now - lastProgressTrigger >= 3000) {
+                if (progressTriggerTimeout) { clearTimeout(progressTriggerTimeout); progressTriggerTimeout = null; }
+                lastProgressTrigger = now;
+                liveActivityUpdateVersion += 1;
+                const v = liveActivityUpdateVersion;
+                refreshProgress(progressTitle(), progressFooter(), { expectedVersion: v, skipWhenFinalized: true }).catch(() => { });
+            } else if (!progressTriggerTimeout) {
+                progressTriggerTimeout = setTimeout(() => {
+                    progressTriggerTimeout = null;
+                    if (isFinalized) return;
+                    lastProgressTrigger = Date.now();
+                    liveActivityUpdateVersion += 1;
+                    const v = liveActivityUpdateVersion;
+                    refreshProgress(progressTitle(), progressFooter(), { expectedVersion: v, skipWhenFinalized: true }).catch(() => { });
+                }, 3000 - (now - lastProgressTrigger));
+            }
+        };
+
+        elapsedTimer = setInterval(() => {
+            if (isFinalized) return;
+            triggerProgressRefresh();
+        }, 1000);
+
+        monitor = new ResponseMonitor({
+            cdpService: cdp,
+            pollIntervalMs: 2000,
+            maxDurationMs: 1800000,
+            stopGoneConfirmCount: 3,
+            onPhaseChange: () => { },
+            onProcessLog: (logText) => {
+                if (isFinalized) return;
+                const trimmed = (logText || '').trim();
+                if (!trimmed || isJunkEntry(trimmed)) return;
+                const formatted = formatActivityLine(trimmed);
+                if (formatted) {
+                    progressLog.push({ kind: 'activity', text: formatted });
+                    trimProgressLog();
+                    triggerProgressRefresh();
+                }
+            },
+            onThinkingLog: (thinkingText) => {
+                if (isFinalized) return;
+                const trimmed = (thinkingText || '').trim();
+                if (!trimmed) return;
+                logger.debug('[mirror] onThinkingLog received:', trimmed.slice(0, 100));
+
+                const stripped = trimmed.replace(/^[^a-zA-Z]+/, '');
+                if (/^thinking\.{0,3}$/i.test(stripped)) {
+                    thinkingActive = true;
+                } else if (/^thought for\s/i.test(stripped)) {
+                    thinkingActive = false;
+                    lastThoughtLabel = trimmed;
+                    progressLog.push({ kind: 'thought', text: trimmed });
+                    trimProgressLog();
+                } else {
+                    thinkingContentParts.push(trimmed);
+                    const firstLine = trimmed.split('\n')[0].trim();
+                    const heading = firstLine.length > 60 ? firstLine.slice(0, 57) + '...' : firstLine;
+                    let merged = false;
+                    for (let i = progressLog.length - 1; i >= 0; i--) {
+                        if (progressLog[i].kind === 'thought') {
+                            if (!progressLog[i].text.includes(' — ')) {
+                                progressLog[i].text += ` — ${heading}`;
+                                merged = true;
+                            }
+                            break;
+                        }
+                    }
+                    if (!merged && heading.length > 10) {
+                        progressLog.push({ kind: 'thought-content', text: heading });
+                        trimProgressLog();
+                    }
+                }
+                triggerProgressRefresh();
+            },
+            onProgress: (text) => {
+                if (isFinalized) return;
+                const isStructured = monitor?.getLastExtractionSource() === 'structured';
+                const separated = isStructured ? { output: text, logs: '' } : splitOutputAndLogs(text);
+                if (separated.output && separated.output.trim().length > 0) {
+                    lastProgressText = separated.output;
+                    liveResponseUpdateVersion += 1;
+                    upsertLiveResponse('', lastProgressText, '', { expectedVersion: liveResponseUpdateVersion, isAlreadyHtml: isStructured, skipWhenFinalized: true }).catch(() => {});
+                }
+            },
+            onComplete: async (finalText, meta) => {
+                if (isFinalized) return;
+                isFinalized = true;
+                if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+                const wasStoppedByUser = userStopRequestedChannels.delete(channelKey(channel));
+                if (wasStoppedByUser) {
+                    logger.info(`[mirror:${monitorTraceId}] Stopped by user`);
+                    await sendMsg('⏹️ Generation stopped.');
+                    resolveMonitorDone?.();
+                    return;
+                }
+
+                try {
+                    const elapsed = Math.round((Date.now() - startTime) / 1000);
+                    const isQuotaError = monitor!.getPhase() === 'quotaReached' || monitor!.getQuotaDetected();
+
+                    if (isQuotaError) {
+                        liveActivityUpdateVersion += 1;
+                        thinkingActive = false;
+                        await setProgressMessage(`<b>⚠️ [IDE] · Quota Reached</b>\n\n${buildProgressBody()}\n\n<i>⏱️ ${elapsed}s</i>`, { expectedVersion: liveActivityUpdateVersion });
+                        liveResponseUpdateVersion += 1;
+                        await upsertLiveResponse('⚠️ Quota Reached', 'Model quota limit reached. Please wait or switch to a different model.', `⏱️ ${elapsed}s`, { expectedVersion: liveResponseUpdateVersion });
+                        resolveMonitorDone();
+                        return;
+                    }
+
+                    let freshText = '';
+                    let freshIsHtml = false;
+                    try {
+                        const contextId = cdp.getPrimaryContextId();
+                        const evalParams: Record<string, unknown> = {
+                            expression: extractAssistantSegmentsPayloadScript(),
+                            returnByValue: true,
+                            awaitPromise: true,
+                        };
+                        if (contextId !== null && contextId !== undefined) evalParams.contextId = contextId;
+                        const freshResult = await cdp.call('Runtime.evaluate', evalParams);
+                        const freshClassified = classifyAssistantSegments(freshResult?.result?.value);
+                        if (freshClassified.diagnostics.source === 'dom-structured' && freshClassified.finalOutputText.trim()) {
+                            freshText = freshClassified.finalOutputText.trim();
+                            freshIsHtml = true;
+                        }
+                    } catch (e) { logger.debug('[mirror:onComplete] Fresh structured extraction failed:', e); }
+
+                    const polledText = (finalText && finalText.trim().length > 0) ? finalText : lastProgressText;
+                    const bestPolled = polledText && polledText.trim().length > 0 ? polledText : '';
+                    let finalResponseText: string;
+                    let isAlreadyHtml: boolean;
+                    if (freshText && freshText.length >= bestPolled.length) {
+                        finalResponseText = freshText;
+                        isAlreadyHtml = freshIsHtml;
+                    } else if (bestPolled) {
+                        finalResponseText = bestPolled;
+                        isAlreadyHtml = meta?.source === 'structured';
+                    } else {
+                        finalResponseText = await tryEmergencyExtractText();
+                        isAlreadyHtml = false;
+                    }
+                    const separated = isAlreadyHtml ? { output: finalResponseText, logs: '' } : splitOutputAndLogs(finalResponseText);
+                    const finalOutputText = separated.output || finalResponseText;
+
+                    try {
+                        const thinkExtract = await cdp.call('Runtime.evaluate', {
+                            expression: `(function() {
+                                var panel = document.querySelector('.antigravity-agent-side-panel');
+                                var scope = panel || document;
+                                var details = scope.querySelectorAll('details');
+                                var blocks = [];
+                                for (var i = 0; i < details.length; i++) {
+                                    var d = details[i];
+                                    var summary = d.querySelector('summary');
+                                    if (!summary) continue;
+                                    var rawLabel = (summary.textContent || '').trim();
+                                    var stripped = rawLabel.replace(/^[^a-zA-Z]+/, '');
+                                    if (!/^(?:thought for|thinking)\\b/i.test(stripped)) continue;
+                                    var wasOpen = d.open;
+                                    if (!wasOpen) d.open = true;
+                                    var children = d.children;
+                                    var parts = [];
+                                    for (var c = 0; c < children.length; c++) {
+                                        if (children[c].tagName === 'SUMMARY' || children[c].tagName === 'STYLE') continue;
+                                        var t = (children[c].innerText || children[c].textContent || '').trim();
+                                        if (t && t.length >= 5) parts.push(t);
+                                    }
+                                    if (parts.length === 0) {
+                                        var fullText = (d.innerText || d.textContent || '').trim();
+                                        var bodyText = fullText.replace(rawLabel, '').trim();
+                                        if (bodyText && bodyText.length >= 5) parts.push(bodyText);
+                                    }
+                                    if (!wasOpen) d.open = false;
+                                    blocks.push({ label: rawLabel, body: parts.join('\\n\\n') });
+                                }
+                                return blocks;
+                            })()`,
+                            returnByValue: true,
+                        });
+                        const thinkBlocks: Array<{ label: string; body: string }> = Array.isArray(thinkExtract?.result?.value) ? thinkExtract.result.value : [];
+                        if (thinkBlocks.length > 0) {
+                            const accumulatedBody = thinkingContentParts.join('\n\n');
+                            const sections: string[] = [];
+                            for (const block of thinkBlocks) {
+                                const label = block.label || lastThoughtLabel || 'Thinking';
+                                const body = block.body || accumulatedBody || '';
+                                if (body) {
+                                    sections.push(`  💭 <b>${escapeHtml(label)}</b>\n\n<i>${escapeHtml(body)}</i>`);
+                                } else {
+                                    sections.push(`  💭 <b>${escapeHtml(label)}</b>`);
+                                }
+                            }
+                            const combined = sections.join('\n\n');
+                            const maxThinkLen = TELEGRAM_MSG_LIMIT - 100;
+                            const trimmed = combined.length > maxThinkLen ? combined.slice(0, maxThinkLen) + '...' : combined;
+                            const thinkMsg = `<blockquote expandable>${trimmed}</blockquote>`;
+                            await sendMsg(thinkMsg);
+                        }
+                    } catch (e) { logger.error('[mirror] Failed to send thinking block:', e); }
+
+                    liveActivityUpdateVersion += 1;
+                    thinkingActive = false;
+                    const completedBody = buildProgressBody();
+                    await setProgressMessage(`<b>🧠 [IDE] · ${escapeHtml(modelLabel)} · ${elapsed}s</b>\n\n${completedBody}`, { expectedVersion: liveActivityUpdateVersion });
+
+                    const undoKeyboard = new InlineKeyboard().text('↩️ ' + t('Undo'), 'undo_last');
+
+                    liveResponseUpdateVersion += 1;
+                    if (finalOutputText && finalOutputText.trim().length > 0) {
+                        const footer = `⏱️ ${elapsed}s`;
+                        await sendChunkedResponse('', footer, finalOutputText, isAlreadyHtml, undoKeyboard);
+                    } else {
+                        await upsertLiveResponse(`${PHASE_ICONS.complete} Complete`, t('Failed to extract response. Use /screenshot to verify.'), `⏱️ ${elapsed}s`, { expectedVersion: liveResponseUpdateVersion, replyMarkup: undoKeyboard });
+                    }
+
+                    try {
+                        const sessionInfo = await options.chatSessionService.getCurrentSessionInfo(cdp);
+                        if (sessionInfo && sessionInfo.hasActiveChat && sessionInfo.title && sessionInfo.title !== t('(Untitled)')) {
+                            const session = options.chatSessionRepo.findByChannelId(channelKey(channel));
+                            const projName = session
+                                ? bridge.pool.extractProjectName(session.workspacePath)
+                                : cdp.getCurrentWorkspaceName();
+                            if (projName) {
+                                registerApprovalSessionChannel(bridge, projName, sessionInfo.title, channel);
+                            }
+
+                            if (session && session.displayName !== sessionInfo.title) {
+                                const newName = options.titleGenerator.sanitizeForChannelName(sessionInfo.title);
+                                const formattedName = `${session.sessionNumber}-${newName}`;
+                                const threadId = session.channelId.includes(':')
+                                    ? Number(session.channelId.split(':')[1])
+                                    : undefined;
+                                if (threadId) {
+                                    options.topicManager.setChatId(Number(session.channelId.split(':')[0]));
+                                    await options.topicManager.renameTopic(threadId, formattedName);
+                                    options.chatSessionRepo.updateDisplayName(channelKey(channel), sessionInfo.title);
+                                    logger.info(`[mirror] Sync: Thread renamed to ${formattedName}`);
+                                }
+                            }
+                        }
+                    } catch (e) { logger.error('[mirror] Failed to sync session title:', e); }
+
+                    await sendGeneratedImages(finalOutputText);
+                } catch (e: any) {
+                    logger.error('[mirror:onComplete] Failed:', e);
+                } finally {
+                    resolveMonitorDone();
+                }
+            },
+            onTimeout: async (lastText) => {
+                if (isFinalized) return;
+                isFinalized = true;
+                if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+                const elapsed = Math.round((Date.now() - startTime) / 1000);
+                liveActivityUpdateVersion += 1;
+                await setProgressMessage(`<b>⏰ Timeout</b>\n\n<i>⏱️ ${elapsed}s</i>`, { expectedVersion: liveActivityUpdateVersion });
+                resolveMonitorDone();
+            },
+        });
+
+        await monitor.startPassive();
+    } catch (e: any) {
+        isFinalized = true;
+        if (elapsedTimer) { clearInterval(elapsedTimer); }
+        if (monitor) { await monitor.stop().catch(() => {}); }
+        resolveMonitorDone();
+        await sendEmbed(`${PHASE_ICONS.error} Error`, t(`Error occurred during processing: ${e.message}`));
+    }
+
+    return monitorDone;
+}
+
 // =============================================================================
 // Bot main entry point
 // =============================================================================
@@ -1035,6 +1624,33 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 ensureApprovalDetector(bridge, cdp, projectName);
                 ensureErrorPopupDetector(bridge, cdp, projectName);
                 ensurePlanningDetector(bridge, cdp, projectName);
+
+                const onUserMessageCallback = (info: any) => {
+                    logger.info(`[UserMessageDetector:${projectName}] Detected user message from IDE: "${info.text.slice(0, 50)}..."`);
+                    
+                    if (promptDispatcher.isBusy(channel, cdp)) {
+                        logger.debug(`[UserMessageDetector:${projectName}] Workspace is busy, skipping user message mirror.`);
+                        return;
+                    }
+
+                    // 1. Send the user message to the Telegram channel
+                    const userMsgText = `👤 [IDE]: ${info.text}`;
+                    bot.api.sendMessage(channel.chatId, userMsgText, {
+                        message_thread_id: channel.threadId,
+                    }).catch(e => logger.error('[UserMessageDetector] Failed to send user message to TG:', e));
+
+                    // 2. Start mirroring the response using acquireLock to block TG commands
+                    const mirrorPromise = mirrorResponseToTelegram(bridge, channel, cdp, info.text, {
+                        chatSessionService,
+                        chatSessionRepo,
+                        topicManager,
+                        titleGenerator,
+                        modelService
+                    });
+
+                    promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
+                };
+                ensureUserMessageDetector(bridge, cdp, projectName, onUserMessageCallback);
             },
         });
 
@@ -1071,7 +1687,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             `/mode — ` + t('Change execution mode') + `\n` +
             `/model — ` + t('Change LLM model') + `\n\n` +
             `<b>📁 ` + t('Projects') + `</b>\n` +
-            `/project — ` + t('Select a project') + `\n\n` +
+            `/project — ` + t('Select a project') + `\n` +
+            `/setworkspacedir — ` + t('Change workspace base directory') + `\n\n` +
             `<b>📝 ` + t('Templates') + `</b>\n` +
             `/template — ` + t('Show templates') + `\n` +
             `/template_add — ` + t('Register a template') + `\n` +
@@ -1143,6 +1760,24 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         if (!name) { await ctx.reply('Usage: /template_delete <name>'); return; }
         const result = await slashCommandHandler.handleCommand('template', ['delete', name]);
         await ctx.reply(result.message);
+    });
+
+
+    // /setworkspacedir command
+    bot.command('setworkspacedir', async (ctx) => {
+        const newPath = (ctx.match || '').trim();
+        if (!newPath) {
+            await ctx.reply(`Usage: /setworkspacedir <path>\nCurrent base directory: ${workspaceService.getBaseDir()}`);
+            return;
+        }
+
+        try {
+            workspaceService.setBaseDir(newPath);
+            ConfigLoader.save({ workspaceBaseDir: newPath });
+            await ctx.reply(`✅ Workspace base directory updated to:\n<code>${newPath}</code>`, { parse_mode: 'HTML' });
+        } catch (e: any) {
+            await ctx.reply(`⚠️ Failed to update workspace base directory: ${e.message}`);
+        }
     });
 
     // /status command

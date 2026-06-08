@@ -119,5 +119,6 @@
   "Last changes successfully rolled back in IDE.": "Последние изменения успешно отменены в IDE.",
   "Undo button not found": "Кнопка Undo не найдена",
   "Failed to rollback": "Не удалось отменить изменения",
-  "Rolling back last changes...": "Откат последних изменений..."
+  "Rolling back last changes...": "Откат последних изменений...",
+  "Change workspace base directory": "Изменить базовую директорию проектов"
 }
