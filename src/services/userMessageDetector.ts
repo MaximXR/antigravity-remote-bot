@@ -38,24 +38,28 @@ const DETECT_USER_MESSAGE_SCRIPT = `(() => {
     const panel = document.querySelector('.antigravity-agent-side-panel');
     const scope = panel || document;
 
-    // Strategy A (primary): Query .whitespace-pre-wrap elements directly inside
-    // user bubble containers. This avoids the parent-container problem where
-    // querySelectorAll matches a wrapper that contains multiple bubbles.
-    const textEls = scope.querySelectorAll(
-        '[class*="bg-gray-500/15"][class*="select-text"] .whitespace-pre-wrap'
-    );
+    // Strategy A (primary): Query based on the modern data-testid="user-input-step"
+    const textEls = Array.from(scope.querySelectorAll(
+        '[data-testid="user-input-step"] .whitespace-pre-wrap, [class*="user-input-step"] .whitespace-pre-wrap'
+    ));
 
-    if (textEls.length > 0) {
-        const lastTextEl = textEls[textEls.length - 1];
+    // Fallback to the older bg-gray-500/15 bubble style
+    const legacyEls = Array.from(scope.querySelectorAll(
+        '[class*="bg-gray-500/15"][class*="select-text"] .whitespace-pre-wrap'
+    ));
+
+    const combinedEls = [...textEls, ...legacyEls];
+
+    if (combinedEls.length > 0) {
+        const lastTextEl = combinedEls[combinedEls.length - 1];
         const text = (lastTextEl.textContent || '').trim();
         if (text.length > 0) return { text };
     }
 
-    // Strategy B (fallback): Find individual bubble containers, filtering out
-    // any element that itself contains nested bubble elements (i.e., a parent wrapper).
+    // Strategy B (fallback)
     const userBubbles = Array.from(scope.querySelectorAll(
-        '[class*="bg-gray-500/15"][class*="rounded-lg"][class*="select-text"]'
-    )).filter(el => !el.querySelector('[class*="bg-gray-500/15"][class*="select-text"]'));
+        '[data-testid="user-input-step"], [class*="user-input-step"], [class*="bg-gray-500/15"][class*="rounded-lg"][class*="select-text"]'
+    )).filter(el => !el.querySelector('[data-testid="user-input-step"], [class*="user-input-step"], [class*="bg-gray-500/15"][class*="select-text"]'));
 
     if (userBubbles.length === 0) return null;
 
