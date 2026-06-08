@@ -81,5 +81,11 @@
   "Fast Mode — for simple tasks": "Fast Mode — for simple tasks",
   "Plan Mode — for complex step-by-step tasks": "Plan Mode — for complex step-by-step tasks",
   "⚠️ Mode name not specified. Available modes: ": "⚠️ Mode name not specified. Available modes: ",
-  "⚠️ Invalid mode \"${modeName}\". Available modes: ${AVAILABLE_MODES.join(', ')}": "⚠️ Invalid mode \"${modeName}\". Available modes: ${AVAILABLE_MODES.join(', ')}"
+  "⚠️ Invalid mode \"${modeName}\". Available models/modes: ${AVAILABLE_MODES.join(', ')}": "⚠️ Invalid mode \"${modeName}\". Available modes: ${AVAILABLE_MODES.join(', ')}",
+  "Undo": "Undo",
+  "Rolling back changes in Antigravity...": "Rolling back changes in Antigravity...",
+  "Last changes successfully rolled back in IDE.": "Last changes successfully rolled back in IDE.",
+  "Undo button not found": "Undo button not found",
+  "Failed to rollback": "Failed to rollback",
+  "Rolling back last changes...": "Rolling back last changes..."
 }

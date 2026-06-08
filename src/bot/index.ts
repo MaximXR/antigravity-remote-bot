@@ -232,14 +232,14 @@ async function sendPromptToAntigravity(
     }, 'send-embed');
 
     /** Send a potentially long response, splitting into chunks and attaching a .md file if needed. */
-    const sendChunkedResponse = async (title: string, footer: string, rawBody: string, isAlreadyHtml: boolean): Promise<void> => {
+    const sendChunkedResponse = async (title: string, footer: string, rawBody: string, isAlreadyHtml: boolean, replyMarkup?: any): Promise<void> => {
         const formattedBody = isAlreadyHtml ? rawBody : formatForTelegram(rawBody);
         const titleLine = title ? `<b>${escapeHtml(title)}</b>\n\n` : '';
         const footerLine = footer ? `\n\n<i>${escapeHtml(footer)}</i>` : '';
         const fullMsg = `${titleLine}${formattedBody}${footerLine}`;
 
         if (fullMsg.length <= TELEGRAM_MSG_LIMIT) {
-            await upsertLiveResponse(title, rawBody, footer, { expectedVersion: liveResponseUpdateVersion, isAlreadyHtml, skipTruncation: true });
+            await upsertLiveResponse(title, rawBody, footer, { expectedVersion: liveResponseUpdateVersion, isAlreadyHtml, skipTruncation: true, replyMarkup });
             return;
         }
 
@@ -250,12 +250,14 @@ async function sendPromptToAntigravity(
 
         for (let pi = 0; pi < inlineCount; pi++) {
             const partLabel = hasFile ? `(${pi + 1}/${inlineCount}+file)` : `(${pi + 1}/${total})`;
+            const isLast = (pi === inlineCount - 1);
+            const currentMarkup = isLast && !hasFile ? replyMarkup : undefined;
             if (pi === 0) {
                 const firstTitle = title ? `${title} ${partLabel}` : partLabel;
-                await upsertLiveResponse(firstTitle, bodyChunks[pi], footer, { expectedVersion: liveResponseUpdateVersion, isAlreadyHtml: true, skipTruncation: true });
+                await upsertLiveResponse(firstTitle, bodyChunks[pi], footer, { expectedVersion: liveResponseUpdateVersion, isAlreadyHtml: true, skipTruncation: true, replyMarkup: currentMarkup });
             } else {
                 const partFooter = footer ? `${escapeHtml(footer)} ${partLabel}` : partLabel;
-                await sendMsg(`${bodyChunks[pi]}\n\n<i>${partFooter}</i>`);
+                await sendMsg(`${bodyChunks[pi]}\n\n<i>${partFooter}</i>`, currentMarkup);
             }
         }
 
@@ -267,6 +269,7 @@ async function sendPromptToAntigravity(
                 await api.sendDocument(channel.chatId, new InputFile(buf, `response-${timestamp}.md`), {
                     caption: `📄 Full response (${rawBody.length} chars)`,
                     message_thread_id: channel.threadId,
+                    reply_markup: replyMarkup,
                 });
             } catch (e) { logger.error('[sendPrompt] Failed to send response file:', e); }
         }
@@ -390,19 +393,19 @@ async function sendPromptToAntigravity(
         return `${titleLine}${truncated}${footerLine}`;
     };
 
-    const upsertLiveResponse = (title: string, rawText: string, footer: string, opts?: { expectedVersion?: number; skipWhenFinalized?: boolean; isAlreadyHtml?: boolean; skipTruncation?: boolean }): Promise<void> =>
+    const upsertLiveResponse = (title: string, rawText: string, footer: string, opts?: { expectedVersion?: number; skipWhenFinalized?: boolean; isAlreadyHtml?: boolean; skipTruncation?: boolean; replyMarkup?: any }): Promise<void> =>
         enqueueResponse(async () => {
             if (opts?.skipWhenFinalized && isFinalized) return;
             if (opts?.expectedVersion !== undefined && opts.expectedVersion !== liveResponseUpdateVersion) return;
             const text = buildLiveResponseText(title, rawText, footer, opts?.isAlreadyHtml, opts?.skipTruncation);
-            const renderKey = `${title}|${rawText.slice(0, 200)}|${footer}`;
+            const renderKey = `${title}|${rawText.slice(0, 200)}|${footer}|${opts?.replyMarkup ? 'with-markup' : 'no-markup'}`;
             if (renderKey === lastLiveResponseKey && liveResponseMsgId) return;
             lastLiveResponseKey = renderKey;
 
             if (liveResponseMsgId) {
-                await editMsg(liveResponseMsgId, text);
+                await editMsg(liveResponseMsgId, text, opts?.replyMarkup);
             } else {
-                liveResponseMsgId = await sendMsg(text);
+                liveResponseMsgId = await sendMsg(text, opts?.replyMarkup);
             }
         }, 'upsert-response');
 
@@ -766,12 +769,14 @@ async function sendPromptToAntigravity(
                     const completedBody = buildProgressBody();
                     await setProgressMessage(`<b>${PHASE_ICONS.complete} ${escapeHtml(modelLabel)} · ${elapsed}s</b>\n\n${completedBody}`, { expectedVersion: liveActivityUpdateVersion });
 
+                    const undoKeyboard = new InlineKeyboard().text('↩️ ' + t('Undo'), 'undo_last');
+
                     liveResponseUpdateVersion += 1;
                     if (finalOutputText && finalOutputText.trim().length > 0) {
                         const footer = `⏱️ ${elapsed}s`;
-                        await sendChunkedResponse('', footer, finalOutputText, isAlreadyHtml);
+                        await sendChunkedResponse('', footer, finalOutputText, isAlreadyHtml, undoKeyboard);
                     } else {
-                        await upsertLiveResponse(`${PHASE_ICONS.complete} Complete`, t('Failed to extract response. Use /screenshot to verify.'), `⏱️ ${elapsed}s`, { expectedVersion: liveResponseUpdateVersion });
+                        await upsertLiveResponse(`${PHASE_ICONS.complete} Complete`, t('Failed to extract response. Use /screenshot to verify.'), `⏱️ ${elapsed}s`, { expectedVersion: liveResponseUpdateVersion, replyMarkup: undoKeyboard });
                     }
 
                     if (options) {
@@ -820,8 +825,10 @@ async function sendPromptToAntigravity(
                         ? `${separated.output}\n\n[Monitor Ended] Timeout after 30 minutes.`
                         : 'Monitor ended after 30 minutes. No text was retrieved.';
 
+                    const undoKeyboard = new InlineKeyboard().text('↩️ ' + t('Undo'), 'undo_last');
+
                     liveResponseUpdateVersion += 1;
-                    await sendChunkedResponse(`${PHASE_ICONS.timeout} Timeout`, `⏱️ ${elapsed}s`, payload, timeoutIsHtml);
+                    await sendChunkedResponse(`${PHASE_ICONS.timeout} Timeout`, `⏱️ ${elapsed}s`, payload, timeoutIsHtml, undoKeyboard);
                     liveActivityUpdateVersion += 1;
                     thinkingActive = false;
                     await setProgressMessage(`<b>${PHASE_ICONS.timeout} ${escapeHtml(modelLabel)} · ${elapsed}s</b>\n\n${buildProgressBody()}`, { expectedVersion: liveActivityUpdateVersion });
@@ -1461,6 +1468,33 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }
     });
 
+    // /undo command
+    bot.command('undo', async (ctx) => {
+        const ch = getChannel(ctx);
+        const resolved = await resolveWorkspaceAndCdp(ch);
+        if (!resolved.ok) {
+            await ctx.reply(resolved.message);
+            return;
+        }
+
+        const statusMsg = await ctx.reply('↩️ ' + t('Rolling back changes in Antigravity...'));
+        try {
+            const rollbackResult = await chatSessionService.rollbackLastChanges(resolved.cdp);
+            
+            // Delete status message
+            await bot.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
+
+            if (rollbackResult.ok) {
+                await ctx.reply('✅ ' + t('Last changes successfully rolled back in IDE.'));
+            } else {
+                await ctx.reply(`❌ ${t('Failed to rollback')}: ${rollbackResult.error || t('Undo button not found')}`);
+            }
+        } catch (e: any) {
+            await bot.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
+            await ctx.reply(`❌ ${t('Failed to rollback')}: ${e.message}`);
+        }
+    });
+
 
     // =============================================================================
     // Callback query handler (inline keyboard buttons)
@@ -1493,6 +1527,34 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 }
             } catch (e: any) {
                 await ctx.answerCallbackQuery({ text: `Error: ${e.message}`, show_alert: true });
+            }
+            return;
+        }
+
+        // Undo last message button click
+        if (data === 'undo_last') {
+            const resolved = await resolveWorkspaceAndCdp(ch);
+            const cdp = (resolved.ok ? resolved.cdp : null) ?? getCurrentCdp(bridge);
+            if (!cdp) {
+                await ctx.answerCallbackQuery({ text: 'Not connected to CDP.' });
+                return;
+            }
+            try {
+                await ctx.answerCallbackQuery({ text: '↩️ ' + t('Rolling back last changes...') });
+                const rollbackResult = await chatSessionService.rollbackLastChanges(cdp);
+                if (rollbackResult.ok) {
+                    await bot.api.sendMessage(ch.chatId, '✅ ' + t('Last changes successfully rolled back in IDE.'), {
+                        message_thread_id: ch.threadId,
+                    });
+                } else {
+                    await bot.api.sendMessage(ch.chatId, `❌ ${t('Failed to rollback')}: ${rollbackResult.error || t('Undo button not found')}`, {
+                        message_thread_id: ch.threadId,
+                    });
+                }
+            } catch (e: any) {
+                await bot.api.sendMessage(ch.chatId, `❌ ${t('Failed to rollback')}: ${e.message}`, {
+                    message_thread_id: ch.threadId,
+                });
             }
             return;
         }
@@ -1618,6 +1680,9 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         { parse_mode: 'HTML', message_thread_id: topicId },
                     );
                     workspaceBindingRepo.upsert({ channelId: key, workspacePath, guildId });
+                    bridge.pool.getOrConnect(fullPath).catch((err: any) => {
+                        logger.warn(`[ProjectSelectTopic] Proactive connection failed for ${workspacePath}:`, err?.message || err);
+                    });
                     await ctx.answerCallbackQuery({ text: `Topic created for: ${workspacePath}` });
                     return;
                 } catch (e: any) {
@@ -1629,6 +1694,10 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             workspaceBindingRepo.upsert({ channelId: key, workspacePath, guildId });
 
             const fullPath = workspaceService.getWorkspacePath(workspacePath);
+            bridge.pool.getOrConnect(fullPath).catch((err: any) => {
+                logger.warn(`[ProjectSelect] Proactive connection failed for ${workspacePath}:`, err?.message || err);
+            });
+
             await ctx.editMessageText(
                 `<b>📁 Project Selected</b>\n\n✅ <b>${escapeHtml(workspacePath)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this project.`,
                 { parse_mode: 'HTML' },
@@ -2153,8 +2222,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         if (session?.isRenamed && session.displayName) {
             const activationResult = await chatSessionService.activateSessionByTitle(resolved.cdp, session.displayName);
             if (!activationResult.ok) {
-                await ctx.reply(`⚠️ Could not route to session (${session.displayName}).`);
-                return;
+                await ctx.reply(`⚠️ Could not route to session (${session.displayName}). Message will be sent to the currently active session.`);
             }
         } else if (session && !session.isRenamed) {
             try { await chatSessionService.startNewChat(resolved.cdp); }

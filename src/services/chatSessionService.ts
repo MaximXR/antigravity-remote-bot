@@ -193,9 +193,9 @@ function buildActivateChatByTitleScript(title: string): string {
         for (const node of nodes) {
             const text = normalize(node.textContent || '');
             if (!text) continue;
-            if (text === wanted) {
+            if (text === wanted || (text.length >= 20 && wanted.slice(0, 20) === text.slice(0, 20))) {
                 exact.push({ node, textLength: text.length });
-            } else if (text.includes(wanted)) {
+            } else if (text.includes(wanted) || (wanted.length >= 15 && wanted.includes(text)) || (text.length >= 15 && wanted.startsWith(text.slice(0, 15)))) {
                 includes.push({ node, textLength: text.length });
             }
         }
@@ -265,11 +265,14 @@ function buildActivateViaPastConversationsScript(title: string): string {
                     if (!pattern) continue;
                     const p = normalize(pattern);
                     const pLoose = normalizeLoose(pattern);
-                    if (
+                    const isMatch = 
                         text === p ||
                         text.includes(p) ||
-                        (pLoose && (textLoose === pLoose || textLoose.includes(pLoose)))
-                    ) {
+                        (text.length >= 15 && p.includes(text)) ||
+                        (pLoose && (textLoose === pLoose || textLoose.includes(pLoose) || (textLoose.length >= 15 && pLoose.includes(textLoose)))) ||
+                        (text.slice(0, 20) === p.slice(0, 20)) ||
+                        (pLoose && textLoose.slice(0, 20) === pLoose.slice(0, 20));
+                    if (isMatch) {
                         matched.push({ el, score: Math.abs(text.length - pattern.length) });
                         break;
                     }
@@ -968,6 +971,73 @@ export class ChatSessionService {
             await new Promise((resolve) => setTimeout(resolve, 150));
         }
         return resolvedAny;
+    }
+
+    /**
+     * Locate and click the last visible Undo (rollback) button in the chat panel.
+     */
+    async rollbackLastChanges(cdpService: CdpService): Promise<{ ok: boolean; error?: string }> {
+        const script = `(() => {
+            const elements = Array.from(document.querySelectorAll('button, [role=\"button\"]'));
+            const undoButtons = [];
+            
+            for (const el of elements) {
+                const text = (el.textContent || '').trim().toLowerCase();
+                const title = (el.getAttribute('title') || '').trim().toLowerCase();
+                const ariaLabel = (el.getAttribute('aria-label') || '').trim().toLowerCase();
+                const tooltip = (el.getAttribute('data-tooltip-content') || '').trim().toLowerCase();
+                const tooltipId = (el.getAttribute('data-tooltip-id') || '').trim().toLowerCase();
+                const html = el.outerHTML.toLowerCase();
+                
+                const isUndo = text.includes('undo') || 
+                               title.includes('undo') || 
+                               ariaLabel.includes('undo') || 
+                               tooltip.includes('undo') || 
+                               tooltipId.includes('undo') ||
+                               html.includes('undo');
+                               
+                if (isUndo) {
+                    undoButtons.push(el);
+                }
+            }
+            
+            if (undoButtons.length === 0) {
+                return { found: false, error: 'No undo buttons found' };
+            }
+            
+            const target = undoButtons[undoButtons.length - 1];
+            const rect = target.getBoundingClientRect();
+            
+            return {
+                found: true,
+                x: Math.round(rect.x + rect.width / 2),
+                y: Math.round(rect.y + rect.height / 2)
+            };
+        })()`;
+
+        try {
+            const contexts = cdpService.getContexts();
+            for (const ctx of contexts) {
+                try {
+                    const res = await cdpService.call('Runtime.evaluate', {
+                        expression: script,
+                        returnByValue: true,
+                        contextId: ctx.id,
+                    });
+                    const val = res?.result?.value;
+                    if (val && val.found && typeof val.x === 'number' && typeof val.y === 'number') {
+                        logger.info(`[ChatSessionService] Clicking Undo button at x=${val.x}, y=${val.y} in context ${ctx.id}`);
+                        await this.cdpMouseClick(cdpService, val.x, val.y);
+                        return { ok: true };
+                    }
+                } catch (_) {
+                    // try next context
+                }
+            }
+            return { ok: false, error: 'Undo button not found' };
+        } catch (err: any) {
+            return { ok: false, error: err?.message || String(err) };
+        }
     }
 
     /**

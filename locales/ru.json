@@ -113,5 +113,11 @@
   "No messages found in history.": "История сообщений пуста.",
   "Load history of the active session": "Подгрузить историю сообщений текущей сессии",
   "You": "Вы",
-  "Assistant": "Ассистент"
+  "Assistant": "Ассистент",
+  "Undo": "Отменить",
+  "Rolling back changes in Antigravity...": "Откат изменений в Antigravity...",
+  "Last changes successfully rolled back in IDE.": "Последние изменения успешно отменены в IDE.",
+  "Undo button not found": "Кнопка Undo не найдена",
+  "Failed to rollback": "Не удалось отменить изменения",
+  "Rolling back last changes...": "Откат последних изменений..."
 }
