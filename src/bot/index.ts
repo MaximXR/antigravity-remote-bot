@@ -2900,15 +2900,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             registerApprovalSessionChannel(bridge, resolved.projectName, session.displayName, ch);
         }
 
-        if (session?.isRenamed && session.displayName) {
-            const activationResult = await chatSessionService.activateSessionByTitle(resolved.cdp, session.displayName);
-            if (!activationResult.ok) {
-                await ctx.reply(`⚠️ Could not route to session (${session.displayName}). Message will be sent to the currently active session.`);
-            }
-        } else if (session && !session.isRenamed) {
-            try { await chatSessionService.startNewChat(resolved.cdp); }
-            catch (e) { logger.debug('[startNewChat] Failed, continuing anyway:', e); }
-        }
+
 
         const userMsgDetector = bridge.pool.getUserMessageDetector?.(resolved.projectName);
         if (userMsgDetector) userMsgDetector.addEchoHash(text);
