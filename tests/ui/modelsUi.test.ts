@@ -36,14 +36,16 @@ describe('modelsUi', () => {
 });
 
 describe('buildModelsUI', () => {
-    it('returns null when no models are available', async () => {
+    it('falls back to AVAILABLE_MODELS when no models are retrieved from CDP', async () => {
         const cdp = {
             getUiModels: jest.fn().mockResolvedValue([]),
             getCurrentModel: jest.fn().mockResolvedValue(null),
         };
 
         const result = await buildModelsUI(cdp as any, async () => []);
-        expect(result).toBeNull();
+        expect(result).not.toBeNull();
+        expect(result!.text).toContain('Model Management');
+        expect(result!.text).toContain('Available Models');
     });
 
     it('returns text and keyboard when models are available', async () => {

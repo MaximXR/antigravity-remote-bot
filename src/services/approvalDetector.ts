@@ -41,21 +41,42 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
     const ALLOW_PATTERNS = ['allow', 'permit', 'run', 'execute', 'accept', 'approve', '許可', '承認', '確認', '実行'];
     const DENY_PATTERNS = ['deny', 'reject', '拒否', 'decline', '却下'];
 
-    const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+    const normalize = (text) => (text || '').toLowerCase().replace(/\\\\s+/g, ' ').trim();
 
-    const allButtons = Array.from(document.querySelectorAll('button'))
-        .filter(btn => btn.offsetParent !== null);
+    const panel = document.querySelector('.antigravity-agent-side-panel');
+    const scope = panel || document;
 
-    let approveBtn = allButtons.find(btn => {
+    const allClickables = Array.from(scope.querySelectorAll('button, span, div, [role="button"]'))
+        .filter(el => {
+            const isButton = el.tagName === 'BUTTON' || el.getAttribute('role') === 'button';
+            const hasCursorPointer = el.classList.contains('cursor-pointer');
+            if (!isButton && !hasCursorPointer) return false;
+
+            const text = (el.textContent || '').trim();
+            if (text.length === 0 || text.length > 30) return false;
+
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return false;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden') return false;
+            return true;
+        });
+
+    const reversedClickables = [...allClickables].reverse();
+
+    let approveBtn = reversedClickables.find(btn => {
         const t = normalize(btn.textContent || '');
         return ALLOW_ONCE_PATTERNS.some(p => t.includes(p));
     }) || null;
 
     if (!approveBtn) {
-        approveBtn = allButtons.find(btn => {
+        approveBtn = reversedClickables.find(btn => {
             const t = normalize(btn.textContent || '');
             const isAlways = ALWAYS_ALLOW_PATTERNS.some(p => t.includes(p));
-            return !isAlways && ALLOW_PATTERNS.some(p => t.includes(p));
+            return !isAlways && ALLOW_PATTERNS.some(p => {
+                if (p === 'accept' && t.includes('accept all')) return true;
+                return t === p || t.includes(p);
+            });
         }) || null;
     }
 
@@ -63,30 +84,41 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
 
     let container = approveBtn.closest('[role="dialog"], .modal, .dialog, .approval-container, .permission-dialog');
     if (!container) {
-        // Walk up ancestors until we find one that also contains a deny button
         let el = approveBtn.parentElement;
         for (let i = 0; i < 6 && el && el !== document.body; i++) {
-            const btns = Array.from(el.querySelectorAll('button')).filter(b => b.offsetParent !== null);
-            if (btns.some(b => DENY_PATTERNS.some(p => normalize(b.textContent || '').includes(p)))) {
+            const clickables = Array.from(el.querySelectorAll('button, span, div, [role="button"]')).filter(b => {
+                const isButton = b.tagName === 'BUTTON' || b.getAttribute('role') === 'button';
+                const hasCursorPointer = b.classList.contains('cursor-pointer');
+                if (!isButton && !hasCursorPointer) return false;
+                const rect = b.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            });
+            if (clickables.some(b => DENY_PATTERNS.some(p => normalize(b.textContent || '').includes(p)))) {
                 container = el;
                 break;
             }
             el = el.parentElement;
         }
     }
-    if (!container) container = document.body;
+    if (!container) container = scope;
 
-    const containerButtons = Array.from(container.querySelectorAll('button'))
-        .filter(btn => btn.offsetParent !== null);
+    const containerClickables = Array.from(container.querySelectorAll('button, span, div, [role="button"]'))
+        .filter(btn => {
+            const isButton = btn.tagName === 'BUTTON' || btn.getAttribute('role') === 'button';
+            const hasCursorPointer = btn.classList.contains('cursor-pointer');
+            if (!isButton && !hasCursorPointer) return false;
+            const rect = btn.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+        });
 
-    const denyBtn = containerButtons.find(btn => {
+    const denyBtn = containerClickables.find(btn => {
         const t = normalize(btn.textContent || '');
         return DENY_PATTERNS.some(p => t.includes(p));
     }) || null;
 
     if (!denyBtn) return null;
 
-    const alwaysAllowBtn = containerButtons.find(btn => {
+    const alwaysAllowBtn = containerClickables.find(btn => {
         const t = normalize(btn.textContent || '');
         return ALWAYS_ALLOW_PATTERNS.some(p => t.includes(p));
     }) || null;
@@ -95,10 +127,7 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
     const alwaysAllowText = alwaysAllowBtn ? (alwaysAllowBtn.textContent || '').trim() : '';
     const denyText = (denyBtn.textContent || '').trim();
 
-    // Description extraction (multiple fallbacks)
     let description = '';
-
-    // 1. p or .description inside dialog/modal
     const dialog = container;
     if (dialog) {
         const descEl = dialog.querySelector('p, .description, [data-testid="description"]');
@@ -107,21 +136,27 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
         }
     }
 
-    // 2. Parent element text (excluding button text)
     if (!description) {
-        const parent = approveBtn.parentElement?.parentElement || approveBtn.parentElement;
-        if (parent) {
-            const clone = parent.cloneNode(true);
-            const buttons = clone.querySelectorAll('button');
-            buttons.forEach(b => b.remove());
-            const parentText = (clone.textContent || '').trim();
-            if (parentText.length > 5 && parentText.length < 500) {
-                description = parentText;
+        let ancestor = approveBtn.parentElement;
+        for (let i = 0; i < 8 && ancestor && ancestor !== scope.parentElement && ancestor !== document.body; i++) {
+            const clone = ancestor.cloneNode(true);
+            const clickables = Array.from(clone.querySelectorAll('button, span, div, [role="button"]'));
+            clickables.forEach(b => {
+                const isButton = b.tagName === 'BUTTON' || b.getAttribute('role') === 'button';
+                const hasCursorPointer = b.classList.contains('cursor-pointer');
+                if (isButton || hasCursorPointer) {
+                    try { b.remove(); } catch (e) {}
+                }
+            });
+            const text = (clone.textContent || '').trim().replace(/\\\\s+/g, ' ');
+            if (text.length > 3 && text.length < 200) {
+                description = text;
+                break;
             }
+            ancestor = ancestor.parentElement;
         }
     }
 
-    // 3. aria-label fallback
     if (!description) {
         const ariaLabel = approveBtn.getAttribute('aria-label') || '';
         if (ariaLabel) description = ariaLabel;
@@ -211,12 +246,20 @@ const EXPAND_ALWAYS_ALLOW_MENU_SCRIPT = `(() => {
 export function buildClickScript(buttonText: string): string {
     const safeText = JSON.stringify(buttonText);
     return `(() => {
-        const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+        const normalize = (text) => (text || '').toLowerCase().replace(/\\\\s+/g, ' ').trim();
         const text = ${safeText};
         const wanted = normalize(text);
-        const allButtons = Array.from(document.querySelectorAll('button'));
-        const target = allButtons.find(btn => {
-            if (!btn.offsetParent) return false;
+        const panel = document.querySelector('.antigravity-agent-side-panel');
+        const scope = panel || document;
+        const allClickables = Array.from(scope.querySelectorAll('button, span, div, [role="button"]'))
+            .filter(el => {
+                const isButton = el.tagName === 'BUTTON' || el.getAttribute('role') === 'button';
+                const hasCursorPointer = el.classList.contains('cursor-pointer');
+                if (!isButton && !hasCursorPointer) return false;
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            });
+        const target = allClickables.find(btn => {
             const buttonText = normalize(btn.textContent || '');
             const ariaLabel = normalize(btn.getAttribute('aria-label') || '');
             return buttonText === wanted ||

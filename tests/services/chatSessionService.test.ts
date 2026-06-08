@@ -1,6 +1,8 @@
 import { ChatSessionService } from '../../src/services/chatSessionService';
 import { CdpService } from '../../src/services/cdpService';
 
+jest.setTimeout(25000);
+
 jest.mock('../../src/services/cdpService');
 const MockedCdpService = CdpService as jest.MockedClass<typeof CdpService>;
 

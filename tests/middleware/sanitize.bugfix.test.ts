@@ -29,7 +29,7 @@ describe('resolveSafePath — bug fix coverage', () => {
     });
 
     it('allows absolute paths inside base', () => {
-        const insidePath = path.join(baseDir, 'project', 'file.txt');
+        const insidePath = path.resolve(baseDir, 'project', 'file.txt');
         expect(resolveSafePath(insidePath, baseDir)).toBe(insidePath);
     });
 

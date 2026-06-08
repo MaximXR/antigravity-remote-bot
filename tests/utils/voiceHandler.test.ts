@@ -7,6 +7,7 @@ const TEMP_VOICE_DIR = path.join(os.tmpdir(), 'remoat-voice');
 // Mock fetch globally
 const mockFetch = jest.fn();
 (global as any).fetch = mockFetch;
+jest.mock('node-fetch', () => mockFetch);
 
 // Mock fs/promises
 jest.mock('fs/promises', () => ({
@@ -55,6 +56,7 @@ describe('voiceHandler', () => {
             expect(mockBotApi.getFile).toHaveBeenCalledWith('voice-file-id-123');
             expect(mockFetch).toHaveBeenCalledWith(
                 'https://api.telegram.org/file/bottest-bot-token/voice/file_0.oga',
+                expect.any(Object),
             );
             expect(fs.mkdir).toHaveBeenCalledWith(TEMP_VOICE_DIR, { recursive: true });
             expect(fs.writeFile).toHaveBeenCalled();

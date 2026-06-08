@@ -773,6 +773,7 @@ async function sendPromptToAntigravity(
                     const undoKeyboard = new InlineKeyboard().text('↩️ ' + t('Undo'), 'undo_last');
 
                     liveResponseUpdateVersion += 1;
+                    liveResponseMsgId = null;
                     if (finalOutputText && finalOutputText.trim().length > 0) {
                         const footer = `⏱️ ${elapsed}s`;
                         await sendChunkedResponse('', footer, finalOutputText, isAlreadyHtml, undoKeyboard);
@@ -829,6 +830,7 @@ async function sendPromptToAntigravity(
                     const undoKeyboard = new InlineKeyboard().text('↩️ ' + t('Undo'), 'undo_last');
 
                     liveResponseUpdateVersion += 1;
+                    liveResponseMsgId = null;
                     await sendChunkedResponse(`${PHASE_ICONS.timeout} Timeout`, `⏱️ ${elapsed}s`, payload, timeoutIsHtml, undoKeyboard);
                     liveActivityUpdateVersion += 1;
                     thinkingActive = false;
@@ -1382,6 +1384,7 @@ async function mirrorResponseToTelegram(
                     const undoKeyboard = new InlineKeyboard().text('↩️ ' + t('Undo'), 'undo_last');
 
                     liveResponseUpdateVersion += 1;
+                    liveResponseMsgId = null;
                     if (finalOutputText && finalOutputText.trim().length > 0) {
                         const footer = `⏱️ ${elapsed}s`;
                         await sendChunkedResponse('', footer, finalOutputText, isAlreadyHtml, undoKeyboard);
@@ -1428,6 +1431,7 @@ async function mirrorResponseToTelegram(
                 isFinalized = true;
                 if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
                 const elapsed = Math.round((Date.now() - startTime) / 1000);
+                liveResponseMsgId = null;
                 liveActivityUpdateVersion += 1;
                 await setProgressMessage(`<b>⏰ Timeout</b>\n\n<i>⏱️ ${elapsed}s</i>`, { expectedVersion: liveActivityUpdateVersion });
                 resolveMonitorDone();

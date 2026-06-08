@@ -95,44 +95,68 @@ export const RESPONSE_SELECTORS = {
         }
 
         return null;
-    })()`,
-    /** Stop button detection via tooltip-id + text fallback */
+    })()`,    /** Stop button detection via tooltip-id + text fallback */
     STOP_BUTTON: `(() => {
         const panel = document.querySelector('.antigravity-agent-side-panel');
         const scopes = [panel, document].filter(Boolean);
 
+        let hasStop = false;
         for (const scope of scopes) {
             const el = scope.querySelector('[data-tooltip-id="input-send-button-cancel-tooltip"]');
-            if (el) return { isGenerating: true };
+            if (el) { hasStop = true; break; }
         }
 
-        const normalize = (value) => (value || '').toLowerCase().replace(/\\s+/g, ' ').trim();
-        const STOP_PATTERNS = [
-            /^stop$/,
-            /^stop generating$/,
-            /^stop response$/,
-            /^停止$/,
-            /^生成を停止$/,
-            /^応答を停止$/,
-        ];
-        const isStopLabel = (value) => {
-            const normalized = normalize(value);
-            if (!normalized) return false;
-            return STOP_PATTERNS.some((re) => re.test(normalized));
-        };
-        for (const scope of scopes) {
-            const buttons = scope.querySelectorAll('button, [role="button"]');
-            for (let i = 0; i < buttons.length; i++) {
-                const btn = buttons[i];
-                const labels = [
-                    btn.textContent || '',
-                    btn.getAttribute('aria-label') || '',
-                    btn.getAttribute('title') || '',
-                ];
-                if (labels.some(isStopLabel)) {
-                    return { isGenerating: true };
+        if (!hasStop) {
+            const normalize = (value) => (value || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+            const STOP_PATTERNS = [
+                /^stop$/,
+                /^stop generating$/,
+                /^stop response$/,
+                /^停止$/,
+                /^生成を停止$/,
+                /^応答を停止$/,
+            ];
+            const isStopLabel = (value) => {
+                const normalized = normalize(value);
+                if (!normalized) return false;
+                return STOP_PATTERNS.some((re) => re.test(normalized));
+            };
+            outer: for (const scope of scopes) {
+                const buttons = scope.querySelectorAll('button, [role="button"]');
+                for (let i = 0; i < buttons.length; i++) {
+                    const btn = buttons[i];
+                    const labels = [
+                        btn.textContent || '',
+                        btn.getAttribute('aria-label') || '',
+                        btn.getAttribute('title') || '',
+                    ];
+                    if (labels.some(isStopLabel)) {
+                        hasStop = true;
+                        break outer;
+                    }
                 }
             }
+        }
+
+        if (hasStop) {
+            // Check if approval card is visible
+            let approvalVisible = false;
+            for (const scope of scopes) {
+                const candidateSpans = Array.from(scope.querySelectorAll('span, button'));
+                for (const el of candidateSpans) {
+                    const txt = (el.textContent || '').trim().toLowerCase();
+                    const isClickable = el.classList.contains('cursor-pointer') || el.tagName === 'BUTTON';
+                    if (isClickable && (txt === 'accept all' || txt === 'reject all' || txt === 'allow once' || txt === 'always allow')) {
+                        approvalVisible = true;
+                        break;
+                    }
+                }
+                if (approvalVisible) break;
+            }
+            if (approvalVisible) {
+                return { isGenerating: false };
+            }
+            return { isGenerating: true };
         }
 
         return { isGenerating: false };
@@ -366,6 +390,25 @@ export const RESPONSE_SELECTORS = {
                         isGenerating = true; break outer;
                     }
                 }
+            }
+        }
+        if (isGenerating) {
+            // Check if approval card is visible in the chat panel
+            let approvalVisible = false;
+            for (const scope of scopes) {
+                const candidateSpans = Array.from(scope.querySelectorAll('span, button'));
+                for (const el of candidateSpans) {
+                    const txt = (el.textContent || '').trim().toLowerCase();
+                    const isClickable = el.classList.contains('cursor-pointer') || el.tagName === 'BUTTON';
+                    if (isClickable && (txt === 'accept all' || txt === 'reject all' || txt === 'allow once' || txt === 'always allow')) {
+                        approvalVisible = true;
+                        break;
+                    }
+                }
+                if (approvalVisible) break;
+            }
+            if (approvalVisible) {
+                isGenerating = false;
             }
         }
 

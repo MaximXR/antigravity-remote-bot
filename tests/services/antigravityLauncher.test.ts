@@ -6,6 +6,7 @@ jest.mock('http', () => ({
 
 import * as http from 'http';
 import { ensureAntigravityRunning } from '../../src/services/antigravityLauncher';
+import { CDP_PORTS } from '../../src/utils/cdpPorts';
 import { logger } from '../../src/utils/logger';
 
 function mockHttpSuccessOnce(port: number): void {
@@ -67,16 +68,16 @@ describe('ensureAntigravityRunning', () => {
 
     it('returns immediately when a port responds (parallel scan)', async () => {
         // All ports are scanned in parallel; mock first as success, rest as errors
-        mockHttpSuccessOnce(9222);
+        mockHttpSuccessOnce(CDP_PORTS[0]);
         mockHttpErrorAlways(); // fallback for remaining ports
 
         await ensureAntigravityRunning();
 
-        // All 6 ports are checked in parallel
-        expect(http.get).toHaveBeenCalledTimes(6);
+        // All ports are checked in parallel
+        expect(http.get).toHaveBeenCalledTimes(CDP_PORTS.length);
         expect(consoleDebugSpy).toHaveBeenCalledWith(
             expect.stringContaining('\x1b[2m[DEBUG]\x1b[0m'),
-            expect.stringContaining('[AntigravityLauncher] OK — Port 9222 responding')
+            expect.stringContaining(`[AntigravityLauncher] OK — Port ${CDP_PORTS[0]} responding`)
         );
         // No warning should be logged since a port was found
         expect(consoleWarnSpy).not.toHaveBeenCalledWith(
@@ -90,7 +91,7 @@ describe('ensureAntigravityRunning', () => {
 
         await ensureAntigravityRunning();
 
-        expect(http.get).toHaveBeenCalledTimes(6);
+        expect(http.get).toHaveBeenCalledTimes(CDP_PORTS.length);
         expect(consoleWarnSpy).toHaveBeenCalledWith(
             expect.stringContaining('\x1b[33m[WARN]\x1b[0m'),
             expect.stringContaining('  Antigravity CDP ports are not responding')
