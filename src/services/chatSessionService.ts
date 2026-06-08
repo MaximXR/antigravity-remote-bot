@@ -464,6 +464,7 @@ export class ChatSessionService {
      */
     async listAllSessions(cdpService: CdpService): Promise<SessionListItem[]> {
         try {
+            await cdpService.ensureSidebarOpen();
             // Step 1: Find Past Conversations button
             const btnState = await this.evaluateOnAnyContext(
                 cdpService, FIND_PAST_CONVERSATIONS_BUTTON_SCRIPT, false,
@@ -567,6 +568,7 @@ export class ChatSessionService {
      */
     async startNewChat(cdpService: CdpService): Promise<{ ok: boolean; error?: string }> {
         try {
+            await cdpService.ensureSidebarOpen();
             // Contexts may be empty right after Antigravity starts.
             // Wait up to 10 seconds for the chat panel to become ready.
             let contexts = cdpService.getContexts();
@@ -674,6 +676,8 @@ export class ChatSessionService {
         if (!title || title.trim().length === 0) {
             return { ok: false, error: 'Session title is empty' };
         }
+
+        await cdpService.ensureSidebarOpen();
 
         const current = await this.getCurrentSessionInfo(cdpService);
         if (current.title.trim().toLowerCase() === title.trim().toLowerCase()) {
@@ -802,6 +806,7 @@ export class ChatSessionService {
         }
         return { ok: false, error: lastError };
     }
+
 
     /**
      * Resolve the VS Code QuickInput dropdown if it appears in any execution context.

@@ -944,6 +944,70 @@ export class CdpService extends EventEmitter {
     }
 
     /**
+     * Ensure the Agent chat sidebar panel is open.
+     * Checks if .antigravity-agent-side-panel is in the DOM; if not, sends Ctrl+Alt+J.
+     */
+    async ensureSidebarOpen(): Promise<boolean> {
+        const checkPanelScript = `!!document.querySelector('.antigravity-agent-side-panel')`;
+        let panelExists = false;
+
+        for (const ctx of this.contexts) {
+            try {
+                const res = await this.call('Runtime.evaluate', {
+                    expression: checkPanelScript,
+                    returnByValue: true,
+                    contextId: ctx.id,
+                });
+                if (res?.result?.value === true) {
+                    panelExists = true;
+                    break;
+                }
+            } catch {
+                // ignore
+            }
+        }
+
+        if (panelExists) {
+            return true;
+        }
+
+        logger.info('[CdpService] Chat sidebar is closed. Attempting to open with Ctrl+Alt+J...');
+
+        // Send Ctrl+Alt+J shortcut
+        // Ctrl: modifier = 2, Alt: modifier = 1. Together = 3.
+        await this.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17, modifiers: 2 });
+        await this.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Alt', code: 'AltLeft', windowsVirtualKeyCode: 18, nativeVirtualKeyCode: 18, modifiers: 3 });
+        await this.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'j', code: 'KeyJ', windowsVirtualKeyCode: 74, nativeVirtualKeyCode: 74, modifiers: 3 });
+        await this.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'j', code: 'KeyJ', windowsVirtualKeyCode: 74, nativeVirtualKeyCode: 74, modifiers: 3 });
+        await this.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Alt', code: 'AltLeft', windowsVirtualKeyCode: 18, nativeVirtualKeyCode: 18, modifiers: 2 });
+        await this.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17, modifiers: 0 });
+
+        // Wait up to 3 seconds for the panel to appear
+        const start = Date.now();
+        while (Date.now() - start < 3000) {
+            for (const ctx of this.contexts) {
+                try {
+                    const res = await this.call('Runtime.evaluate', {
+                        expression: checkPanelScript,
+                        returnByValue: true,
+                        contextId: ctx.id,
+                    });
+                    if (res?.result?.value === true) {
+                        logger.info('[CdpService] Chat sidebar opened successfully.');
+                        return true;
+                    }
+                } catch {
+                    // ignore
+                }
+            }
+            await new Promise(r => setTimeout(r, 200));
+        }
+
+        logger.warn('[CdpService] Failed to open chat sidebar using Ctrl+Alt+J.');
+        return false;
+    }
+
+    /**
      * Focus the chat input field.
      */
     private async focusChatInput(): Promise<{ ok: boolean; contextId?: number; error?: string }> {
@@ -956,22 +1020,30 @@ export class CdpService extends EventEmitter {
             return { ok: true };
         })()`;
 
-        for (const ctx of this.contexts) {
-            try {
-                const res = await this.call('Runtime.evaluate', {
-                    expression: focusScript,
-                    returnByValue: true,
-                    contextId: ctx.id,
-                });
-                if (res?.result?.value?.ok) {
-                    return { ok: true, contextId: ctx.id };
+        const tryFocus = async () => {
+            for (const ctx of this.contexts) {
+                try {
+                    const res = await this.call('Runtime.evaluate', {
+                        expression: focusScript,
+                        returnByValue: true,
+                        contextId: ctx.id,
+                    });
+                    if (res?.result?.value?.ok) {
+                        return { ok: true, contextId: ctx.id };
+                    }
+                } catch {
+                    // Try next context
                 }
-            } catch {
-                // Try next context
             }
-        }
+            return { ok: false };
+        };
 
-        return { ok: false, error: 'Chat input field not found' };
+        let res = await tryFocus();
+        if (!res.ok) {
+            await this.ensureSidebarOpen();
+            res = await tryFocus();
+        }
+        return res.ok ? res : { ok: false, error: 'Chat input field not found' };
     }
 
     /**
