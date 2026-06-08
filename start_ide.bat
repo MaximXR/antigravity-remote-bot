@@ -1,4 +1,6 @@
+@chcp 65001 >nul
 @echo off
+SetLocal EnableExtensions
 rem ============================================================================
 rem Запуск Antigravity IDE с поддержкой отладки (динамический выбор порта)
 rem Starts Antigravity IDE with debugging enabled (dynamic port selection)
@@ -16,10 +18,13 @@ set SCANNED_PORTS=9223 9222 9333 9444 9555 9666 61390 61114 61113
 
 rem 1. Проверяем, запущена ли уже IDE на одном из этих портов
 for %%p in (%SCANNED_PORTS%) do (
-    netstat -ano | find "LISTENING" | find ":%%p " >nul
-    if !errorlevel! equ 0 (
-        echo [INFO] Antigravity IDE is already running and active on port %%p.
-        exit /b 0
+    for /f "tokens=5" %%a in ('netstat -ano ^| find "LISTENING" ^| find ":%%p "') do (
+        set "L_PID=%%a"
+        tasklist /fi "pid eq !L_PID!" /nh | find /i "Antigravity" >nul
+        if !errorlevel! equ 0 (
+            echo [INFO] Antigravity IDE is already running and active on port %%p.
+            exit /b 0
+        )
     )
 )
 

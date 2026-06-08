@@ -1,4 +1,6 @@
+@chcp 65001 >nul
 @echo off
+SetLocal EnableExtensions
 rem ============================================================================
 rem Остановка Remoat Telegram-бота (для фонового/скрытого режима)
 rem Stopping Remoat Telegram Bot (for background/hidden mode)

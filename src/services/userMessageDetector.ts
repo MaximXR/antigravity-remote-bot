@@ -13,8 +13,8 @@ export interface UserMessageDetectorOptions {
     cdpService: CdpService;
     /** Poll interval in milliseconds (default: 2000ms) */
     pollIntervalMs?: number;
-    /** Callback when a new user message is detected */
-    onUserMessage: (info: UserMessageInfo) => void;
+    /** Callback when a new user message is detected. Return false if skipped/not accepted. */
+    onUserMessage: (info: UserMessageInfo) => boolean | void;
 }
 
 /**
@@ -80,7 +80,7 @@ const DETECT_USER_MESSAGE_SCRIPT = `(() => {
  * Normalize text for echo hash comparison.
  * Trims, collapses whitespace, and takes first 200 chars.
  */
-function normalizeForHash(text: string): string {
+export function normalizeForHash(text: string): string {
     return text.trim().replace(/\s+/g, ' ').slice(0, 200);
 }
 
@@ -98,7 +98,7 @@ function computeEchoHash(text: string): string {
 export class UserMessageDetector {
     private readonly cdpService: CdpService;
     private readonly pollIntervalMs: number;
-    private readonly onUserMessage: (info: UserMessageInfo) => void;
+    private readonly onUserMessage: (info: UserMessageInfo) => boolean | void;
 
     private pollTimer: NodeJS.Timeout | null = null;
     private isRunning: boolean = false;
@@ -239,10 +239,14 @@ export class UserMessageDetector {
                     return;
                 }
 
-                this.lastDetectedHash = hash;
-                this.addToSeenHashes(hash);
                 logger.debug(`[UserMessageDetector] New message detected: "${preview}..."`);
-                this.onUserMessage(info);
+                const accepted = this.onUserMessage(info);
+                if (accepted !== false) {
+                    this.lastDetectedHash = hash;
+                    this.addToSeenHashes(hash);
+                } else {
+                    logger.debug(`[UserMessageDetector] Callback rejected message: "${preview}...", not updating lastDetectedHash`);
+                }
             }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);

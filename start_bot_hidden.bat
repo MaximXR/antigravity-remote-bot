@@ -1,4 +1,6 @@
+@chcp 65001 >nul
 @echo off
+SetLocal EnableExtensions
 rem ============================================================================
 rem Скрытый запуск Remoat Telegram-бота (без черного окна консоли)
 rem Hidden Startup for Remoat Telegram Bot (no console window)

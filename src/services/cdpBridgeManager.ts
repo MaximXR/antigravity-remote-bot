@@ -435,7 +435,7 @@ export function ensureUserMessageDetector(
     bridge: CdpBridge,
     cdp: CdpService,
     projectName: string,
-    onUserMessage: (info: UserMessageInfo) => void,
+    onUserMessage: (info: UserMessageInfo) => boolean | void,
 ): void {
     const existing = bridge.pool.getUserMessageDetector(projectName);
     if (existing && existing.isActive()) return;

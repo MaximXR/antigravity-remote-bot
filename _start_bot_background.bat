@@ -1,4 +1,6 @@
+@chcp 65001 >nul
 @echo off
+SetLocal EnableExtensions
 rem ============================================================================
 rem [СЛУЖЕБНЫЙ СКРИПТ] Запуск Telegram-бота в фоновом режиме
 rem [INTERNAL SCRIPT] Starts the Telegram bot in background mode

@@ -86,6 +86,9 @@ import {
     consumeBypass,
     MAX_QUEUE_DEPTH,
 } from '../services/interruptState';
+import { normalizeForHash } from '../services/userMessageDetector';
+
+const telegramSentPrompts = new Set<string>();
 
 const PHASE_ICONS = {
     sending: '📡',
@@ -1629,19 +1632,25 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 ensureErrorPopupDetector(bridge, cdp, projectName);
                 ensurePlanningDetector(bridge, cdp, projectName);
 
-                const onUserMessageCallback = (info: any) => {
+                const onUserMessageCallback = (info: any): boolean => {
                     logger.info(`[UserMessageDetector:${projectName}] Detected user message from IDE: "${info.text.slice(0, 50)}..."`);
                     
                     if (promptDispatcher.isBusy(channel, cdp)) {
                         logger.debug(`[UserMessageDetector:${projectName}] Workspace is busy, skipping user message mirror.`);
-                        return;
+                        return false;
                     }
 
-                    // 1. Send the user message to the Telegram channel
-                    const userMsgText = `👤 [IDE]: ${info.text}`;
-                    bot.api.sendMessage(channel.chatId, userMsgText, {
-                        message_thread_id: channel.threadId,
-                    }).catch(e => logger.error('[UserMessageDetector] Failed to send user message to TG:', e));
+                    const normalized = normalizeForHash(info.text);
+                    if (telegramSentPrompts.has(normalized)) {
+                        logger.debug(`[UserMessageDetector:${projectName}] Message came from Telegram, skipping echo text.`);
+                        telegramSentPrompts.delete(normalized);
+                    } else {
+                        // 1. Send the user message to the Telegram channel
+                        const userMsgText = `👤 [IDE]: ${info.text}`;
+                        bot.api.sendMessage(channel.chatId, userMsgText, {
+                            message_thread_id: channel.threadId,
+                        }).catch(e => logger.error('[UserMessageDetector] Failed to send user message to TG:', e));
+                    }
 
                     // 2. Start mirroring the response using acquireLock to block TG commands
                     const mirrorPromise = mirrorResponseToTelegram(bridge, channel, cdp, info.text, {
@@ -1653,6 +1662,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     });
 
                     promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
+                    return true;
                 };
                 ensureUserMessageDetector(bridge, cdp, projectName, onUserMessageCallback);
             },
@@ -2871,39 +2881,16 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }
 
         // ── Concurrency gate: check if workspace is busy ────────────────────
-        const wsKey = promptDispatcher.getWorkspaceKey(ch, resolved.cdp);
-        const interruptKey = safeCallbackKey(wsKey);
         const busy = promptDispatcher.isBusy(ch, resolved.cdp);
-        const bypassed = busy ? consumeBypass(interruptKey) : false;
-        logger.info(`[concurrencyGate] wsKey=${wsKey} busy=${busy} bypassed=${bypassed}`);
-        if (busy && !bypassed) {
-            const dispatchOptions = { chatSessionService, chatSessionRepo, topicManager, titleGenerator };
-            const position = addPendingInterrupt(interruptKey, {
-                prompt: text,
-                channel: ch,
-                cdp: resolved.cdp,
-                inboundImages: [],
-                options: dispatchOptions,
+        if (busy) {
+            const normalized = normalizeForHash(text);
+            telegramSentPrompts.add(normalized);
+
+            resolved.cdp.injectMessage(text).catch((err) => {
+                logger.error('[TelegramQueue] Failed to inject queued message:', err);
+                ctx.reply(`❌ Failed to send message to IDE: ${err.message}`).catch(() => {});
+                telegramSentPrompts.delete(normalized);
             });
-
-            if (position === null) {
-                await ctx.reply(`⚠️ Queue full (${MAX_QUEUE_DEPTH} messages pending). Please wait or /stop the current task.`);
-                return;
-            }
-
-            if (position === 1) {
-                // First in queue — show the interrupt keyboard
-                const { text: uiText, keyboard } = buildInterruptUI(interruptKey, text);
-                const sent = await bot.api.sendMessage(ch.chatId, uiText, {
-                    parse_mode: 'HTML',
-                    message_thread_id: ch.threadId,
-                    reply_markup: keyboard,
-                });
-                const pending = getFirstPendingInterrupt(interruptKey);
-                if (pending) pending.interruptMsgId = sent.message_id;
-            } else {
-                await ctx.reply(`📥 Message queued (#${position} in line)`);
-            }
             return;
         }
         // ── End concurrency gate ────────────────────────────────────────────
@@ -2969,35 +2956,20 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         );
 
         // ── Concurrency gate ────────────────────────────────────────────────
-        const wsKey = promptDispatcher.getWorkspaceKey(group.ch, resolved.cdp);
-        const interruptKey = safeCallbackKey(wsKey);
-        if (promptDispatcher.isBusy(group.ch, resolved.cdp) && !consumeBypass(interruptKey)) {
-            const position = addPendingInterrupt(interruptKey, {
-                prompt: caption,
-                channel: group.ch,
-                cdp: resolved.cdp,
-                inboundImages,
-                options: { chatSessionService, chatSessionRepo, topicManager, titleGenerator },
-            });
+        const busy = promptDispatcher.isBusy(group.ch, resolved.cdp);
+        if (busy) {
+            const normalized = normalizeForHash(caption);
+            telegramSentPrompts.add(normalized);
 
-            if (position === null) {
-                await cleanupInboundImageAttachments(inboundImages);
-                await group.ctx.reply(`⚠️ Queue full (${MAX_QUEUE_DEPTH} messages pending). Please wait or /stop the current task.`);
-                return;
-            }
-
-            if (position === 1) {
-                const keyboard = new InlineKeyboard()
-                    .text('📥 Queue', `interrupt:queue:${interruptKey}`)
-                    .text('⚡ Stop & Send Now', `interrupt:now:${interruptKey}`)
-                    .text('🗑 Discard', `interrupt:discard:${interruptKey}`);
-                await replyHtml(group.ctx,
-                    `⏳ <b>AI is still generating a response…</b>\n\n🖼️ Photo message queued.`,
-                    keyboard,
-                );
-            } else {
-                await group.ctx.reply(`📥 Photo message queued (#${position} in line)`);
-            }
+            resolved.cdp.injectMessageWithImageFiles(caption, inboundImages.map(i => i.localPath))
+                .catch((err) => {
+                    logger.error('[TelegramQueue:mediaGroup] Failed to inject:', err);
+                    group.ctx.reply(`❌ Failed to send album to IDE: ${err.message}`).catch(() => {});
+                    telegramSentPrompts.delete(normalized);
+                })
+                .finally(() => {
+                    cleanupInboundImageAttachments(inboundImages).catch(() => {});
+                });
             return;
         }
         // ── End concurrency gate ────────────────────────────────────────────
@@ -3055,36 +3027,22 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         );
 
         // ── Concurrency gate ────────────────────────────────────────────────
-        const wsKey = promptDispatcher.getWorkspaceKey(ch, resolved.cdp);
-        const interruptKey = safeCallbackKey(wsKey);
-        if (promptDispatcher.isBusy(ch, resolved.cdp) && !consumeBypass(interruptKey)) {
-            const position = addPendingInterrupt(interruptKey, {
-                prompt: caption || 'Please review the attached images and respond accordingly.',
-                channel: ch,
-                cdp: resolved.cdp,
-                inboundImages,
-                options: { chatSessionService, chatSessionRepo, topicManager, titleGenerator },
-            });
+        const busy = promptDispatcher.isBusy(ch, resolved.cdp);
+        if (busy) {
+            const promptText = caption || 'Please review the attached images and respond accordingly.';
+            const normalized = normalizeForHash(promptText);
+            telegramSentPrompts.add(normalized);
 
-            if (position === null) {
-                await cleanupInboundImageAttachments(inboundImages);
-                await ctx.reply(`⚠️ Queue full (${MAX_QUEUE_DEPTH} messages pending). Please wait or /stop the current task.`);
-                return;
-            }
-
-            if (position === 1) {
-                const keyboard = new InlineKeyboard()
-                    .text('📥 Queue', `interrupt:queue:${interruptKey}`)
-                    .text('⚡ Stop & Send Now', `interrupt:now:${interruptKey}`)
-                    .text('🗑 Discard', `interrupt:discard:${interruptKey}`);
-                await replyHtml(ctx,
-                    `⏳ <b>AI is still generating a response…</b>\n\n🖼️ Photo message queued.`,
-                    keyboard,
-                );
-            } else {
-                await ctx.reply(`📥 Photo message queued (#${position} in line)`);
-            }
-            return; // Images kept in interruptState; cleaned up on dispatch or discard
+            resolved.cdp.injectMessageWithImageFiles(promptText, inboundImages.map(i => i.localPath))
+                .catch((err) => {
+                    logger.error('[TelegramQueue:photo] Failed to inject:', err);
+                    ctx.reply(`❌ Failed to send photo to IDE: ${err.message}`).catch(() => {});
+                    telegramSentPrompts.delete(normalized);
+                })
+                .finally(() => {
+                    cleanupInboundImageAttachments(inboundImages).catch(() => {});
+                });
+            return;
         }
         // ── End concurrency gate ────────────────────────────────────────────
 
@@ -3146,35 +3104,21 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         );
 
         // ── Concurrency gate ────────────────────────────────────────────────
-        const wsKey = promptDispatcher.getWorkspaceKey(ch, resolved.cdp);
-        const interruptKey = safeCallbackKey(wsKey);
-        if (promptDispatcher.isBusy(ch, resolved.cdp) && !consumeBypass(interruptKey)) {
-            const position = addPendingInterrupt(interruptKey, {
-                prompt: caption || 'Please review the attached images and respond accordingly.',
-                channel: ch,
-                cdp: resolved.cdp,
-                inboundImages,
-                options: { chatSessionService, chatSessionRepo, topicManager, titleGenerator },
-            });
+        const busy = promptDispatcher.isBusy(ch, resolved.cdp);
+        if (busy) {
+            const promptText = caption || 'Please review the attached images and respond accordingly.';
+            const normalized = normalizeForHash(promptText);
+            telegramSentPrompts.add(normalized);
 
-            if (position === null) {
-                await cleanupInboundImageAttachments(inboundImages);
-                await ctx.reply(`⚠️ Queue full (${MAX_QUEUE_DEPTH} messages pending). Please wait or /stop the current task.`);
-                return;
-            }
-
-            if (position === 1) {
-                const keyboard = new InlineKeyboard()
-                    .text('📥 Queue', `interrupt:queue:${interruptKey}`)
-                    .text('⚡ Stop & Send Now', `interrupt:now:${interruptKey}`)
-                    .text('🗑 Discard', `interrupt:discard:${interruptKey}`);
-                await replyHtml(ctx,
-                    `⏳ <b>AI is still generating a response…</b>\n\n🖼️ Photo message queued.`,
-                    keyboard,
-                );
-            } else {
-                await ctx.reply(`📥 Photo message queued (#${position} in line)`);
-            }
+            resolved.cdp.injectMessageWithImageFiles(promptText, inboundImages.map(i => i.localPath))
+                .catch((err) => {
+                    logger.error('[TelegramQueue:document] Failed to inject:', err);
+                    ctx.reply(`❌ Failed to send file to IDE: ${err.message}`).catch(() => {});
+                    telegramSentPrompts.delete(normalized);
+                })
+                .finally(() => {
+                    cleanupInboundImageAttachments(inboundImages).catch(() => {});
+                });
             return;
         }
         // ── End concurrency gate ────────────────────────────────────────────
@@ -3246,35 +3190,16 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         await ctx.reply(`📝 "${transcript}"`);
 
         // ── Concurrency gate ────────────────────────────────────────────────
-        const wsKey = promptDispatcher.getWorkspaceKey(ch, resolved.cdp);
-        const interruptKey = safeCallbackKey(wsKey);
-        if (promptDispatcher.isBusy(ch, resolved.cdp) && !consumeBypass(interruptKey)) {
-            const position = addPendingInterrupt(interruptKey, {
-                prompt: transcript,
-                channel: ch,
-                cdp: resolved.cdp,
-                inboundImages: [],
-                options: { chatSessionService, chatSessionRepo, topicManager, titleGenerator },
+        const busy = promptDispatcher.isBusy(ch, resolved.cdp);
+        if (busy) {
+            const normalized = normalizeForHash(transcript);
+            telegramSentPrompts.add(normalized);
+
+            resolved.cdp.injectMessage(transcript).catch((err) => {
+                logger.error('[TelegramQueue:voice] Failed to inject:', err);
+                ctx.reply(`❌ Failed to send voice transcription to IDE: ${err.message}`).catch(() => {});
+                telegramSentPrompts.delete(normalized);
             });
-
-            if (position === null) {
-                await ctx.reply(`⚠️ Queue full (${MAX_QUEUE_DEPTH} messages pending). Please wait or /stop the current task.`);
-                return;
-            }
-
-            if (position === 1) {
-                const keyboard = new InlineKeyboard()
-                    .text('📥 Queue', `interrupt:queue:${interruptKey}`)
-                    .text('⚡ Stop & Send Now', `interrupt:now:${interruptKey}`)
-                    .text('🗑 Discard', `interrupt:discard:${interruptKey}`);
-                const preview = transcript.length > 80 ? transcript.slice(0, 77) + '…' : transcript;
-                await replyHtml(ctx,
-                    `⏳ <b>AI is still generating a response…</b>\n\n🎙️ Voice: <i>${escapeHtml(preview)}</i>`,
-                    keyboard,
-                );
-            } else {
-                await ctx.reply(`📥 Voice message queued (#${position} in line)`);
-            }
             return;
         }
         // ── End concurrency gate ────────────────────────────────────────────
@@ -3313,18 +3238,24 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 ensureErrorPopupDetector(bridge, cdp, binding.workspacePath);
                 ensurePlanningDetector(bridge, cdp, binding.workspacePath);
                 
-                const onUserMessageCallback = (info: any) => {
+                const onUserMessageCallback = (info: any): boolean => {
                     logger.info(`[UserMessageDetector:${binding.workspacePath}] Detected user message from IDE: "${info.text.slice(0, 50)}..."`);
                     
                     if (promptDispatcher.isBusy(channel, cdp)) {
                         logger.debug(`[UserMessageDetector:${binding.workspacePath}] Workspace is busy, skipping user message mirror.`);
-                        return;
+                        return false;
                     }
 
-                    const userMsgText = `👤 [IDE]: ${info.text}`;
-                    bot.api.sendMessage(channel.chatId, userMsgText, {
-                        message_thread_id: channel.threadId,
-                    }).catch(e => logger.error('[UserMessageDetector] Failed to send user message to TG:', e));
+                    const normalized = normalizeForHash(info.text);
+                    if (telegramSentPrompts.has(normalized)) {
+                        logger.debug(`[UserMessageDetector:${binding.workspacePath}] Message came from Telegram, skipping echo text.`);
+                        telegramSentPrompts.delete(normalized);
+                    } else {
+                        const userMsgText = `👤 [IDE]: ${info.text}`;
+                        bot.api.sendMessage(channel.chatId, userMsgText, {
+                            message_thread_id: channel.threadId,
+                        }).catch(e => logger.error('[UserMessageDetector] Failed to send user message to TG:', e));
+                    }
 
                     const mirrorPromise = mirrorResponseToTelegram(bridge, channel, cdp, info.text, {
                         chatSessionService,
@@ -3335,6 +3266,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     });
 
                     promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
+                    return true;
                 };
                 ensureUserMessageDetector(bridge, cdp, binding.workspacePath, onUserMessageCallback);
 
