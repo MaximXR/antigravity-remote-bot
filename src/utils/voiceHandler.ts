@@ -32,7 +32,8 @@ export function checkWhisperAvailability(): string | null {
         'cpp', 'whisper.cpp', 'build', 'bin',
     );
     try {
-        const stat = require('fs').statSync(path.join(cppDir, 'whisper-cli'));
+        const binName = process.platform === 'win32' ? path.join('Release', 'whisper-cli.exe') : 'whisper-cli';
+        const stat = require('fs').statSync(path.join(cppDir, binName));
         if (!stat.isFile()) throw new Error();
     } catch {
         return (
@@ -47,7 +48,7 @@ export function checkWhisperAvailability(): string | null {
     // 3. Check model file
     const modelsDir = path.join(
         path.dirname(require.resolve('nodejs-whisper/package.json')),
-        'models',
+        'cpp', 'whisper.cpp', 'models'
     );
     try {
         const files = require('fs').readdirSync(modelsDir) as string[];
