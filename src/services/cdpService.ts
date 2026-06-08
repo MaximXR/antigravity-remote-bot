@@ -331,15 +331,11 @@ export class CdpService extends EventEmitter {
         const projectName = extractProjectNameFromPath(workspacePath);
         this.currentWorkspacePath = workspacePath;
 
-        // Re-validate existing connection before skipping reconnect.
+        // If already connected to the expected project, reuse the active connection directly.
+        // We avoid calling verifyCurrentWorkspace on every message because DOM probing
+        // is slow and fails when the sidebar/explorer is closed, triggering false reconnections.
         if (this.isConnectedFlag && this.currentWorkspaceName === projectName) {
-            const stillMatched = await this.verifyCurrentWorkspace(projectName, workspacePath);
-            if (stillMatched) {
-                return true;
-            }
-            logger.warn(
-                `[CdpService] Workspace mismatch detected while reusing connection (expected="${projectName}"). Reconnecting...`,
-            );
+            return true;
         }
 
         this.isSwitchingWorkspace = true;
