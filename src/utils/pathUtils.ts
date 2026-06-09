@@ -41,8 +41,21 @@ export function isTitleMatch(title: string, projectName: string): boolean {
     const normProj = projectName.toLowerCase().trim();
     const parts = title.split(/\s[—–-]\s/).map(p => p.toLowerCase().trim());
     
-    // Extract segment immediately before application name
-    const projectPart = parts.length < 2 ? parts[0] : parts[parts.length - 2];
+    if (parts.length < 2) {
+        return parts[0] === normProj;
+    }
+
+    const appRegex = /^(antigravity\s*ide|antigravity|visual\s*studio\s*code|vscode|cursor|code\s*oss|code)$/i;
+    const appIndex = parts.findIndex(p => appRegex.test(p));
+
+    let projectPart = '';
+    if (appIndex > 0) {
+        projectPart = parts[appIndex - 1];
+    } else if (appIndex === 0) {
+        projectPart = parts[1] || '';
+    } else {
+        projectPart = parts[parts.length - 2] || parts[0];
+    }
     
     // Remove workspace suffix (e.g., "(workspace)" or "(рабочая область)")
     const cleanProjectPart = projectPart.replace(/\s*\([^)]+\)$/, '').trim();

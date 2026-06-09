@@ -1967,9 +1967,32 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 });
 
                 if (!silent) {
+                    let sessionStr = '';
+                    if (cdp) {
+                        try {
+                            const sessionInfo = await chatSessionService.getCurrentSessionInfo(cdp);
+                            if (sessionInfo.hasActiveChat) {
+                                sessionStr = `\n💬 <b>Активный диалог:</b> ${escapeHtml(sessionInfo.title)}`;
+                            } else {
+                                sessionStr = `\n🆕 <b>Активный диалог:</b> Начинаем диалог с нуля`;
+                            }
+                        } catch (e) {
+                            sessionStr = `\n💬 <b>Активный диалог:</b> Неизвестно`;
+                        }
+                    } else {
+                        sessionStr = `\n💬 <b>Активный диалог:</b> Неизвестно`;
+                    }
+
+                    const text = `<b>💼 Рабочая область выбрана</b>\n\n` +
+                        `✅ <b>${escapeHtml(cleanFolderName)}</b>\n` +
+                        `<code>${escapeHtml(fullPath)}</code>\n` +
+                        `${sessionStr}\n\n` +
+                        `Отправляйте сообщения сюда для работы с этим проектом.\n` +
+                        `Используйте /chats или /history для управления сессиями.`;
+
                     await bot.api.sendMessage(
                         ch.chatId,
-                        `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(cleanFolderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.\n\nUse /chats or /history to manage sessions.`,
+                        text,
                         { parse_mode: 'HTML', message_thread_id: topicId, reply_markup: sessionKeyboard },
                     );
                 }
@@ -1986,7 +2009,29 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         });
 
         if (!silent) {
-            const text = `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(cleanFolderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.\n\nUse /chats or /history to manage sessions.`;
+            let sessionStr = '';
+            if (cdp) {
+                try {
+                    const sessionInfo = await chatSessionService.getCurrentSessionInfo(cdp);
+                    if (sessionInfo.hasActiveChat) {
+                        sessionStr = `\n💬 <b>Активный диалог:</b> ${escapeHtml(sessionInfo.title)}`;
+                    } else {
+                        sessionStr = `\n🆕 <b>Активный диалог:</b> Начинаем диалог с нуля`;
+                    }
+                } catch (e) {
+                    sessionStr = `\n💬 <b>Активный диалог:</b> Неизвестно`;
+                }
+            } else {
+                sessionStr = `\n💬 <b>Активный диалог:</b> Неизвестно`;
+            }
+
+            const text = `<b>💼 Рабочая область выбрана</b>\n\n` +
+                `✅ <b>${escapeHtml(cleanFolderName)}</b>\n` +
+                `<code>${escapeHtml(fullPath)}</code>\n` +
+                `${sessionStr}\n\n` +
+                `Отправляйте сообщения сюда для работы с этим проектом.\n` +
+                `Используйте /chats или /history для управления сессиями.`;
+
             try {
                 await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: sessionKeyboard });
             } catch {
