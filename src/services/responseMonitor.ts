@@ -574,7 +574,7 @@ export const RESPONSE_SELECTORS = {
             }
         }
 
-        return { isGenerating, quotaError, planningActive, responseText, processLogs };
+        return { isGenerating, quotaError, planningActive, approvalActive: approvalVisible, responseText, processLogs };
     })()`,
     /** Quota error detection — text-based h3 span match first, class-based fallback second */
     QUOTA_ERROR: `(() => {
@@ -1051,6 +1051,7 @@ export class ResponseMonitor {
             let isGenerating: boolean;
             let quotaDetected: boolean;
             let planningActive: boolean;
+            let approvalActive = false;
             let currentText: string | null = null;
             let structuredHandledLogs = false;
 
@@ -1065,6 +1066,7 @@ export class ResponseMonitor {
                 isGenerating = !!combined.isGenerating;
                 quotaDetected = !!combined.quotaError;
                 planningActive = !!combined.planningActive;
+                approvalActive = !!combined.approvalActive;
 
                 // Try structured extraction first
                 if (structuredResult) {
@@ -1124,6 +1126,7 @@ export class ResponseMonitor {
                 isGenerating = !!combined.isGenerating;
                 quotaDetected = !!combined.quotaError;
                 planningActive = !!combined.planningActive;
+                approvalActive = !!combined.approvalActive;
                 currentText = typeof combined.responseText === 'string' ? combined.responseText.trim() || null : null;
                 this.lastExtractionSource = 'legacy';
 
@@ -1189,9 +1192,9 @@ export class ResponseMonitor {
             // Completion: stop button gone N consecutive times
             if (!isGenerating && this.generationStarted) {
                 // Planning check already done in combined poll script
-                if (planningActive) {
+                if (planningActive || approvalActive) {
                     this.stopGoneCount = 0;
-                    logger.info('[ResponseMonitor] Planning dialog active — deferring completion');
+                    logger.info(`[ResponseMonitor] ${planningActive ? 'Planning' : 'Approval'} dialog active — deferring completion`);
                 } else {
                     this.stopGoneCount++;
                     if (this.stopGoneCount >= this.stopGoneConfirmCount && this.isRunning) {
