@@ -16,7 +16,7 @@ function getJson(url) {
 
 async function run() {
     try {
-        const pages = await getJson('http://localhost:9223/json/list');
+        const pages = await getJson('http://localhost:9333/json/list');
         const target = pages.find(p => p.type === 'page' && p.webSocketDebuggerUrl && p.title.includes('Antigravity IDE'));
         if (!target) {
             console.error("No real workbench page found!");

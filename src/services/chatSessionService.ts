@@ -977,39 +977,22 @@ export class ChatSessionService {
      * Locate and click the last visible Undo (rollback) button in the chat panel.
      */
     async rollbackLastChanges(cdpService: CdpService): Promise<{ ok: boolean; error?: string }> {
-        const script = `(() => {
-            const elements = Array.from(document.querySelectorAll('button, [role=\"button\"]'));
-            const undoButtons = [];
-            
-            for (const el of elements) {
-                const text = (el.textContent || '').trim().toLowerCase();
-                const title = (el.getAttribute('title') || '').trim().toLowerCase();
-                const ariaLabel = (el.getAttribute('aria-label') || '').trim().toLowerCase();
-                const tooltip = (el.getAttribute('data-tooltip-content') || '').trim().toLowerCase();
-                const tooltipId = (el.getAttribute('data-tooltip-id') || '').trim().toLowerCase();
-                const html = el.outerHTML.toLowerCase();
-                
-                const isUndo = text.includes('undo') || 
-                               title.includes('undo') || 
-                               ariaLabel.includes('undo') || 
-                               tooltip.includes('undo') || 
-                               tooltipId.includes('undo') ||
-                               html.includes('undo');
-                               
-                if (isUndo) {
-                    undoButtons.push(el);
-                }
+        const scrollScript = `(() => {
+            const elements = Array.from(document.querySelectorAll('button[data-testid="revert-button"], [role="button"][data-testid="revert-button"]'));
+            if (elements.length === 0) {
+                return { found: false, error: 'No revert buttons found' };
             }
-            
-            if (undoButtons.length === 0) {
-                return { found: false, error: 'No undo buttons found' };
-            }
-            
-            const target = undoButtons[undoButtons.length - 1];
+            const target = elements[elements.length - 1];
+            target.scrollIntoView({ block: 'center', inline: 'center' });
+            return { found: true };
+        })()`;
+
+        const getCoordsScript = `(() => {
+            const elements = Array.from(document.querySelectorAll('button[data-testid="revert-button"], [role="button"][data-testid="revert-button"]'));
+            if (elements.length === 0) return null;
+            const target = elements[elements.length - 1];
             const rect = target.getBoundingClientRect();
-            
             return {
-                found: true,
                 x: Math.round(rect.x + rect.width / 2),
                 y: Math.round(rect.y + rect.height / 2)
             };
@@ -1019,48 +1002,51 @@ export class ChatSessionService {
             const contexts = cdpService.getContexts();
             for (const ctx of contexts) {
                 try {
-                    const res = await cdpService.call('Runtime.evaluate', {
-                        expression: script,
+                    // 1. Find and scroll revert-button into view
+                    const scrollRes = await cdpService.call('Runtime.evaluate', {
+                        expression: scrollScript,
                         returnByValue: true,
                         contextId: ctx.id,
                     });
-                    const val = res?.result?.value;
-                    if (val && val.found && typeof val.x === 'number' && typeof val.y === 'number') {
-                        logger.info(`[ChatSessionService] Clicking Undo button at x=${val.x}, y=${val.y} in context ${ctx.id}`);
-                        await this.cdpMouseClick(cdpService, val.x, val.y);
+                    
+                    const scrollVal = scrollRes?.result?.value;
+                    if (scrollVal && scrollVal.found) {
+                        // Wait 200ms for scrolling animation
+                        await new Promise((resolve) => setTimeout(resolve, 200));
 
-                        // Wait 350ms for the Confirm Undo modal to open
-                        await new Promise((resolve) => setTimeout(resolve, 350));
+                        // 2. Retrieve the scrolled coordinates
+                        const coordsRes = await cdpService.call('Runtime.evaluate', {
+                            expression: getCoordsScript,
+                            returnByValue: true,
+                            contextId: ctx.id,
+                        });
+                        const coords = coordsRes?.result?.value;
 
-                        // Execute confirmation click
-                        const confirmScript = `(() => {
-                            const buttons = Array.from(document.querySelectorAll('button'));
-                            const confirmBtn = buttons.find(b => {
-                                const text = (b.textContent || '').trim().toLowerCase();
-                                return text === 'confirm' || text === 'confirm undo' || text === 'yes';
+                        if (coords && typeof coords.x === 'number' && typeof coords.y === 'number') {
+                            logger.info(`[ChatSessionService] Clicking Undo button at x=${coords.x}, y=${coords.y} in context ${ctx.id}`);
+                            await this.cdpMouseClick(cdpService, coords.x, coords.y);
+
+                            // Wait 500ms for the Confirm Undo modal to open
+                            await new Promise((resolve) => setTimeout(resolve, 500));
+
+                            // 3. Send Enter key via CDP to confirm the dialog
+                            logger.info('[ChatSessionService] Sending Enter key to confirm Undo dialog.');
+                            await cdpService.call('Input.dispatchKeyEvent', { 
+                                type: 'keyDown', 
+                                key: 'Enter', 
+                                code: 'Enter', 
+                                windowsVirtualKeyCode: 13 
                             });
-                            if (confirmBtn) {
-                                confirmBtn.click();
-                                return { clicked: true };
-                            }
-                            return { clicked: false };
-                        })()`;
-                        try {
-                            const confirmRes = await cdpService.call('Runtime.evaluate', {
-                                expression: confirmScript,
-                                returnByValue: true,
-                                contextId: ctx.id,
+                            await new Promise((resolve) => setTimeout(resolve, 50));
+                            await cdpService.call('Input.dispatchKeyEvent', { 
+                                type: 'keyUp', 
+                                key: 'Enter', 
+                                code: 'Enter', 
+                                windowsVirtualKeyCode: 13 
                             });
-                            if (confirmRes?.result?.value?.clicked) {
-                                logger.info('[ChatSessionService] Automatically confirmed Undo dialog.');
-                            } else {
-                                logger.info('[ChatSessionService] No confirmation dialog found or clicked.');
-                            }
-                        } catch (e: any) {
-                            logger.warn('[ChatSessionService] Failed to auto-confirm Undo dialog:', e.message);
+
+                            return { ok: true };
                         }
-
-                        return { ok: true };
                     }
                 } catch (_) {
                     // try next context
