@@ -27,7 +27,7 @@ import { CdpService } from '../services/cdpService';
 import { ChatSessionService } from '../services/chatSessionService';
 import { ResponseMonitor, RESPONSE_SELECTORS } from '../services/responseMonitor';
 import { ensureAntigravityRunning } from '../services/antigravityLauncher';
-import { getAntigravityCdpHint } from '../utils/pathUtils';
+import { getAntigravityCdpHint, isTitleMatch } from '../utils/pathUtils';
 import { CDP_PORTS } from '../utils/cdpPorts';
 import { AutoAcceptService } from '../services/autoAcceptService';
 import { PromptDispatcher } from '../services/promptDispatcher';
@@ -1886,7 +1886,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         let matchedWorkspace: RecentWorkspace | null = null;
                         for (const w of recentWorkspaces) {
                             const cleanName = w.name.replace(/\.code-workspace$/i, '');
-                            if (title.toLowerCase().includes(cleanName.toLowerCase())) {
+                            if (isTitleMatch(title, cleanName)) {
                                 matchedWorkspace = w;
                                 break;
                             }

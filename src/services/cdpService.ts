@@ -4,7 +4,7 @@ import { EventEmitter } from 'events';
 import * as http from 'http';
 import * as net from 'net';
 import { spawn } from 'child_process';
-import { getAntigravityCliPath, extractProjectNameFromPath } from '../utils/pathUtils';
+import { getAntigravityCliPath, extractProjectNameFromPath, isTitleMatch, isWorkspaceMatch } from '../utils/pathUtils';
 import WebSocket from 'ws';
 
 export interface CdpServiceOptions {
@@ -369,7 +369,7 @@ export class CdpService extends EventEmitter {
                 returnByValue: true,
             });
             const liveTitle = String(titleResult?.result?.value || '');
-            if (liveTitle.toLowerCase().includes(projectName.toLowerCase())) {
+            if (isTitleMatch(liveTitle, projectName)) {
                 this.currentWorkspaceName = projectName;
                 return true;
             }
@@ -440,7 +440,7 @@ export class CdpService extends EventEmitter {
         }
 
         // 1. Title match (fast path)
-        const titleMatch = workbenchPages.find((t: any) => t.title?.includes(projectName));
+        const titleMatch = workbenchPages.find((t: any) => isTitleMatch(t.title, projectName));
         if (titleMatch) {
             return this.connectToPage(titleMatch, projectName);
         }
@@ -532,7 +532,7 @@ export class CdpService extends EventEmitter {
             }
 
             // If it matches by title, it is NOT different
-            if (normalizedLiveTitle.includes(normalizedProject)) {
+            if (isTitleMatch(liveTitle, projectName)) {
                 return false;
             }
 
@@ -601,7 +601,7 @@ export class CdpService extends EventEmitter {
                 );
 
                 // Title match
-                const titleMatch = workbenchPages.find((t: any) => t.title?.toLowerCase().includes(projectName.toLowerCase()));
+                const titleMatch = workbenchPages.find((t: any) => isTitleMatch(t.title, projectName));
                 if (titleMatch) {
                     return this.connectToPage(titleMatch, projectName);
                 }
@@ -651,7 +651,7 @@ export class CdpService extends EventEmitter {
                 const normalizedLiveTitle = liveTitle.toLowerCase();
                 const normalizedProject = projectName.toLowerCase();
 
-                if (normalizedLiveTitle.includes(normalizedProject)) {
+                if (isTitleMatch(liveTitle, projectName)) {
                     this.currentWorkspaceName = projectName;
                     logger.debug(`[CdpService] Probe success: detected "${projectName}"`);
                     return true;
@@ -738,15 +738,7 @@ export class CdpService extends EventEmitter {
             const value = res?.result?.value;
             if (value?.found && value?.value) {
                 const detectedValue = value.value as string;
-
-                const normalizedDetected = detectedValue.toLowerCase();
-                const normalizedProject = projectName.toLowerCase();
-                const normalizedWorkspace = workspacePath.toLowerCase();
-
-                if (
-                    normalizedDetected.includes(normalizedProject) ||
-                    normalizedDetected.includes(normalizedWorkspace)
-                ) {
+                if (isWorkspaceMatch(detectedValue, projectName, workspacePath)) {
                     this.currentWorkspaceName = projectName;
                     logger.debug(`[CdpService] Folder path match success: "${projectName}"`);
                     return true;
@@ -758,9 +750,8 @@ export class CdpService extends EventEmitter {
                 expression: 'window.location.href',
                 returnByValue: true,
             });
-            const pageUrl = (urlResult?.result?.value || '').toLowerCase();
-            const normalizedWorkspaceUri = encodeURIComponent(workspacePath).toLowerCase();
-            if (pageUrl.includes(normalizedWorkspaceUri) || pageUrl.includes(projectName.toLowerCase())) {
+            const pageUrl = String(urlResult?.result?.value || '');
+            if (isWorkspaceMatch(pageUrl, projectName, workspacePath)) {
                 this.currentWorkspaceName = projectName;
                 logger.debug(`[CdpService] URL parameter match success: "${projectName}"`);
                 return true;

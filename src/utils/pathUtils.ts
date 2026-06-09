@@ -36,6 +36,94 @@ export function extractProjectNameFromPath(workspacePath: string): string {
     return last;
 }
 
+export function isTitleMatch(title: string, projectName: string): boolean {
+    if (!title) return false;
+    const normProj = projectName.toLowerCase().trim();
+    const parts = title.split(/\s[—–-]\s/).map(p => p.toLowerCase().trim());
+    if (parts.length < 2) {
+        return parts[0] === normProj;
+    }
+    // VS Code titles typically end with the application name (e.g. "Visual Studio Code"), 
+    // and the project/workspace name is the segment immediately before it.
+    const projectPart = parts[parts.length - 2];
+    if (projectPart === normProj) return true;
+    if (projectPart === `${normProj} (workspace)`) return true;
+    if (projectPart.endsWith('.code-workspace') && projectPart.slice(0, -'.code-workspace'.length).trim() === normProj) {
+        return true;
+    }
+    return false;
+}
+
+export function isWorkspaceMatch(
+    detected: string,
+    projectName: string,
+    workspacePath: string
+): boolean {
+    let cleanDetected = detected.trim();
+    try {
+        if (cleanDetected.includes('%')) {
+            cleanDetected = decodeURIComponent(cleanDetected);
+        }
+    } catch {
+        // Ignore decoding errors
+    }
+
+    const normDetected = cleanDetected.toLowerCase();
+    const normProj = projectName.toLowerCase().trim();
+    const normPath = workspacePath.toLowerCase().replace(/\//g, '\\').trim();
+
+    const isPathOrUri = (str: string): boolean => {
+        return str.includes('\\') || str.includes('/') || str.includes(':');
+    };
+
+    if (isPathOrUri(normDetected)) {
+        // Handle URL parameters for folder/workspace if present
+        const folderMatch = normDetected.match(/(?:folder|workspace)=([^&]+)/);
+        if (folderMatch) {
+            let extractedPath = folderMatch[1];
+            if (extractedPath.startsWith('file:')) {
+                extractedPath = extractedPath.replace(/^file:\/\/\/?/, '');
+            }
+            extractedPath = extractedPath.replace(/^\/([a-z]):/, '$1:').replace(/\//g, '\\');
+
+            if (extractedPath === normPath || extractedPath === normPath + '\\') {
+                return true;
+            }
+
+            const lastSeg = extractedPath.split(/[\\/]/).filter(Boolean).pop() || '';
+            if (lastSeg === normProj) {
+                return true;
+            }
+
+            return false;
+        }
+
+        let cleanPath = normDetected;
+        if (cleanPath.startsWith('file:')) {
+            cleanPath = cleanPath.replace(/^file:\/\/\/?/, '');
+        }
+        cleanPath = cleanPath.replace(/^[a-z0-9-]+:\/\/[^/]+\//, '');
+        cleanPath = cleanPath.replace(/^\/([a-z]):/, '$1:').replace(/\//g, '\\');
+
+        if (cleanPath === normPath || cleanPath === normPath + '\\') {
+            return true;
+        }
+
+        const lastSeg = cleanPath.split(/[\\/]/).filter(Boolean).pop() || '';
+        if (lastSeg === normProj) {
+            return true;
+        }
+
+        return false;
+    }
+
+    if (normDetected.includes(' - ') || normDetected.includes(' — ') || normDetected.includes(' – ')) {
+        return isTitleMatch(cleanDetected, projectName);
+    }
+
+    return normDetected === normProj;
+}
+
 /**
  * Get a platform-appropriate hint for starting Antigravity with CDP.
  *
