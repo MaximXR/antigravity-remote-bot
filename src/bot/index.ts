@@ -2388,8 +2388,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     bot.command('allow_chat', (ctx) => handleApprovalCommand(ctx, 'always_allow'));
     bot.command('deny', (ctx) => handleApprovalCommand(ctx, 'deny'));
 
-    // /workspace command
-    bot.command('workspace', async (ctx) => {
+    // /workspace and /project commands
+    bot.command(['workspace', 'project'], async (ctx) => {
         const workspaces = workspaceService.getRecentWorkspaces();
         const { text, keyboard } = buildWorkspaceListUI(workspaces, 0);
         await replyHtml(ctx, text, keyboard);
@@ -3990,7 +3990,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             try {
                 await bot.api.setMyCommands([
                     { command: 'status', description: t('Bot Status') },
-                    { command: 'project', description: t('Select a workspace') },
+                    { command: 'workspace', description: t('Select a workspace') },
                     { command: 'new', description: t('Start a new chat session') },
                     { command: 'chat', description: t('Current session info') },
                     { command: 'chats', description: t('List and select chats') },
