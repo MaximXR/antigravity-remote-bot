@@ -1791,7 +1791,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         resolveWorkspaceAndCdpImpl(ch, {
             findBinding: (key) => workspaceBindingRepo.findByChannelId(key),
             getWorkspacePath: (name) => workspaceService.getWorkspacePath(name),
-            getOrConnect: (fullPath) => bridge.pool.getOrConnect(fullPath),
+            getOrConnect: (fullPath) => bridge.pool.getOrConnect(fullPath, false, undefined, false),
             extractProjectName: (fullPath) => bridge.pool.extractProjectName(fullPath),
             onConnected: (cdp, projectName, channel) => {
                 setupWorkspaceDetectors(cdp, projectName, channel);
@@ -2491,24 +2491,16 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     // /new command
     bot.command('new', async (ctx) => {
         const ch = getChannel(ctx);
-        const key = channelKey(ch);
-        const session = chatSessionRepo.findByChannelId(key);
-        const binding = workspaceBindingRepo.findByChannelId(key);
-        const workspaceName = session?.workspacePath ?? binding?.workspacePath;
-
-        if (!workspaceName) {
-            await ctx.reply('⚠️ No workspace is bound to this chat. Use /workspace to select one.');
+        const resolved = await resolveWorkspaceAndCdp(ch);
+        if (!resolved.ok) {
+            await ctx.reply(resolved.message);
             return;
         }
 
-        const workspacePath = workspaceService.getWorkspacePath(workspaceName);
-        let cdp;
-        try { cdp = await bridge.pool.getOrConnect(workspacePath); }
-        catch (e: any) { await ctx.reply(`⚠️ Failed to connect: ${e.message}`); return; }
-
         try {
-            const chatResult = await chatSessionService.startNewChat(cdp);
+            const chatResult = await chatSessionService.startNewChat(resolved.cdp);
             if (chatResult.ok) {
+                const key = channelKey(ch);
                 chatSessionRepo.resetSession(key);
                 await replyHtml(ctx, `<b>💬 New Chat Started</b>\nSend your message now.`);
             } else {
