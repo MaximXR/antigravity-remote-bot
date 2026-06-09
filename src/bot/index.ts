@@ -1891,7 +1891,22 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                                 break;
                             }
                         }
-                        const projectName = matchedWorkspace ? matchedWorkspace.name : (title.split(/\s[—–-]\s/)[0] || 'Unknown');
+
+                        // Parse project name from title as fallback
+                        const titleParts = title.split(/\s[—–-]\s/);
+                        const parsedProjectName = titleParts.length >= 2 ? titleParts[titleParts.length - 2] : (titleParts[0] || 'Unknown');
+                        const cleanParsedName = parsedProjectName.replace(/\s*\([^)]+\)$/, '').replace(/\.code-workspace$/i, '').trim();
+
+                        // Fallback matching by project name equality
+                        if (!matchedWorkspace && cleanParsedName !== 'Unknown') {
+                            const normParsed = cleanParsedName.toLowerCase();
+                            matchedWorkspace = recentWorkspaces.find(w => {
+                                const cleanWName = w.name.replace(/\.code-workspace$/i, '').toLowerCase().trim();
+                                return cleanWName === normParsed;
+                            }) || null;
+                        }
+
+                        const projectName = matchedWorkspace ? matchedWorkspace.name : cleanParsedName;
                         activeWindows.push({
                             port,
                             title,
