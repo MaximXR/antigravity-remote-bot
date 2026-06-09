@@ -102,7 +102,10 @@ const SCRAPE_PAST_CONVERSATIONS_SCRIPT = `(() => {
 
     // Find the scrollable conversation list container
     const containers = Array.from(document.querySelectorAll('div[class*="overflow-auto"], div[class*="overflow-y-scroll"]'));
-    const container = containers.find((c) => isVisible(c) && c.querySelectorAll('div[class*="cursor-pointer"]').length > 0) || document;
+    const container = document.getElementById('fastpick-listbox') ||
+        document.querySelector('div[class*="jetski-fast-pick"] div[class*="overflow"]') ||
+        containers.find((c) => isVisible(c) && c.querySelectorAll('div[class*="cursor-pointer"]').length > 0) ||
+        document;
 
     // Detect the "Other Conversations" section boundary.
     // Sessions below this header belong to other projects and must be excluded.
