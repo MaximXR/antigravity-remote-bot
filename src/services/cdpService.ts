@@ -331,14 +331,14 @@ export class CdpService extends EventEmitter {
      * @param workspacePath Full workspace path (e.g., /home/user/Code/MyProject)
      * @returns true on successful connection
      */
-    async discoverAndConnectForWorkspace(workspacePath: string): Promise<boolean> {
+    async discoverAndConnectForWorkspace(workspacePath: string, forceVerify: boolean = false): Promise<boolean> {
         const projectName = extractProjectNameFromPath(workspacePath);
         this.currentWorkspacePath = workspacePath;
 
         // If already connected to the expected project, reuse the active connection directly.
         // We avoid calling verifyCurrentWorkspace on every message because DOM probing
         // is slow and fails when the sidebar/explorer is closed, triggering false reconnections.
-        if (this.isConnectedFlag && this.currentWorkspaceName === projectName) {
+        if (!forceVerify && this.isConnectedFlag && this.currentWorkspaceName === projectName) {
             return true;
         }
 

@@ -51,7 +51,7 @@ export class CdpConnectionPool extends EventEmitter {
             if (existing.isConnected()) {
                 try {
                     // Re-validate that the still-open window is actually bound to this workspace.
-                    await existing.discoverAndConnectForWorkspace(workspacePath);
+                    await existing.discoverAndConnectForWorkspace(workspacePath, true);
                     return existing;
                 } catch {
                     // Connection dropped during re-validation; close WebSocket and clean up
