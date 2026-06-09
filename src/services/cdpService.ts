@@ -339,7 +339,8 @@ export class CdpService extends EventEmitter {
         workspacePath: string,
         forceVerify: boolean = false,
         openInNewWindow: boolean = false,
-        targetPort?: number
+        targetPort?: number,
+        allowLaunch: boolean = true
     ): Promise<boolean> {
         const projectName = extractProjectNameFromPath(workspacePath);
         this.currentWorkspacePath = workspacePath;
@@ -353,7 +354,7 @@ export class CdpService extends EventEmitter {
 
         this.isSwitchingWorkspace = true;
         try {
-            return await this._discoverAndConnectForWorkspaceImpl(workspacePath, projectName, openInNewWindow, targetPort);
+            return await this._discoverAndConnectForWorkspaceImpl(workspacePath, projectName, openInNewWindow, targetPort, allowLaunch);
         } finally {
             this.isSwitchingWorkspace = false;
         }
@@ -388,7 +389,8 @@ export class CdpService extends EventEmitter {
         workspacePath: string,
         projectName: string,
         openInNewWindow: boolean = false,
-        targetPort?: number
+        targetPort?: number,
+        allowLaunch: boolean = true
     ): Promise<boolean> {
         if (workspacePath.startsWith('empty-workspace:')) {
             const parts = workspacePath.split(':');
@@ -440,6 +442,9 @@ export class CdpService extends EventEmitter {
 
         if (respondingPort === null) {
             // Launch Antigravity if no port responds
+            if (!allowLaunch) {
+                throw new Error(`Antigravity is not running and auto-launch is disabled.`);
+            }
             return this.launchAndConnectWorkspace(workspacePath, projectName);
         }
 
@@ -484,11 +489,17 @@ export class CdpService extends EventEmitter {
 
         // If explicitly requested to open in new window, launch it now
         if (openInNewWindow) {
+            if (!allowLaunch) {
+                throw new Error(`Workspace "${projectName}" requested in new window, but launch is disabled.`);
+            }
             logger.info(`[CdpService] Workspace "${projectName}" requested in new window. Launching...`);
             return this.launchAndConnectWorkspace(workspacePath, projectName);
         }
 
         // 3. If not found, open the workspace in the running IDE
+        if (!allowLaunch) {
+            throw new Error(`Workspace "${projectName}" is not open and auto-launch is disabled.`);
+        }
         logger.info(`[CdpService] Workspace "${projectName}" not found open. Opening it in the running IDE on port ${respondingPort}...`);
         const opened = await this.openWorkspaceInRunningIde(workspacePath, respondingPort);
         if (opened) {
@@ -1039,7 +1050,7 @@ export class CdpService extends EventEmitter {
             try {
                 this.contexts = [];
                 if (this.currentWorkspacePath) {
-                    await this.discoverAndConnectForWorkspace(this.currentWorkspacePath);
+                    await this.discoverAndConnectForWorkspace(this.currentWorkspacePath, false, false, undefined, false);
                 } else {
                     await this.discoverTarget();
                     await this.connect();

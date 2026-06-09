@@ -42,7 +42,7 @@ export class CdpConnectionPool extends EventEmitter {
      * @param workspacePath Full path of the workspace
      * @returns Connected CdpService
      */
-    async getOrConnect(workspacePath: string, openInNewWindow: boolean = false, targetPort?: number): Promise<CdpService> {
+    async getOrConnect(workspacePath: string, openInNewWindow: boolean = false, targetPort?: number, allowLaunch: boolean = true): Promise<CdpService> {
         const projectName = this.extractProjectName(workspacePath);
 
         // Return existing connection if available
@@ -51,7 +51,7 @@ export class CdpConnectionPool extends EventEmitter {
             if (existing.isConnected()) {
                 try {
                     // Re-validate that the still-open window is actually bound to this workspace.
-                    await existing.discoverAndConnectForWorkspace(workspacePath, true, openInNewWindow, targetPort);
+                    await existing.discoverAndConnectForWorkspace(workspacePath, true, openInNewWindow, targetPort, allowLaunch);
                     return existing;
                 } catch {
                     // Connection dropped during re-validation; close WebSocket and clean up
@@ -71,7 +71,7 @@ export class CdpConnectionPool extends EventEmitter {
         }
 
         // Start a new connection
-        const connectPromise = this.createAndConnect(workspacePath, projectName, openInNewWindow, targetPort);
+        const connectPromise = this.createAndConnect(workspacePath, projectName, openInNewWindow, targetPort, allowLaunch);
         this.connectingPromises.set(projectName, connectPromise);
 
         try {
@@ -257,7 +257,8 @@ export class CdpConnectionPool extends EventEmitter {
         workspacePath: string,
         projectName: string,
         openInNewWindow: boolean = false,
-        targetPort?: number
+        targetPort?: number,
+        allowLaunch: boolean = true
     ): Promise<CdpService> {
         // Disconnect old connection if exists
         const old = this.connections.get(projectName);
@@ -288,7 +289,7 @@ export class CdpConnectionPool extends EventEmitter {
         });
 
         // Connect to the workspace
-        await cdp.discoverAndConnectForWorkspace(workspacePath, false, openInNewWindow, targetPort);
+        await cdp.discoverAndConnectForWorkspace(workspacePath, false, openInNewWindow, targetPort, allowLaunch);
         this.connections.set(projectName, cdp);
 
         return cdp;

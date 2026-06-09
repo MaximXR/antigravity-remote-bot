@@ -142,6 +142,8 @@ function stripHtmlForFile(html: string): string {
 
 const userStopRequestedChannels = new Set<string>();
 const statusWindowPathCache = new Map<string, string>();
+const restoreWindowPathCache = new Map<string, string>();
+const promptSelectionSentChannels = new Set<string>();
 
 // Interrupt state is managed by ../services/interruptState.ts
 // (addPendingInterrupt, drainPendingInterrupts, etc.)
@@ -1529,6 +1531,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     await ensureAntigravityRunning();
 
     const bridge = initCdpBridge(config.autoApproveFileEdits);
+    (bridge as any).db = db;
     bridge.botToken = config.telegramBotToken;
 
     const chatSessionService = new ChatSessionService();
@@ -1636,12 +1639,71 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }).catch((err) => logger.error('[Bot] Failed to send reconnect notification:', err));
     });
 
-    bridge.pool.on('workspace:reconnectFailed', (projectName: string) => {
+    bridge.pool.on('workspace:reconnectFailed', async (projectName: string) => {
         const channel = bridge.lastActiveChannel;
         if (!channel || !bridge.botApi) return;
-        bridge.botApi.sendMessage(channel.chatId, `❌ <b>${escapeHtml(projectName)}</b>: Reconnection failed. Send a message to retry.`, {
+
+        // Find workspace path from bindings
+        const binding = workspaceBindingRepo.findByChannelId(channelKey(channel));
+        const activeProjectName = binding ? bridge.pool.extractProjectName(binding.workspacePath) : null;
+        const isMain = activeProjectName === projectName;
+
+        // Try to get workspace path
+        let workspacePath = '';
+        if (binding && isMain) {
+            workspacePath = binding.workspacePath;
+        } else {
+            // Find in recent workspaces or bindings by name
+            const allBindings = workspaceBindingRepo.findAll();
+            const found = allBindings.find(b => bridge.pool.extractProjectName(b.workspacePath) === projectName);
+            if (found) {
+                workspacePath = found.workspacePath;
+            } else {
+                const recent = workspaceService.getRecentWorkspaces();
+                const matched = recent.find(w => w.name === projectName);
+                if (matched) workspacePath = matched.path;
+            }
+        }
+
+        const keyboard = new InlineKeyboard();
+        
+        if (workspacePath) {
+            const shortId = `rest_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+            restoreWindowPathCache.set(shortId, workspacePath);
+            keyboard.text(`🔄 ${t('Restore')} ${projectName}`, `restore_window:${shortId}`).row();
+        }
+
+        let text = `❌ <b>${escapeHtml(projectName)}</b>: ${t('Connection closed.')}\n\n`;
+
+        if (isMain) {
+            text += `${t('The active workspace is offline. You can restore it or switch to another open window:')}\n`;
+            
+            // Scan other active windows
+            const activeWindows = await scanActiveWindows();
+            const otherWindows = activeWindows.filter(w => w.projectName !== projectName);
+            
+            if (otherWindows.length > 0) {
+                text += `\n<b>${t('Other open windows:')}</b>\n`;
+                let btnCount = 0;
+                for (const win of otherWindows) {
+                    if (win.workspacePath) {
+                        const cleanName = win.projectName.replace(/\.code-workspace$/i, '');
+                        const swId = `sw_rec_${btnCount++}_${Date.now()}`;
+                        statusWindowPathCache.set(swId, win.workspacePath);
+                        keyboard.text(`🔌 ${cleanName}`, `switch_window:${swId}`).row();
+                    }
+                }
+            } else {
+                text += `\n<i>${t('No other open IDE windows detected.')}</i>`;
+            }
+        } else {
+            text += `${t('Would you like to restore this workspace window?')}`;
+        }
+
+        bridge.botApi.sendMessage(channel.chatId, text, {
             parse_mode: 'HTML',
             message_thread_id: channel.threadId,
+            reply_markup: keyboard,
         }).catch((err) => logger.error('[Bot] Failed to send reconnect-failed notification:', err));
     });
 
@@ -2765,6 +2827,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         openInNewWindow: boolean = false,
         targetPort?: number
     ) => {
+        promptSelectionSentChannels.delete(key);
         const isForum = ctx.chat?.type === 'supergroup' && (ctx.chat as any).is_forum === true;
 
         if (config.useTopics && isForum && !ch.threadId) {
@@ -2957,8 +3020,36 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             const folderName = path.basename(workspacePath);
             const cleanFolderName = folderName.replace(/\.code-workspace$/i, '');
 
+            promptSelectionSentChannels.delete(channelKey(ch));
             await switchWorkspaceInternal(ctx, workspacePath, false);
             await ctx.answerCallbackQuery({ text: `Selected: ${cleanFolderName}` });
+            return;
+        }
+
+        // Restore window button click
+        if (data.startsWith('restore_window:')) {
+            const shortId = data.replace('restore_window:', '');
+            const workspacePath = restoreWindowPathCache.get(shortId);
+            if (!workspacePath) {
+                await ctx.answerCallbackQuery({ text: 'Restore path not found in cache.' });
+                return;
+            }
+
+            if (!workspaceService.exists(workspacePath)) {
+                await ctx.answerCallbackQuery({ text: `Workspace "${workspacePath}" not found.` });
+                return;
+            }
+
+            const folderName = path.basename(workspacePath);
+            const cleanFolderName = folderName.replace(/\.code-workspace$/i, '');
+            const fullPath = workspaceService.getWorkspacePath(workspacePath);
+            const key = channelKey(ch);
+            const guildId = String(ch.chatId);
+
+            promptSelectionSentChannels.delete(key);
+            await ctx.answerCallbackQuery({ text: `Restoring ${cleanFolderName}...` });
+            await replyHtml(ctx, `🔄 <b>${t('Restoring workspace')}...</b>\nLaunching <b>${cleanFolderName}</b> window.`);
+            await selectAndConnectWorkspace(ctx, ch, workspacePath, cleanFolderName, fullPath, key, guildId, false, undefined);
             return;
         }
 
@@ -3908,7 +3999,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             };
             
             const connectProactively = () => {
-                bridge.pool.getOrConnect(workspacePath).then((cdp) => {
+                bridge.pool.getOrConnect(workspacePath, false, undefined, false).then((cdp) => {
                     const projectName = bridge.pool.extractProjectName(binding.workspacePath);
                     logger.info(`[startup] Proactively connected to workspace: ${projectName} (${binding.workspacePath})`);
                     
@@ -3957,6 +4048,90 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     } catch (e: any) {
         logger.error('[startup] Proactive workspace connections failed:', e?.message || e);
     }
+
+    const scanAndConnectNewWindows = async () => {
+        try {
+            const activeWindows = await scanActiveWindows();
+            for (const win of activeWindows) {
+                if (!win.workspacePath) continue;
+                
+                // Check if already connected
+                if (bridge.pool.getConnected(win.projectName)) continue;
+
+                // Find channel target: either from DB, or fallback to last active channel
+                let targetChannel: TelegramChannel | null = null;
+                const bindings = workspaceBindingRepo.findAll();
+                const matched = bindings.find(b => {
+                    const normB = b.workspacePath.toLowerCase().replace(/\//g, '\\').trim();
+                    const normW = win.workspacePath!.toLowerCase().replace(/\//g, '\\').trim();
+                    return normB === normW;
+                });
+
+                if (matched) {
+                    targetChannel = {
+                        chatId: matched.channelId.includes(':') ? Number(matched.channelId.split(':')[0]) : Number(matched.channelId),
+                        threadId: matched.channelId.includes(':') ? Number(matched.channelId.split(':')[1]) : undefined,
+                    };
+                } else if (bridge.lastActiveChannel) {
+                    targetChannel = bridge.lastActiveChannel;
+                }
+
+                if (targetChannel) {
+                    logger.info(`[background] Auto-connecting to newly discovered window: ${win.projectName} (${win.workspacePath})`);
+                    bridge.pool.getOrConnect(win.workspacePath, false, undefined, false).then((cdp) => {
+                        setupWorkspaceDetectors(cdp, win.projectName, targetChannel!);
+                        logger.info(`[background] Successfully connected to window: ${win.projectName}`);
+                    }).catch((err) => {
+                        logger.debug(`[background] Failed auto-connection to ${win.projectName}:`, err?.message || err);
+                    });
+                }
+            }
+
+            // Prompt user if multiple windows are open but none are connected to the current channel/chat
+            if (activeWindows.length > 1) {
+                const bindings = workspaceBindingRepo.findAll();
+                for (const binding of bindings) {
+                    const ch: TelegramChannel = {
+                        chatId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[0]) : Number(binding.channelId),
+                        threadId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[1]) : undefined,
+                    };
+                    const key = channelKey(ch);
+                    
+                    const bindingProjectName = bridge.pool.extractProjectName(binding.workspacePath);
+                    const isBindingConnected = !!bridge.pool.getConnected(bindingProjectName);
+                    
+                    if (!isBindingConnected && !promptSelectionSentChannels.has(key)) {
+                        promptSelectionSentChannels.add(key);
+                        
+                        let text = `🖥️ <b>${t('Multiple open IDE windows detected:')}</b>\n\n`;
+                        text += `${t('Select which workspace window you want to work with:')}`;
+                        
+                        const keyboard = new InlineKeyboard();
+                        let btnCount = 0;
+                        for (const win of activeWindows) {
+                            if (win.workspacePath) {
+                                const cleanName = win.projectName.replace(/\.code-workspace$/i, '');
+                                const swId = `sw_scan_${btnCount++}_${Date.now()}`;
+                                statusWindowPathCache.set(swId, win.workspacePath);
+                                keyboard.text(`🔌 ${cleanName}`, `switch_window:${swId}`).row();
+                            }
+                        }
+                        
+                        bot.api.sendMessage(ch.chatId, text, {
+                            parse_mode: 'HTML',
+                            message_thread_id: ch.threadId,
+                            reply_markup: keyboard
+                        }).catch(e => logger.error('[background] Failed to send multiple windows selection:', e));
+                    }
+                }
+            }
+        } catch (e: any) {
+            logger.debug(`[background] scanAndConnectNewWindows failed:`, e?.message || e);
+        }
+    };
+
+    // Run background scanner every 15s
+    setInterval(scanAndConnectNewWindows, 15000);
 
     logger.info('Starting Remoat Telegram bot...');
 

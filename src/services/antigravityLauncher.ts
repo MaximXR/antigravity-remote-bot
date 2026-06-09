@@ -1,7 +1,8 @@
 import { logger } from '../utils/logger';
 import { CDP_PORTS } from '../utils/cdpPorts';
-import { getAntigravityCdpHint } from '../utils/pathUtils';
+import { getAntigravityCdpHint, getAntigravityCliPath } from '../utils/pathUtils';
 import * as http from 'http';
+import { spawn } from 'child_process';
 
 /**
  * Check if CDP responds on the specified port.
@@ -44,11 +45,29 @@ export async function ensureAntigravityRunning(): Promise<void> {
         return;
     }
 
+    logger.info('[AntigravityLauncher] Antigravity CDP ports are not responding. Launching default Antigravity IDE...');
+    try {
+        const antigravityCli = getAntigravityCliPath();
+        const args = ['--remote-debugging-port=9223'];
+        logger.debug(`[AntigravityLauncher] Spawning IDE: ${antigravityCli} ${args.join(' ')}`);
+        const child = spawn(antigravityCli, args, {
+            detached: true,
+            stdio: 'ignore',
+            shell: process.platform === 'win32'
+        });
+        child.unref();
+
+        // Wait briefly (e.g. 3 seconds) for the IDE to launch and bind port
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+    } catch (e: any) {
+        logger.error(`[AntigravityLauncher] Failed to auto-launch Antigravity IDE: ${e?.message || e}`);
+    }
+
     logger.warn('');
     logger.warn('='.repeat(70));
-    logger.warn('  Antigravity CDP ports are not responding');
+    logger.warn('  Antigravity CDP ports were not responding. Attempted launch.');
     logger.warn('');
-    logger.warn('  Launch Antigravity with CDP enabled:');
+    logger.warn('  If it did not launch, please open it manually:');
     logger.warn('    remoat open');
     logger.warn('');
     logger.warn('  Or manually:');

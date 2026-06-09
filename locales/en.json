@@ -123,5 +123,15 @@
   "When disabled, messages will only be mirrored from the currently active workspace in this chat.": "When disabled, messages will only be mirrored from the currently active workspace in this chat.",
   "Messages and progress from all open IDE windows will now be mirrored.": "Messages and progress from all open IDE windows will now be mirrored.",
   "Messages will now only be mirrored from the selected active workspace.": "Messages will now only be mirrored from the selected active workspace.",
-  "Mirror all windows": "Mirror all windows"
+  "Mirror all windows": "Mirror all windows",
+  "Restore": "Restore",
+  "Connection closed.": "Connection closed.",
+  "The active workspace is offline. You can restore it or switch to another open window:": "The active workspace is offline. You can restore it or switch to another open window:",
+  "Other open windows:": "Other open windows:",
+  "No other open IDE windows detected.": "No other open IDE windows detected.",
+  "Would you like to restore this workspace window?": "Would you like to restore this workspace window?",
+  "Multiple open IDE windows detected:": "Multiple open IDE windows detected:",
+  "Select which workspace window you want to work with:": "Select which workspace window you want to work with:",
+  "Restoring workspace...": "Restoring workspace...",
+  "Restoring workspace": "Restoring workspace"
 }

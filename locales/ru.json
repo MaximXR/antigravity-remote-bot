@@ -156,5 +156,15 @@
   "Mirror all windows": "Трансляция всех окон",
   "Dialogs": "Диалоги",
   "History": "История",
-  "Unknown": "Неизвестно"
+  "Unknown": "Неизвестно",
+  "Restore": "Восстановить",
+  "Connection closed.": "Соединение закрыто.",
+  "The active workspace is offline. You can restore it or switch to another open window:": "Активная рабочая область отключена. Вы можете восстановить её или перейти в другое открытое окно:",
+  "Other open windows:": "Другие открытые окна:",
+  "No other open IDE windows detected.": "Других открытых окон IDE не обнаружено.",
+  "Would you like to restore this workspace window?": "Хотите восстановить это окно рабочей области?",
+  "Multiple open IDE windows detected:": "Обнаружено несколько открытых окон IDE:",
+  "Select which workspace window you want to work with:": "Выберите, с какой рабочей областью вы хотите работать:",
+  "Restoring workspace...": "Восстановление рабочей области...",
+  "Restoring workspace": "Восстановление рабочей области"
 }

@@ -248,18 +248,51 @@ export function ensureApprovalDetector(
     const existing = bridge.pool.getApprovalDetector(projectName);
     if (existing && existing.isActive()) return;
 
+    const db = (bridge as any).db;
+
+    if (db) {
+        try {
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS active_approvals (
+                    project_name TEXT NOT NULL PRIMARY KEY,
+                    approval_key TEXT NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    chat_id TEXT NOT NULL
+                )
+            `);
+        } catch (err) {
+            logger.error('[ApprovalDetector] Failed to create active_approvals table:', err);
+        }
+    }
+
     let lastMessageId: number | null = null;
     let lastMessageChatId: number | string | null = null;
 
     const detector = new ApprovalDetector({
         cdpService: cdp,
         pollIntervalMs: 2000,
-        onResolved: () => {
-            if (!lastMessageId || !lastMessageChatId || !bridge.botApi) return;
-            const msgId = lastMessageId;
-            const chatId = lastMessageChatId;
+        onResolved: async () => {
+            let msgId = lastMessageId;
+            let chatId = lastMessageChatId;
+
+            if (db) {
+                try {
+                    const row = db.prepare('SELECT message_id, chat_id FROM active_approvals WHERE project_name = ?').get(projectName) as any;
+                    if (row) {
+                        msgId = row.message_id;
+                        chatId = row.chat_id;
+                        db.prepare('DELETE FROM active_approvals WHERE project_name = ?').run(projectName);
+                    }
+                } catch (err) {
+                    logger.error('[ApprovalDetector] Failed to clean active approval from DB:', err);
+                }
+            }
+
+            if (!msgId || !chatId || !bridge.botApi) return;
+            
             lastMessageId = null;
             lastMessageChatId = null;
+
             bridge.botApi.editMessageReplyMarkup(chatId, msgId, { reply_markup: undefined })
                 .catch((e) => logger.debug('[ApprovalDetector] Markup remove failed (expected if already removed):', e));
         },
@@ -275,6 +308,36 @@ export function ensureApprovalDetector(
             }
 
             const targetChannelStr = targetChannel.threadId ? String(targetChannel.threadId) : String(targetChannel.chatId);
+            const key = `${info.approveText}::${info.description}`;
+
+            // Check if there is already an active approval for this project in the database
+            let existingRow: any = null;
+            if (db) {
+                try {
+                    existingRow = db.prepare('SELECT message_id, chat_id, approval_key FROM active_approvals WHERE project_name = ?').get(projectName);
+                } catch (err) {
+                    logger.error('[ApprovalDetector] Failed to query active approvals from DB:', err);
+                }
+            }
+
+            if (existingRow) {
+                if (existingRow.approval_key === key) {
+                    // Same approval, bind to memory and do not send duplicate
+                    lastMessageId = existingRow.message_id;
+                    lastMessageChatId = existingRow.chat_id;
+                    logger.debug(`[ApprovalDetector:${projectName}] Approval already mirrored (msgId: ${existingRow.message_id}), skipping duplicate.`);
+                    return;
+                } else {
+                    // Different approval, remove keyboard from old message and delete it from DB
+                    bridge.botApi.editMessageReplyMarkup(existingRow.chat_id, existingRow.message_id, { reply_markup: undefined })
+                        .catch(() => {});
+                    if (db) {
+                        try {
+                            db.prepare('DELETE FROM active_approvals WHERE project_name = ?').run(projectName);
+                        } catch (err) {}
+                    }
+                }
+            }
 
             if (bridge.autoAccept.isEnabled()) {
                 const accepted = await detector.alwaysAllowButton() || await detector.approveButton();
@@ -306,6 +369,21 @@ export function ensureApprovalDetector(
             if (msgId) {
                 lastMessageId = msgId;
                 lastMessageChatId = targetChannel.chatId;
+
+                if (db) {
+                    try {
+                        db.prepare(`
+                            INSERT INTO active_approvals (project_name, approval_key, message_id, chat_id)
+                            VALUES (?, ?, ?, ?)
+                            ON CONFLICT(project_name) DO UPDATE SET
+                                approval_key = excluded.approval_key,
+                                message_id = excluded.message_id,
+                                chat_id = excluded.chat_id
+                        `).run(projectName, key, msgId, String(targetChannel.chatId));
+                    } catch (err) {
+                        logger.error('[ApprovalDetector] Failed to save active approval to DB:', err);
+                    }
+                }
             }
         },
     });
@@ -444,6 +522,7 @@ export function ensureUserMessageDetector(
         cdpService: cdp,
         pollIntervalMs: 2000,
         onUserMessage,
+        db: (bridge as any).db,
     });
 
     detector.start();

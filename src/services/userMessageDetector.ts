@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import Database from 'better-sqlite3';
 import { logger } from '../utils/logger';
 import { CdpService } from './cdpService';
 
@@ -15,6 +16,8 @@ export interface UserMessageDetectorOptions {
     pollIntervalMs?: number;
     /** Callback when a new user message is detected. Return false if skipped/not accepted. */
     onUserMessage: (info: UserMessageInfo) => boolean | void;
+    /** SQLite database connection for deduplication */
+    db?: Database.Database;
 }
 
 /**
@@ -99,6 +102,7 @@ export class UserMessageDetector {
     private readonly cdpService: CdpService;
     private readonly pollIntervalMs: number;
     private readonly onUserMessage: (info: UserMessageInfo) => boolean | void;
+    private readonly db?: Database.Database;
 
     private pollTimer: NodeJS.Timeout | null = null;
     private isRunning: boolean = false;
@@ -116,6 +120,35 @@ export class UserMessageDetector {
         this.cdpService = options.cdpService;
         this.pollIntervalMs = options.pollIntervalMs ?? 2000;
         this.onUserMessage = options.onUserMessage;
+        this.db = options.db;
+
+        if (this.db) {
+            try {
+                this.db.exec(`
+                    CREATE TABLE IF NOT EXISTS seen_user_messages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        message_hash TEXT NOT NULL UNIQUE,
+                        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    )
+                `);
+            } catch (err) {
+                logger.error('[UserMessageDetector] Failed to create seen_user_messages table:', err);
+            }
+        }
+    }
+
+    /**
+     * Check if seen_user_messages table is completely empty (first run).
+     */
+    private isDbEmpty(): boolean {
+        if (!this.db) return true;
+        try {
+            const row = this.db.prepare('SELECT 1 FROM seen_user_messages LIMIT 1').get();
+            return !row;
+        } catch (err) {
+            logger.error('[UserMessageDetector] Error checking if DB is empty:', err);
+            return true;
+        }
     }
 
     /**
@@ -212,16 +245,56 @@ export class UserMessageDetector {
                 const hash = computeEchoHash(info.text);
                 const preview = info.text.slice(0, 40);
 
-                // First poll: seed the current DOM state without firing callback
+                const wasPriming = this.isPriming;
                 if (this.isPriming) {
                     this.isPriming = false;
+                }
+
+                // Check in DB
+                let alreadySeenInDb = false;
+                if (this.db) {
+                    try {
+                        const row = this.db.prepare('SELECT 1 FROM seen_user_messages WHERE message_hash = ?').get(hash);
+                        if (row) {
+                            alreadySeenInDb = true;
+                        }
+                    } catch (err) {
+                        logger.error('[UserMessageDetector] DB query error:', err);
+                    }
+                }
+
+                if (alreadySeenInDb) {
                     this.lastDetectedHash = hash;
                     this.addToSeenHashes(hash);
-                    logger.debug(`[UserMessageDetector] Primed with existing message: "${preview}..."`);
+                    if (wasPriming) {
+                        logger.debug(`[UserMessageDetector] Primed with already seen message (in DB): "${preview}..."`);
+                    }
                     return;
                 }
 
-                // Skip if same as last detected message
+                // First poll (and not in DB): seed the current DOM state without firing callback
+                // But only if the database is completely empty (first run). If the DB has history,
+                // this is a restart, so we forward the unmirrored message to Telegram.
+                if (wasPriming) {
+                    const dbEmpty = this.isDbEmpty();
+                    if (dbEmpty) {
+                        this.lastDetectedHash = hash;
+                        this.addToSeenHashes(hash);
+                        if (this.db) {
+                            try {
+                                this.db.prepare('INSERT OR IGNORE INTO seen_user_messages (message_hash) VALUES (?)').run(hash);
+                            } catch (err) {
+                                logger.error('[UserMessageDetector] DB insert error:', err);
+                            }
+                        }
+                        logger.debug(`[UserMessageDetector] Primed (empty DB) with existing message: "${preview}..."`);
+                        return;
+                    } else {
+                        logger.debug(`[UserMessageDetector] Startup check: found unmirrored message: "${preview}...", forwarding to Telegram`);
+                    }
+                }
+
+                // Skip if same as last detected message in memory
                 if (hash === this.lastDetectedHash) return;
 
                 // Skip if already seen (defense-in-depth dedup)
@@ -236,6 +309,13 @@ export class UserMessageDetector {
                     logger.debug(`[UserMessageDetector] Echo hash match, skipping: "${preview}..."`);
                     this.lastDetectedHash = hash;
                     this.addToSeenHashes(hash);
+                    if (this.db) {
+                        try {
+                            this.db.prepare('INSERT OR IGNORE INTO seen_user_messages (message_hash) VALUES (?)').run(hash);
+                        } catch (err) {
+                            logger.error('[UserMessageDetector] DB insert error:', err);
+                        }
+                    }
                     return;
                 }
 
@@ -244,6 +324,13 @@ export class UserMessageDetector {
                 if (accepted !== false) {
                     this.lastDetectedHash = hash;
                     this.addToSeenHashes(hash);
+                    if (this.db) {
+                        try {
+                            this.db.prepare('INSERT OR IGNORE INTO seen_user_messages (message_hash) VALUES (?)').run(hash);
+                        } catch (err) {
+                            logger.error('[UserMessageDetector] DB insert error:', err);
+                        }
+                    }
                 } else {
                     logger.debug(`[UserMessageDetector] Callback rejected message: "${preview}...", not updating lastDetectedHash`);
                 }
