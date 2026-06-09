@@ -111,5 +111,17 @@
   "Active windows detected": "Active windows detected",
   "Choose how to open it": "Choose how to open it",
   "Open in new window": "Open in new window",
-  "Switch window": "Switch window"
+  "Switch window": "Switch window",
+  "Toggle active workspace only messages": "Toggle active workspace only messages",
+  "Active Workspace Only Settings": "Active Workspace Only Settings",
+  "Current status:": "Current status:",
+  "Active Workspace Only: ON": "Active Workspace Only: ON",
+  "Active Workspace Only: OFF": "Active Workspace Only: OFF",
+  "Turn ON": "Turn ON",
+  "Turn OFF": "Turn OFF",
+  "When enabled, the bot will only forward user messages and AI responses/progress from the workspace that is currently selected (active) in this chat.": "When enabled, the bot will only forward user messages and AI responses/progress from the workspace that is currently selected (active) in this chat.",
+  "When disabled, messages from all open IDE windows will be forwarded.": "When disabled, messages from all open IDE windows will be forwarded.",
+  "Messages and progress will only be mirrored from the selected workspace in this chat.": "Messages and progress will only be mirrored from the selected workspace in this chat.",
+  "Messages and progress from all open IDE windows will be mirrored.": "Messages and progress from all open IDE windows will be mirrored.",
+  "Active workspace only": "Active workspace only"
 }

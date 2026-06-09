@@ -19,6 +19,7 @@ export interface PersistedConfig {
     logLevel?: LogLevel;
     extractionMode?: 'legacy' | 'structured';
     useTopics?: boolean;
+    onlyActiveWorkspaceMessages?: boolean;
 }
 
 function getConfigDir(): string {
@@ -86,6 +87,12 @@ function mergeConfig(persisted: PersistedConfig): AppConfig {
         true,
     );
 
+    const onlyActiveWorkspaceMessages = resolveBoolean(
+        process.env.ONLY_ACTIVE_WORKSPACE_MESSAGES,
+        persisted.onlyActiveWorkspaceMessages,
+        true,
+    );
+
     return {
         telegramBotToken: token,
         allowedUserIds,
@@ -94,6 +101,7 @@ function mergeConfig(persisted: PersistedConfig): AppConfig {
         logLevel,
         extractionMode,
         useTopics,
+        onlyActiveWorkspaceMessages,
     };
 }
 

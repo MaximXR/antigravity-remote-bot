@@ -141,5 +141,17 @@
   "Active windows detected": "Обнаружены активные окна",
   "Choose how to open it": "Выберите, как его открыть",
   "Open in new window": "Открыть в новом окне",
-  "Switch window": "Переключить окно"
+  "Switch window": "Переключить окно",
+  "Toggle active workspace only messages": "Пересылка сообщений только из активного окна",
+  "Active Workspace Only Settings": "Настройки пересылки сообщений",
+  "Current status:": "Текущий статус:",
+  "Active Workspace Only: ON": "Только активная рабочая область: ВКЛ",
+  "Active Workspace Only: OFF": "Только активная рабочая область: ВЫКЛ",
+  "Turn ON": "Включить",
+  "Turn OFF": "Выключить",
+  "When enabled, the bot will only forward user messages and AI responses/progress from the workspace that is currently selected (active) in this chat.": "Когда включено, бот будет пересылать сообщения пользователя и ответы/прогресс ИИ только из той рабочей области, которая в данный момент выбрана (активна) в этом чате.",
+  "When disabled, messages from all open IDE windows will be forwarded.": "Когда выключено, сообщения из всех открытых окон IDE будут пересылаться.",
+  "Messages and progress will only be mirrored from the selected workspace in this chat.": "Сообщения и прогресс будут транслироваться только из выбранной рабочей области в этом чате.",
+  "Messages and progress from all open IDE windows will be mirrored.": "Сообщения и прогресс будут транслироваться из всех открытых окон IDE.",
+  "Active workspace only": "Только активный воркспейс"
 }

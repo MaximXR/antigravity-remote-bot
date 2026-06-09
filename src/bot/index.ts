@@ -877,6 +877,7 @@ async function mirrorResponseToTelegram(
         topicManager: TelegramTopicManager;
         titleGenerator: TitleGeneratorService;
         modelService: ModelService;
+        workspaceBindingRepo: WorkspaceBindingRepository;
     }
 ): Promise<void> {
     logger.info(`[mirror] Starting response mirror for channel ${channel.chatId} (prompt: "${userPrompt.slice(0, 30)}...")`);
@@ -886,7 +887,20 @@ async function mirrorResponseToTelegram(
     const enqueueResponse = createSerialTaskQueue('response', monitorTraceId);
     const enqueueActivity = createSerialTaskQueue('activity', monitorTraceId);
 
+    const workspaceName = cdp.getCurrentWorkspaceName();
+
+    const shouldSkipMirroring = (): boolean => {
+        const conf = loadConfig();
+        if (!conf.onlyActiveWorkspaceMessages) return false;
+        const binding = options.workspaceBindingRepo.findByChannelId(channelKey(channel));
+        if (!binding) return true;
+        const activeProjectName = bridge.pool.extractProjectName(binding.workspacePath);
+        const currentProjectName = workspaceName ? bridge.pool.extractProjectName(workspaceName) : '';
+        return activeProjectName !== currentProjectName;
+    };
+
     const sendMsg = async (text: string, replyMarkup?: any): Promise<number | null> => {
+        if (shouldSkipMirroring()) return null;
         try {
             const truncated = text.length > TELEGRAM_MSG_LIMIT ? text.slice(0, TELEGRAM_MSG_LIMIT - 20) + '\n...(truncated)' : text;
             logger.info(`[mirror] Sending message to Telegram (${text.slice(0, 40)}...)`);
@@ -904,6 +918,7 @@ async function mirrorResponseToTelegram(
     };
 
     const editMsg = async (msgId: number, text: string, replyMarkup?: any, maxRetries = 3): Promise<void> => {
+        if (shouldSkipMirroring()) return;
         const truncated = text.length > TELEGRAM_MSG_LIMIT ? text.slice(0, TELEGRAM_MSG_LIMIT - 20) + '\n...(truncated)' : text;
         logger.info(`[mirror] Editing message ${msgId} (${text.slice(0, 40)}...)`);
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -934,6 +949,7 @@ async function mirrorResponseToTelegram(
     };
 
     const sendEmbed = (title: string, description: string): Promise<void> => enqueueGeneral(async () => {
+        if (shouldSkipMirroring()) return;
         const text = `<b>${escapeHtml(title)}</b>\n\n${escapeHtml(description)}`;
         await sendMsg(text);
     }, 'send-embed');
@@ -993,7 +1009,6 @@ async function mirrorResponseToTelegram(
     const modelLabel = `${currentModel}`;
     const stopKeyboard = new InlineKeyboard().text('⏹️ Stop', 'stop_generation');
 
-    const workspaceName = cdp.getCurrentWorkspaceName();
     const cleanProjName = workspaceName ? workspaceName.replace(/\.code-workspace$/i, '') : '';
     const ideLabel = cleanProjName ? `IDE: ${cleanProjName}` : 'IDE';
 
@@ -1092,6 +1107,7 @@ async function mirrorResponseToTelegram(
 
     const upsertLiveResponse = (title: string, rawText: string, footer: string, opts?: { expectedVersion?: number; skipWhenFinalized?: boolean; isAlreadyHtml?: boolean; skipTruncation?: boolean; replyMarkup?: any }): Promise<void> =>
         enqueueResponse(async () => {
+            if (shouldSkipMirroring()) return;
             if (opts?.skipWhenFinalized && isFinalized) return;
             if (opts?.expectedVersion !== undefined && opts.expectedVersion !== liveResponseUpdateVersion) return;
             const text = buildLiveResponseText(title, rawText, footer, opts?.isAlreadyHtml, opts?.skipTruncation);
@@ -1108,6 +1124,7 @@ async function mirrorResponseToTelegram(
 
     const refreshProgress = (title: string, footer: string, opts?: { expectedVersion?: number; skipWhenFinalized?: boolean }): Promise<void> =>
         enqueueActivity(async () => {
+            if (shouldSkipMirroring()) return;
             if (opts?.skipWhenFinalized && isFinalized) return;
             if (opts?.expectedVersion !== undefined && opts.expectedVersion !== liveActivityUpdateVersion) return;
             const text = buildProgressMessage(title, footer);
@@ -1125,6 +1142,7 @@ async function mirrorResponseToTelegram(
 
     const setProgressMessage = (htmlContent: string, opts?: { expectedVersion?: number }): Promise<void> =>
         enqueueActivity(async () => {
+            if (shouldSkipMirroring()) return;
             if (opts?.expectedVersion !== undefined && opts.expectedVersion !== liveActivityUpdateVersion) return;
             lastLiveActivityKey = htmlContent.slice(0, 200);
             if (liveActivityMsgId) {
@@ -1135,6 +1153,7 @@ async function mirrorResponseToTelegram(
         }, 'upsert-activity');
 
     const sendGeneratedImages = async (responseText: string): Promise<void> => {
+        if (shouldSkipMirroring()) return;
         const imageIntentPattern = /(image|images|png|jpg|jpeg|gif|webp|illustration|diagram|render)/i;
         const imageUrlPattern = /https?:\/\/\S+\.(png|jpg|jpeg|gif|webp)/i;
         if (!imageIntentPattern.test(userPrompt) && !responseText.includes('![') && !imageUrlPattern.test(responseText)) return;
@@ -1665,6 +1684,16 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 ensurePlanningDetector(bridge, cdp, projectName);
 
                 const onUserMessageCallback = (info: any): boolean => {
+                    const conf = loadConfig();
+                    if (conf.onlyActiveWorkspaceMessages) {
+                        const binding = workspaceBindingRepo.findByChannelId(channelKey(channel));
+                        const activeProjectName = binding ? bridge.pool.extractProjectName(binding.workspacePath) : null;
+                        if (activeProjectName !== projectName) {
+                            logger.debug(`[UserMessageDetector:${projectName}] onlyActiveWorkspaceMessages is true and this is not the active workspace (${activeProjectName}), skipping user message mirror.`);
+                            return true;
+                        }
+                    }
+
                     logger.info(`[UserMessageDetector:${projectName}] Detected user message from IDE: "${info.text.slice(0, 50)}..."`);
                     
                     if (promptDispatcher.isBusy(channel, cdp)) {
@@ -1691,7 +1720,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         chatSessionRepo,
                         topicManager,
                         titleGenerator,
-                        modelService
+                        modelService,
+                        workspaceBindingRepo
                     });
 
                     promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
@@ -1732,7 +1762,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             `/close — ` + t('Terminate active Antigravity session') + `\n\n` +
             `<b>⚙️ ` + t('Settings') + `</b>\n` +
             `/mode — ` + t('Change execution mode') + `\n` +
-            `/model — ` + t('Change LLM model') + `\n\n` +
+            `/model — ` + t('Change LLM model') + `\n` +
+            `/active_only — ` + t('Toggle active workspace only messages') + `\n\n` +
             `<b>💼 ` + t('Workspaces') + `</b>\n` +
             `/workspace — ` + t('Select a workspace') + `\n` +
             `/setworkspacedir — ` + t('Change workspace base directory') + `\n\n` +
@@ -1945,6 +1976,33 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             await sendAutoAcceptUI(
                 async (text, keyboard) => { await replyHtml(ctx, text, keyboard); },
                 bridge.autoAccept,
+            );
+        }
+    });
+
+    // /active_only command
+    bot.command('active_only', async (ctx) => {
+        const arg = (ctx.match || '').trim().toLowerCase();
+        const conf = loadConfig();
+        
+        if (arg === 'on' || arg === 'true' || arg === 'yes' || arg === '1') {
+            ConfigLoader.save({ onlyActiveWorkspaceMessages: true });
+            await ctx.reply(`🟢 <b>${t('Active Workspace Only: ON')}</b>\n${t('Messages and progress will only be mirrored from the selected workspace in this chat.')}`, { parse_mode: 'HTML' });
+        } else if (arg === 'off' || arg === 'false' || arg === 'no' || arg === '0') {
+            ConfigLoader.save({ onlyActiveWorkspaceMessages: false });
+            await ctx.reply(`⚪ <b>${t('Active Workspace Only: OFF')}</b>\n${t('Messages and progress from all open IDE windows will be mirrored.')}`, { parse_mode: 'HTML' });
+        } else {
+            const status = conf.onlyActiveWorkspaceMessages ? '🟢 ' + t('ON') : '⚪ ' + t('OFF');
+            const keyboard = new InlineKeyboard()
+                .text('🟢 ' + t('Turn ON'), 'active_only:on')
+                .text('⚪ ' + t('Turn OFF'), 'active_only:off');
+            
+            await replyHtml(ctx,
+                `<b>⚙️ ${t('Active Workspace Only Settings')}</b>\n\n` +
+                `${t('Current status:')} <b>${status}</b>\n\n` +
+                `${t('When enabled, the bot will only forward user messages and AI responses/progress from the workspace that is currently selected (active) in this chat.')}\n` +
+                `${t('When disabled, messages from all open IDE windows will be forwarded.')}`,
+                keyboard
             );
         }
     });
@@ -2774,7 +2832,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         chatSessionRepo,
                         topicManager,
                         titleGenerator,
-                        modelService
+                        modelService,
+                        workspaceBindingRepo
                     });
                     promptDispatcher.acquireLock(ch, cdp, mirrorPromise);
                 }
@@ -3089,6 +3148,26 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             const action = isDelete ? 'deleted' : 'archived';
             try { await ctx.editMessageText(`✅ Cleanup complete — ${processed} session(s) ${action}.`); } catch (e) { logger.debug('[editMsg] Telegram edit failed (expected for unmodified):', e); }
             await ctx.answerCallbackQuery({ text: `${processed} session(s) ${action}` });
+            return;
+        }        // Active workspace only settings callback
+        if (data.startsWith('active_only:')) {
+            const action = data.replace('active_only:', '');
+            const enable = action === 'on';
+            ConfigLoader.save({ onlyActiveWorkspaceMessages: enable });
+            const status = enable ? '🟢 ' + t('ON') : '⚪ ' + t('OFF');
+            const keyboard = new InlineKeyboard()
+                .text('🟢 ' + t('Turn ON'), 'active_only:on')
+                .text('⚪ ' + t('Turn OFF'), 'active_only:off');
+            try {
+                await ctx.editMessageText(
+                    `<b>⚙️ ${t('Active Workspace Only Settings')}</b>\n\n` +
+                    `${t('Current status:')} <b>${status}</b>\n\n` +
+                    `${t('When enabled, the bot will only forward user messages and AI responses/progress from the workspace that is currently selected (active) in this chat.')}\n` +
+                    `${t('When disabled, messages from all open IDE windows will be forwarded.')}`,
+                    { parse_mode: 'HTML', reply_markup: keyboard }
+                );
+            } catch (e) { logger.debug('[active_only] Telegram edit failed:', e); }
+            await ctx.answerCallbackQuery({ text: `${t('Active workspace only')}: ${action.toUpperCase()}` });
             return;
         }
 
@@ -3537,6 +3616,16 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 ensurePlanningDetector(bridge, cdp, projectName);
                 
                 const onUserMessageCallback = (info: any): boolean => {
+                    const conf = loadConfig();
+                    if (conf.onlyActiveWorkspaceMessages) {
+                        const binding = workspaceBindingRepo.findByChannelId(channelKey(channel));
+                        const activeProjectName = binding ? bridge.pool.extractProjectName(binding.workspacePath) : null;
+                        if (activeProjectName !== projectName) {
+                            logger.debug(`[UserMessageDetector:${projectName}] onlyActiveWorkspaceMessages is true and this is not the active workspace (${activeProjectName}), skipping user message mirror.`);
+                            return true;
+                        }
+                    }
+
                     logger.info(`[UserMessageDetector:${projectName}] Detected user message from IDE: "${info.text.slice(0, 50)}..."`);
                     
                     if (promptDispatcher.isBusy(channel, cdp)) {
@@ -3561,7 +3650,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         chatSessionRepo,
                         topicManager,
                         titleGenerator,
-                        modelService
+                        modelService,
+                        workspaceBindingRepo
                     });
 
                     promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
@@ -3576,6 +3666,16 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 }).then((res: any) => {
                     const isGenerating = res?.result?.value?.isGenerating;
                     if (isGenerating) {
+                        const conf = loadConfig();
+                        if (conf.onlyActiveWorkspaceMessages) {
+                            const binding = workspaceBindingRepo.findByChannelId(channelKey(channel));
+                            const activeProjectName = binding ? bridge.pool.extractProjectName(binding.workspacePath) : null;
+                            if (activeProjectName !== projectName) {
+                                logger.debug(`[startup] onlyActiveWorkspaceMessages is true and this is not the active workspace (${activeProjectName}), skipping passive monitoring.`);
+                                return;
+                            }
+                        }
+
                         logger.info(`[startup] Detected active run in progress for workspace ${binding.workspacePath}. Starting passive monitoring.`);
                         const lastUserMsg = 'Activity in IDE'; 
                         const mirrorPromise = mirrorResponseToTelegram(bridge, channel, cdp, lastUserMsg, {
@@ -3583,7 +3683,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             chatSessionRepo,
                             topicManager,
                             titleGenerator,
-                            modelService
+                            modelService,
+                            workspaceBindingRepo
                         });
                         promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
                     }
@@ -3623,6 +3724,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     { command: 'screenshot', description: t('Capture Antigravity screen') },
                     { command: 'stop', description: t('Interrupt active generation') },
                     { command: 'project', description: t('Select a project') },
+                    { command: 'active_only', description: t('Toggle active workspace only messages') },
                     { command: 'status', description: t('Bot status overview') },
                     { command: 'help', description: t('Show all commands') },
                 ]);
