@@ -58,7 +58,7 @@ export async function resolveWorkspaceAndCdp(
         return {
             ok: false,
             reason: 'no_binding',
-            message: 'No project is configured for this chat. Use /project to select one.',
+            message: 'No workspace is configured for this chat. Use /workspace to select one.',
         };
     }
 
@@ -79,7 +79,7 @@ export async function resolveWorkspaceAndCdp(
         return {
             ok: false,
             reason: 'cdp_failed',
-            message: `Project "${binding.workspacePath}" is bound but CDP connection failed: ${errorDetail}.\nIs Antigravity running with --remote-debugging-port?`,
+            message: `Workspace "${binding.workspacePath}" is bound but CDP connection failed: ${errorDetail}.\nIs Antigravity running with --remote-debugging-port?`,
         };
     }
 }

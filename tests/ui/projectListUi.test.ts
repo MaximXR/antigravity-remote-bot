@@ -1,5 +1,5 @@
 import {
-    buildProjectListUI,
+    buildWorkspaceListUI,
     isProjectSelectId,
     parseProjectPageId,
     PROJECT_PAGE_PREFIX,
@@ -8,6 +8,7 @@ import {
     ITEMS_PER_PAGE,
 } from '../../src/ui/projectListUi';
 import { InlineKeyboard } from 'grammy';
+import { RecentWorkspace } from '../../src/services/workspaceService';
 
 describe('projectListUi', () => {
     describe('parseProjectPageId', () => {
@@ -48,70 +49,76 @@ describe('projectListUi', () => {
         });
     });
 
-    describe('buildProjectListUI', () => {
-        const makeWorkspaces = (count: number): string[] =>
-            Array.from({ length: count }, (_, i) => `project-${String(i + 1).padStart(3, '0')}`);
+    describe('buildWorkspaceListUI', () => {
+        const makeWorkspaces = (count: number): RecentWorkspace[] =>
+            Array.from({ length: count }, (_, i) => ({
+                path: `E:\\Desktop\\project-${String(i + 1).padStart(3, '0')}`,
+                name: `project-${String(i + 1).padStart(3, '0')}`,
+                type: 'folder'
+            }));
 
         it('returns empty keyboard for zero workspaces', () => {
-            const { text, keyboard } = buildProjectListUI([], 0);
+            const { text, keyboard } = buildWorkspaceListUI([], 0);
 
-            expect(text).toContain('No projects found');
+            expect(text).toContain('No workspaces found');
             expect(keyboard).toBeInstanceOf(InlineKeyboard);
         });
 
         it('shows buttons for workspaces on a single page', () => {
             const workspaces = makeWorkspaces(5);
-            const { text, keyboard } = buildProjectListUI(workspaces, 0);
+            const { text, keyboard } = buildWorkspaceListUI(workspaces, 0);
 
-            expect(text).toContain('Projects');
+            expect(text).toContain('Workspaces');
             for (const ws of workspaces) {
-                expect(text).toContain(ws);
+                expect(text).toContain(ws.name);
+                expect(text).toContain(ws.path);
             }
             expect(keyboard).toBeInstanceOf(InlineKeyboard);
         });
 
         it('does not add page info for single-page results', () => {
             const workspaces = makeWorkspaces(5);
-            const { text } = buildProjectListUI(workspaces, 0);
+            const { text } = buildWorkspaceListUI(workspaces, 0);
 
             expect(text).not.toContain('Page');
         });
 
         it('shows page info for multi-page workspaces', () => {
             const workspaces = makeWorkspaces(15);
-            const { text } = buildProjectListUI(workspaces, 0);
+            const { text } = buildWorkspaceListUI(workspaces, 0);
 
             expect(text).toContain('Page 1 / 2');
-            expect(text).toContain('15 projects total');
+            expect(text).toContain('15 workspaces total');
         });
 
         it('second page shows remaining items', () => {
             const workspaces = makeWorkspaces(15);
-            const { text } = buildProjectListUI(workspaces, 1);
+            const { text } = buildWorkspaceListUI(workspaces, 1);
 
             expect(text).toContain('Page 2 / 2');
-            expect(text).toContain(workspaces[10]);
+            expect(text).toContain(workspaces[10].name);
         });
 
         it('clamps out-of-range page to the last valid page', () => {
             const workspaces = makeWorkspaces(15);
-            const { text } = buildProjectListUI(workspaces, 100);
+            const { text } = buildWorkspaceListUI(workspaces, 100);
 
             expect(text).toContain('Page 2 / 2');
         });
 
         it('clamps negative page to 0', () => {
             const workspaces = makeWorkspaces(15);
-            const { text } = buildProjectListUI(workspaces, -5);
+            const { text } = buildWorkspaceListUI(workspaces, -5);
 
             expect(text).toContain('Page 1 / 2');
         });
 
         it('handles exactly ITEMS_PER_PAGE workspaces (single page)', () => {
             const workspaces = makeWorkspaces(ITEMS_PER_PAGE);
-            const { text } = buildProjectListUI(workspaces, 0);
+            const { text } = buildWorkspaceListUI(workspaces, 0);
 
             expect(text).not.toContain('Page');
         });
     });
 });
+

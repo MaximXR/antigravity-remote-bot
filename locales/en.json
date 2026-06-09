@@ -37,7 +37,7 @@
   "💬 Started a new session": "💬 Started a new session",
   "Created a new chat session\\n→ <#${newChannelId}>": "Created a new chat session\\n→ <#${newChannelId}>",
   "Session": "Session",
-  "Project": "Project",
+  "Workspace": "Workspace",
   "(CDP Disconnected)": "(CDP Disconnected)",
   "💬 Chat Session Info": "💬 Chat Session Info",
   "Title": "Title",
@@ -59,9 +59,10 @@
   "⚠️ Template **${name}** not found.": "⚠️ Template **${name}** not found.",
   "⚠️ Template **${templateName}** not found.": "⚠️ Template **${templateName}** not found.",
   "📝 Invoked template **${templateName}**.\\nStarting process with this prompt.": "📝 Invoked template **${templateName}**.\\nStarting process with this prompt.",
-  "Select a project to auto-create a category and session channel": "Select a project to auto-create a category and session channel",
-  "Select a project...": "Select a project...",
-  "Select a project... (Showing 25 of ${workspaces.length})": "Select a project... (Showing 25 of ${workspaces.length})",
+  "Select a workspace to activate in Antigravity": "Select a workspace to activate in Antigravity",
+  "No workspaces found.": "No workspaces found.",
+  "Select a project...": "Select a workspace...",
+  "Select a project... (Showing 25 of ${workspaces.length})": "Select a workspace... (Showing 25 of ${workspaces.length})",
   "⚠️ Project **${workspacePath}** already exists\\n": "⚠️ Project **${workspacePath}** already exists\\n",
   "Full Path": "Full Path",
   "⏳ **${workspacePath}** is being created. Please wait.": "⏳ **${workspacePath}** is being created. Please wait.",
@@ -88,5 +89,7 @@
   "Undo button not found": "Undo button not found",
   "Failed to rollback": "Failed to rollback",
   "Rolling back last changes...": "Rolling back last changes...",
-  "Change workspace base directory": "Change workspace base directory"
+  "Change workspace base directory": "Change workspace base directory",
+  "Select a workspace": "Select a workspace",
+  "Workspaces": "Workspaces"
 }

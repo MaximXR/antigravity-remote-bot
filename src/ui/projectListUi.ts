@@ -1,6 +1,7 @@
 import { InlineKeyboard } from 'grammy';
 import { t } from '../utils/i18n';
 import { escapeHtml } from '../utils/telegramFormatter';
+import { RecentWorkspace } from '../services/workspaceService';
 
 export const PROJECT_SELECT_ID = 'project_select';
 export const WORKSPACE_SELECT_ID = 'workspace_select';
@@ -22,8 +23,8 @@ export function isProjectSelectId(customId: string): boolean {
     );
 }
 
-export function buildProjectListUI(
-    workspaces: string[],
+export function buildWorkspaceListUI(
+    workspaces: RecentWorkspace[],
     page: number = 0,
 ): { text: string; keyboard: InlineKeyboard } {
     const totalPages = Math.max(1, Math.ceil(workspaces.length / ITEMS_PER_PAGE));
@@ -31,12 +32,12 @@ export function buildProjectListUI(
 
     projectPathCache.clear();
     for (let i = 0; i < workspaces.length; i++) {
-        projectPathCache.set(`p${i}`, workspaces[i]);
+        projectPathCache.set(`p${i}`, workspaces[i].path);
     }
 
     if (workspaces.length === 0) {
         return {
-            text: `<b>📁 Projects</b>\n\n${t('No projects found.')}`,
+            text: `<b>📁 Workspaces</b>\n\n${t('No workspaces found.')}`,
             keyboard: new InlineKeyboard(),
         };
     }
@@ -45,16 +46,17 @@ export function buildProjectListUI(
     const end = Math.min(start + ITEMS_PER_PAGE, workspaces.length);
     const pageItems = workspaces.slice(start, end);
 
-    const lines = pageItems.map((ws, i) =>
-        `${start + i + 1}. ${escapeHtml(ws)}`,
-    );
+    const lines = pageItems.map((ws, i) => {
+        const icon = ws.type === 'workspace' ? '💼' : ws.type === 'file' ? '📄' : '📁';
+        return `${start + i + 1}. ${icon} <b>${escapeHtml(ws.name)}</b>\n   <code>${escapeHtml(ws.path)}</code>`;
+    });
 
-    let text = `<b>📁 Projects</b>\n\n` +
-        t('Select a project to auto-create a topic and session') + `\n\n` +
-        lines.join('\n');
+    let text = `<b>💼 Recent Workspaces</b>\n\n` +
+        t('Select a workspace to activate in Antigravity') + `\n\n` +
+        lines.join('\n\n');
 
     if (totalPages > 1) {
-        text += `\n\n<i>Page ${safePage + 1} / ${totalPages} (${workspaces.length} projects total)</i>`;
+        text += `\n\n<i>Page ${safePage + 1} / ${totalPages} (${workspaces.length} workspaces total)</i>`;
     }
 
     const keyboard = new InlineKeyboard();
@@ -63,7 +65,7 @@ export function buildProjectListUI(
         const ws = pageItems[i];
         const globalIdx = start + i;
         const shortId = `p${globalIdx}`;
-        const label = ws.length > 40 ? ws.substring(0, 37) + '...' : ws;
+        const label = ws.name.length > 40 ? ws.name.substring(0, 37) + '...' : ws.name;
         keyboard.text(label, `${PROJECT_SELECT_ID}:${shortId}`).row();
     }
 

@@ -313,11 +313,15 @@ export class CdpService extends EventEmitter {
         this.isSwitchingWorkspace = prev;
     }
 
-    /**
-     * Return the currently connected workspace name.
-     */
     getCurrentWorkspaceName(): string | null {
         return this.currentWorkspaceName;
+    }
+
+    /**
+     * Return the currently connected workspace path.
+     */
+    getCurrentWorkspacePath(): string | null {
+        return this.currentWorkspacePath;
     }
 
     /**

@@ -129,7 +129,7 @@ describe('resolveWorkspaceAndCdp', () => {
         expect(result.ok).toBe(false);
         if (!result.ok) {
             expect(result.reason).toBe('no_binding');
-            expect(result.message).toContain('/project');
+            expect(result.message).toContain('/workspace');
         }
     });
 

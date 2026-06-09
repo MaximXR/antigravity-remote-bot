@@ -1,6 +1,7 @@
 import { Bot, Context, InlineKeyboard, InputFile } from 'grammy';
 import Database from 'better-sqlite3';
 import * as https from 'https';
+import path from 'path';
 // @ts-ignore
 import fetch from 'node-fetch';
 
@@ -67,7 +68,7 @@ import { buildModelsUI, sendModelsUI } from '../ui/modelsUi';
 import { sendTemplateUI, TEMPLATE_BTN_PREFIX, parseTemplateButtonId } from '../ui/templateUi';
 import { sendAutoAcceptUI, AUTOACCEPT_BTN_ON, AUTOACCEPT_BTN_OFF, AUTOACCEPT_BTN_REFRESH } from '../ui/autoAcceptUi';
 import { handleScreenshot } from '../ui/screenshotUi';
-import { buildProjectListUI, PROJECT_SELECT_ID, PROJECT_PAGE_PREFIX, parseProjectPageId, projectPathCache } from '../ui/projectListUi';
+import { buildWorkspaceListUI, PROJECT_SELECT_ID, PROJECT_PAGE_PREFIX, parseProjectPageId, projectPathCache } from '../ui/projectListUi';
 import { buildSessionPickerUI, SESSION_SELECT_ID, isSessionSelectId, sessionTitleCache } from '../ui/sessionPickerUi';
 import {
     PLAN_VIEW_BTN, PLAN_PROCEED_BTN, PLAN_EDIT_BTN, PLAN_REFRESH_BTN, PLAN_PAGE_PREFIX,
@@ -1700,8 +1701,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             `<b>⚙️ ` + t('Settings') + `</b>\n` +
             `/mode — ` + t('Change execution mode') + `\n` +
             `/model — ` + t('Change LLM model') + `\n\n` +
-            `<b>📁 ` + t('Projects') + `</b>\n` +
-            `/project — ` + t('Select a project') + `\n` +
+            `<b>💼 ` + t('Workspaces') + `</b>\n` +
+            `/workspace — ` + t('Select a workspace') + `\n` +
             `/setworkspacedir — ` + t('Change workspace base directory') + `\n\n` +
             `<b>📝 ` + t('Templates') + `</b>\n` +
             `/template — ` + t('Show templates') + `\n` +
@@ -1801,19 +1802,21 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         const autoAcceptStatus = bridge.autoAccept.isEnabled() ? '🟢 ON' : '⚪ OFF';
 
         let text = `<b>🔧 Bot Status</b>\n\n`;
-        text += `<b>CDP:</b> ${activeNames.length > 0 ? `🟢 ${activeNames.length} project(s) connected` : '⚪ Disconnected'}\n`;
         text += `<b>Mode:</b> ${escapeHtml(MODE_DISPLAY_NAMES[currentMode] || currentMode)}\n`;
         text += `<b>Auto Approve:</b> ${autoAcceptStatus}\n`;
 
         if (activeNames.length > 0) {
-            text += `\n<b>Connected Projects:</b>\n`;
+            text += `<b>CDP:</b> 🟢 Connected\n\n`;
+            text += `<b>Active Workspaces:</b>\n`;
             for (const name of activeNames) {
                 const cdp = bridge.pool.getConnected(name);
                 const contexts = cdp ? cdp.getContexts().length : 0;
-                text += `• <b>${escapeHtml(name)}</b> — Contexts: ${contexts}\n`;
+                const fullPath = (cdp ? cdp.getCurrentWorkspacePath() : null) || '';
+                text += `• <b>${escapeHtml(name)}</b>\n  <code>${escapeHtml(fullPath)}</code>\n  (Contexts: ${contexts})\n`;
             }
         } else {
-            text += `\nSend a message to auto-connect to a project.`;
+            text += `<b>CDP:</b> ⚪ Disconnected\n\n`;
+            text += `<i>Use /workspace to select and connect to a workspace.</i>`;
         }
 
         await replyHtml(ctx, text);
@@ -1886,13 +1889,13 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }
         const projectName = (resolved.ok ? resolved.projectName : null) ?? cdp.getCurrentWorkspaceName();
         if (!projectName) {
-            await ctx.reply('⚠️ No active project bound to this chat. Cannot close.');
+            await ctx.reply('⚠️ No active workspace bound to this chat. Cannot close.');
             return;
         }
         try {
             await replyHtml(ctx, `🛑 Closing Antigravity workspace: <code>${escapeHtml(projectName)}</code>…`);
             await bridge.pool.closeBrowserWorkspace(projectName);
-            await ctx.reply('✅ Workspace closed. Send a new prompt or use /project to reconnect.');
+            await ctx.reply('✅ Workspace closed. Send a new prompt or use /workspace to reconnect.');
         } catch (e: any) {
             await ctx.reply(`❌ Error closing workspace: ${e.message}`);
         }
@@ -1956,10 +1959,10 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     bot.command('allow_chat', (ctx) => handleApprovalCommand(ctx, 'always_allow'));
     bot.command('deny', (ctx) => handleApprovalCommand(ctx, 'deny'));
 
-    // /project command
-    bot.command('project', async (ctx) => {
-        const workspaces = workspaceService.scanWorkspaces();
-        const { text, keyboard } = buildProjectListUI(workspaces, 0);
+    // /workspace command
+    bot.command('workspace', async (ctx) => {
+        const workspaces = workspaceService.getRecentWorkspaces();
+        const { text, keyboard } = buildWorkspaceListUI(workspaces, 0);
         await replyHtml(ctx, text, keyboard);
     });
 
@@ -1972,7 +1975,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         const workspaceName = session?.workspacePath ?? binding?.workspacePath;
 
         if (!workspaceName) {
-            await ctx.reply('⚠️ No project is bound to this chat. Use /project to select one.');
+            await ctx.reply('⚠️ No workspace is bound to this chat. Use /workspace to select one.');
             return;
         }
 
@@ -2011,7 +2014,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 `<b>💬 Chat Session Info</b>\n\n` +
                 `<b>Title:</b> ${escapeHtml(info.title)}\n` +
                 `<b>Status:</b> ${info.hasActiveChat ? '🟢 Active' : '⚪ Inactive'}\n\n` +
-                `<i>Use /project to bind a project first.</i>`
+                `<i>Use /workspace to bind a workspace first.</i>`
             );
             return;
         }
@@ -2281,7 +2284,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             const shortId = data.replace(`${PROJECT_SELECT_ID}:`, '');
             let workspacePath = projectPathCache.get(shortId);
             if (!workspacePath) {
-                const workspaces = workspaceService.scanWorkspaces();
+                const workspaces = workspaceService.getRecentWorkspaces().map(w => w.path);
                 if (shortId.startsWith('p')) {
                     const idx = parseInt(shortId.slice(1), 10);
                     if (!isNaN(idx) && idx >= 0 && idx < workspaces.length) {
@@ -2294,13 +2297,15 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             }
 
             if (!workspaceService.exists(workspacePath)) {
-                await ctx.answerCallbackQuery({ text: `Project "${workspacePath}" not found.` });
+                await ctx.answerCallbackQuery({ text: `Workspace "${workspacePath}" not found.` });
                 return;
             }
 
             let key = channelKey(ch);
             const guildId = String(ch.chatId);
             const isForum = ctx.chat?.type === 'supergroup' && (ctx.chat as any).is_forum === true;
+
+            const folderName = path.basename(workspacePath);
 
             // Auto-create topic if conditions are met
             if (config.useTopics && isForum && !ch.threadId) {
@@ -2314,7 +2319,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         topicManager.registerTopic(workspacePath, topicId);
                     } else {
                         topicManager.setChatId(ch.chatId);
-                        const sanitized = topicManager.sanitizeName(workspacePath);
+                        const sanitized = topicManager.sanitizeName(folderName);
                         const result = await topicManager.ensureTopic(sanitized);
                         topicId = result.topicId;
                     }
@@ -2325,17 +2330,17 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     const fullPath = workspaceService.getWorkspacePath(workspacePath);
                     await bot.api.sendMessage(
                         ch.chatId,
-                        `<b>📁 Project Selected</b>\n\n✅ <b>${escapeHtml(workspacePath)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this project.`,
+                        `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(folderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.`,
                         { parse_mode: 'HTML', message_thread_id: topicId },
                     );
                     workspaceBindingRepo.upsert({ channelId: key, workspacePath, guildId });
                     bridge.pool.getOrConnect(fullPath).catch((err: any) => {
-                        logger.warn(`[ProjectSelectTopic] Proactive connection failed for ${workspacePath}:`, err?.message || err);
+                        logger.warn(`[WorkspaceSelectTopic] Proactive connection failed for ${workspacePath}:`, err?.message || err);
                     });
-                    await ctx.answerCallbackQuery({ text: `Topic created for: ${workspacePath}` });
+                    await ctx.answerCallbackQuery({ text: `Topic created for: ${folderName}` });
                     return;
                 } catch (e: any) {
-                    logger.warn(`[ProjectSelect] Topic creation failed, falling back: ${e.message}`);
+                    logger.warn(`[WorkspaceSelect] Topic creation failed, falling back: ${e.message}`);
                     // Fall through to default behavior
                 }
             }
@@ -2344,23 +2349,23 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
             const fullPath = workspaceService.getWorkspacePath(workspacePath);
             bridge.pool.getOrConnect(fullPath).catch((err: any) => {
-                logger.warn(`[ProjectSelect] Proactive connection failed for ${workspacePath}:`, err?.message || err);
+                logger.warn(`[WorkspaceSelect] Proactive connection failed for ${workspacePath}:`, err?.message || err);
             });
 
             await ctx.editMessageText(
-                `<b>📁 Project Selected</b>\n\n✅ <b>${escapeHtml(workspacePath)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this project.`,
+                `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(folderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.`,
                 { parse_mode: 'HTML' },
             );
-            await ctx.answerCallbackQuery({ text: `Selected: ${workspacePath}` });
+            await ctx.answerCallbackQuery({ text: `Selected: ${folderName}` });
             return;
         }
 
-        // Project page navigation
+        // Workspace page navigation
         if (data.startsWith(`${PROJECT_PAGE_PREFIX}:`)) {
             const page = parseProjectPageId(data);
             if (!isNaN(page)) {
-                const workspaces = workspaceService.scanWorkspaces();
-                const { text, keyboard } = buildProjectListUI(workspaces, page);
+                const workspaces = workspaceService.getRecentWorkspaces();
+                const { text, keyboard } = buildWorkspaceListUI(workspaces, page);
                 try { await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: keyboard }); } catch (e) { logger.debug('[editMsg] Telegram edit failed (expected for unmodified):', e); }
             }
             await ctx.answerCallbackQuery();
@@ -2845,10 +2850,26 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             if (parsed.commandName === 'status') {
                 const activeNames = bridge.pool.getActiveWorkspaceNames();
                 const currentMode = modeService.getCurrentMode();
+                const autoAcceptStatus = bridge.autoAccept.isEnabled() ? '🟢 ON' : '⚪ OFF';
+
                 let statusText = `<b>🔧 Bot Status</b>\n\n`;
-                statusText += `<b>CDP:</b> ${activeNames.length > 0 ? `🟢 ${activeNames.length} project(s)` : '⚪ Disconnected'}\n`;
                 statusText += `<b>Mode:</b> ${escapeHtml(MODE_DISPLAY_NAMES[currentMode] || currentMode)}\n`;
-                statusText += `<b>Auto Approve:</b> ${bridge.autoAccept.isEnabled() ? '🟢 ON' : '⚪ OFF'}`;
+                statusText += `<b>Auto Approve:</b> ${autoAcceptStatus}\n`;
+
+                if (activeNames.length > 0) {
+                    statusText += `<b>CDP:</b> 🟢 Connected\n\n`;
+                    statusText += `<b>Active Workspaces:</b>\n`;
+                    for (const name of activeNames) {
+                        const cdp = bridge.pool.getConnected(name);
+                        const contexts = cdp ? cdp.getContexts().length : 0;
+                        const fullPath = (cdp ? cdp.getCurrentWorkspacePath() : null) || '';
+                        statusText += `• <b>${escapeHtml(name)}</b>\n  <code>${escapeHtml(fullPath)}</code>\n  (Contexts: ${contexts})\n`;
+                    }
+                } else {
+                    statusText += `<b>CDP:</b> ⚪ Disconnected\n\n`;
+                    statusText += `<i>Use /workspace to select and connect to a workspace.</i>`;
+                }
+
                 await replyHtml(ctx, statusText);
                 return;
             }
