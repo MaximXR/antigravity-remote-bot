@@ -38,6 +38,7 @@ src/
   ui/                 Telegram InlineKeyboard builders
   utils/              Config, logging, formatting, i18n, path security
 tests/                Mirrors src/ structure — one test file per module
+diagnostics/          CDP automation and DOM inspection scripts
 docs/                 Architecture docs, DOM selector reference, diagrams
 locales/              i18n translation files (en, ja)
 ```
