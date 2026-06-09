@@ -1,5 +1,5 @@
 ---
-trigger: manual
+trigger: always_on
 description: "ТРИГГЕР: Правила разработки Remoat, структура БД, CDP селекторы, команды сборки, запуска и отладки."
 ---
 
