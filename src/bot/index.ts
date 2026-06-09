@@ -1805,31 +1805,35 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }
     });
 
-    // /status command
-    bot.command('status', async (ctx) => {
+    const buildStatusText = (): string => {
         const activeNames = bridge.pool.getActiveWorkspaceNames();
         const currentMode = modeService.getCurrentMode();
-        const autoAcceptStatus = bridge.autoAccept.isEnabled() ? '🟢 ON' : '⚪ OFF';
+        const autoAcceptStatus = bridge.autoAccept.isEnabled() ? `🟢 ${t('ON')}` : `⚪ ${t('OFF')}`;
 
-        let text = `<b>🔧 Bot Status</b>\n\n`;
-        text += `<b>Mode:</b> ${escapeHtml(MODE_DISPLAY_NAMES[currentMode] || currentMode)}\n`;
-        text += `<b>Auto Approve:</b> ${autoAcceptStatus}\n`;
+        let text = `<b>🔧 ${t('Bot Status')}</b>\n\n`;
+        text += `<b>${t('Mode')}:</b> ${escapeHtml(t(MODE_DISPLAY_NAMES[currentMode] || currentMode))}\n`;
+        text += `<b>${t('Auto Approve')}:</b> ${autoAcceptStatus}\n`;
 
         if (activeNames.length > 0) {
-            text += `<b>CDP:</b> 🟢 Connected\n\n`;
-            text += `<b>Active Workspaces:</b>\n`;
+            text += `<b>${t('CDP')}:</b> 🟢 ${t('Connected')}\n\n`;
+            text += `<b>${t('Active Workspaces')}:</b>\n`;
             for (const name of activeNames) {
                 const cdp = bridge.pool.getConnected(name);
                 const contexts = cdp ? cdp.getContexts().length : 0;
                 const fullPath = (cdp ? cdp.getCurrentWorkspacePath() : null) || '';
-                text += `• <b>${escapeHtml(name)}</b>\n  <code>${escapeHtml(fullPath)}</code>\n  (Contexts: ${contexts})\n`;
+                text += `• <b>${escapeHtml(name)}</b>\n  <code>${escapeHtml(fullPath)}</code>\n  (${t('Contexts')}: ${contexts})\n`;
             }
+            text += `\n<i>${t('Use /workspace to switch workspaces.')}</i>`;
         } else {
-            text += `<b>CDP:</b> ⚪ Disconnected\n\n`;
-            text += `<i>Use /workspace to select and connect to a workspace.</i>`;
+            text += `<b>${t('CDP')}:</b> ⚪ ${t('Disconnected')}\n\n`;
+            text += `<i>${t('Use /workspace to select and connect to a workspace.')}</i>`;
         }
+        return text;
+    };
 
-        await replyHtml(ctx, text);
+    // /status command
+    bot.command('status', async (ctx) => {
+        await replyHtml(ctx, buildStatusText());
     });
 
     // /autoaccept command
@@ -2858,29 +2862,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             }
 
             if (parsed.commandName === 'status') {
-                const activeNames = bridge.pool.getActiveWorkspaceNames();
-                const currentMode = modeService.getCurrentMode();
-                const autoAcceptStatus = bridge.autoAccept.isEnabled() ? '🟢 ON' : '⚪ OFF';
-
-                let statusText = `<b>🔧 Bot Status</b>\n\n`;
-                statusText += `<b>Mode:</b> ${escapeHtml(MODE_DISPLAY_NAMES[currentMode] || currentMode)}\n`;
-                statusText += `<b>Auto Approve:</b> ${autoAcceptStatus}\n`;
-
-                if (activeNames.length > 0) {
-                    statusText += `<b>CDP:</b> 🟢 Connected\n\n`;
-                    statusText += `<b>Active Workspaces:</b>\n`;
-                    for (const name of activeNames) {
-                        const cdp = bridge.pool.getConnected(name);
-                        const contexts = cdp ? cdp.getContexts().length : 0;
-                        const fullPath = (cdp ? cdp.getCurrentWorkspacePath() : null) || '';
-                        statusText += `• <b>${escapeHtml(name)}</b>\n  <code>${escapeHtml(fullPath)}</code>\n  (Contexts: ${contexts})\n`;
-                    }
-                } else {
-                    statusText += `<b>CDP:</b> ⚪ Disconnected\n\n`;
-                    statusText += `<i>Use /workspace to select and connect to a workspace.</i>`;
-                }
-
-                await replyHtml(ctx, statusText);
+                await replyHtml(ctx, buildStatusText());
                 return;
             }
 

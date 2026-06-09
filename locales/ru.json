@@ -121,5 +121,15 @@
   "Undo button not found": "Кнопка Undo не найдена",
   "Failed to rollback": "Не удалось отменить изменения",
   "Rolling back last changes...": "Откат последних изменений...",
-  "Change workspace base directory": "Изменить базовую директорию проектов"
+  "Change workspace base directory": "Изменить базовую директорию проектов",
+  "Bot Status": "Статус бота",
+  "Mode": "Режим",
+  "Auto Approve": "Авто-согласие",
+  "CDP": "CDP",
+  "Connected": "Подключено",
+  "Disconnected": "Отключено",
+  "Active Workspaces": "Активные рабочие области",
+  "Contexts": "Контексты",
+  "Use /workspace to select and connect to a workspace.": "Используйте /workspace для выбора и подключения рабочей области.",
+  "Use /workspace to switch workspaces.": "Используйте /workspace для переключения рабочих областей."
 }

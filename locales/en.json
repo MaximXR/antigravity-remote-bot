@@ -91,5 +91,15 @@
   "Rolling back last changes...": "Rolling back last changes...",
   "Change workspace base directory": "Change workspace base directory",
   "Select a workspace": "Select a workspace",
-  "Workspaces": "Workspaces"
+  "Workspaces": "Workspaces",
+  "Bot Status": "Bot Status",
+  "Mode": "Mode",
+  "Auto Approve": "Auto Approve",
+  "CDP": "CDP",
+  "Connected": "Connected",
+  "Disconnected": "Disconnected",
+  "Active Workspaces": "Active Workspaces",
+  "Contexts": "Contexts",
+  "Use /workspace to select and connect to a workspace.": "Use /workspace to select and connect to a workspace.",
+  "Use /workspace to switch workspaces.": "Use /workspace to switch workspaces."
 }
