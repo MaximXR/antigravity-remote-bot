@@ -2049,7 +2049,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
         let text = `<b>🔧 ${t('Bot Status')}</b>\n\n`;
         text += `<b>${t('Mode')}:</b> ${escapeHtml(t(MODE_DISPLAY_NAMES[currentMode] || currentMode))}\n`;
-        text += `<b>${t('Auto Approve')}:</b> ${autoAcceptStatus}\n`;
+        text += `<b>${t('Auto Approve')}:</b> ${autoAcceptStatus}\n\n`;
 
         // Get bound workspace for CURRENT chat
         const ch = getChannel(ctx);
@@ -2084,7 +2084,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         );
 
         if (activeWindowsWithSessions.length > 0) {
-            text += `<b>🖥️ ${t('Open IDE Windows')}:</b>\n`;
+            text += `<b>${t('Open IDE Windows')}:</b>\n`;
             for (const win of activeWindowsWithSessions) {
                 const pathStr = win.workspacePath ? `<code>${escapeHtml(win.workspacePath)}</code>` : `<i>${t('Path unknown')}</i>`;
                 let sessionStr = '';
@@ -2093,10 +2093,10 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 } else {
                     sessionStr = `\n  Active Chat: <i>${t('Unknown')}</i>`;
                 }
-                text += `• <b>${escapeHtml(win.projectName)}</b> (Port ${win.port})\n  Title: <i>${escapeHtml(win.title)}</i>\n  Path: ${pathStr}${sessionStr}\n`;
+                text += `🖥️ <b>${escapeHtml(win.projectName)}</b> (Port ${win.port})\n  Title: <i>${escapeHtml(win.title)}</i>\n  Path: ${pathStr}${sessionStr}\n`;
             }
         } else {
-            text += `<b>🖥️ ${t('Open IDE Windows')}:</b> ⚪ ${t('None detected')}\n`;
+            text += `<b>${t('Open IDE Windows')}:</b> ⚪ ${t('None detected')}\n`;
         }
 
         text += `\nUse /chats or /history to manage sessions.`;
