@@ -90,7 +90,7 @@ export class WorkspaceService {
      * Return the absolute path of the specified workspace
      */
     public getWorkspacePath(workspaceName: string): string {
-        if (path.isAbsolute(workspaceName)) {
+        if (path.isAbsolute(workspaceName) || workspaceName.startsWith('empty-workspace:')) {
             return workspaceName;
         }
         return this.validatePath(workspaceName);
@@ -100,6 +100,9 @@ export class WorkspaceService {
      * Check if the specified workspace exists
      */
     public exists(workspaceName: string): boolean {
+        if (workspaceName.startsWith('empty-workspace:')) {
+            return true;
+        }
         if (path.isAbsolute(workspaceName)) {
             return this.existsAbsolutePath(workspaceName);
         }

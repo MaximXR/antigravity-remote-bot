@@ -386,6 +386,21 @@ export class CdpService extends EventEmitter {
         openInNewWindow: boolean = false,
         targetPort?: number
     ): Promise<boolean> {
+        if (workspacePath.startsWith('empty-workspace:')) {
+            const parts = workspacePath.split(':');
+            const port = parseInt(parts[1], 10);
+            const targetId = parts[2];
+            try {
+                const list = await this.getJson(`http://127.0.0.1:${port}/json/list`);
+                const target = list.find((t: any) => t.id === targetId);
+                if (target) {
+                    return this.connectToPage(target, projectName);
+                }
+            } catch (err: any) {
+                logger.error(`[CdpService] Failed to connect to empty window ${targetId}:`, err?.message || err);
+            }
+            return false;
+        }
         // Scan all ports to collect workbench pages
         let pages: any[] = [];
         let respondingPort: number | null = null;

@@ -29,6 +29,10 @@ export function getAntigravityCliPath(): string {
 }
 
 export function extractProjectNameFromPath(workspacePath: string): string {
+    if (workspacePath.startsWith('empty-workspace:')) {
+        const parts = workspacePath.split(':');
+        return `empty-window-${parts[1]}-${parts[2].slice(0, 6)}`;
+    }
     const last = workspacePath.split(/[/\\]/).filter(Boolean).pop() || '';
     if (last.endsWith('.code-workspace')) {
         return last.slice(0, -'.code-workspace'.length);

@@ -1988,6 +1988,12 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             workspacePath = matchedWorkspace ? matchedWorkspace.path : null;
                         }
 
+                        if (!workspacePath) {
+                            workspacePath = `empty-workspace:${port}:${page.id}`;
+                            const name = (projectName && projectName !== 'Unknown') ? projectName : 'Antigravity';
+                            projectName = `${name} (без папки)`;
+                        }
+
                         activeWindows.push({
                             port,
                             title,
@@ -2136,10 +2142,14 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         const ch = getChannel(ctx);
         const binding = workspaceBindingRepo.findByChannelId(channelKey(ch));
         if (binding) {
-            const folderName = path.basename(binding.workspacePath);
-            const cleanFolderName = folderName.replace(/\.code-workspace$/i, '');
+            const isEmp = binding.workspacePath.startsWith('empty-workspace:');
+            const cleanFolderName = isEmp ? 'Antigravity (без папки)' : path.basename(binding.workspacePath).replace(/\.code-workspace$/i, '');
             text += `<b>${t('Current Workspace (this chat)')}:</b> 📂 <b>${escapeHtml(cleanFolderName)}</b>\n`;
-            text += `  <code>${escapeHtml(binding.workspacePath)}</code>\n\n`;
+            if (isEmp) {
+                text += `  <i>${t('Path unknown')}</i>\n\n`;
+            } else {
+                text += `  <code>${escapeHtml(binding.workspacePath)}</code>\n\n`;
+            }
         } else {
             text += `<b>${t('Current Workspace (this chat)')}:</b> ⚪ ${t('None')}\n\n`;
         }
@@ -2167,7 +2177,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         if (activeWindowsWithSessions.length > 0) {
             text += `<b>${t('Open IDE Windows')}:</b>\n`;
             for (const win of activeWindowsWithSessions) {
-                const pathStr = win.workspacePath ? `<code>${escapeHtml(win.workspacePath)}</code>` : `<i>${t('Path unknown')}</i>`;
+                const isEmp = win.workspacePath && win.workspacePath.startsWith('empty-workspace:');
+                const pathStr = win.workspacePath && !isEmp ? `<code>${escapeHtml(win.workspacePath)}</code>` : `<i>${t('Path unknown')}</i>`;
                 let sessionStr = '';
                 if (win.sessionInfo) {
                     sessionStr = `\n  Active Chat: 💬 <b>${escapeHtml(win.sessionInfo.title)}</b>`;
