@@ -2093,7 +2093,10 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 } else {
                     sessionStr = `\n  Active Chat: <i>${t('Unknown')}</i>`;
                 }
-                text += `🖥️ <b>${escapeHtml(win.projectName)}</b> (Port ${win.port})\n  Title: <i>${escapeHtml(win.title)}</i>\n  Path: ${pathStr}${sessionStr}\n`;
+                const isActive = !!(binding && win.workspacePath &&
+                    (path.resolve(win.workspacePath).toLowerCase() === path.resolve(binding.workspacePath).toLowerCase()));
+                const prefix = isActive ? '⭐🖥️' : '🖥️';
+                text += `${prefix} <b>${escapeHtml(win.projectName)}</b> (Port ${win.port})\n  Title: <i>${escapeHtml(win.title)}</i>\n  Path: ${pathStr}${sessionStr}\n`;
             }
         } else {
             text += `<b>${t('Open IDE Windows')}:</b> ⚪ ${t('None detected')}\n`;
