@@ -2,6 +2,7 @@ import { Bot, Context, InlineKeyboard, InputFile } from 'grammy';
 import Database from 'better-sqlite3';
 import * as https from 'https';
 import path from 'path';
+import WebSocket from 'ws';
 // @ts-ignore
 import fetch from 'node-fetch';
 
@@ -1858,6 +1859,62 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }
     });
 
+    // Helper to query workspace path directly from a running IDE window via CDP
+    const queryWorkspacePath = async (wsUrl: string): Promise<{ workspacePath: string | null; workspaceId: string | null } | null> => {
+        return new Promise((resolve) => {
+            const ws = new WebSocket(wsUrl);
+            let resolved = false;
+            
+            const cleanup = () => {
+                if (!resolved) {
+                    resolved = true;
+                    resolve(null);
+                }
+                try { ws.close(); } catch {}
+            };
+
+            const timeout = setTimeout(cleanup, 800);
+
+            ws.on('open', () => {
+                if (resolved) return;
+                ws.send(JSON.stringify({
+                    id: 1,
+                    method: 'Runtime.evaluate',
+                    params: {
+                        expression: `(async () => {
+                            if (window.vscode && window.vscode.context) {
+                                const config = await window.vscode.context.resolveConfiguration();
+                                return {
+                                    workspacePath: config.workspace?.configPath?._fsPath || config.workspace?.uri?._fsPath || null,
+                                    workspaceId: config.workspace?.id || null
+                                };
+                            }
+                            return null;
+                        })()`,
+                        returnByValue: true,
+                        awaitPromise: true
+                    }
+                }));
+            });
+
+            ws.on('message', (data) => {
+                if (resolved) return;
+                clearTimeout(timeout);
+                resolved = true;
+                try {
+                    const parsed = JSON.parse(data.toString());
+                    const val = parsed.result?.result?.value;
+                    resolve(val || null);
+                } catch {
+                    resolve(null);
+                }
+                try { ws.close(); } catch {}
+            });
+
+            ws.on('error', cleanup);
+        });
+    };
+
     // Scan active IDE windows
     const scanActiveWindows = async () => {
         const recentWorkspaces = workspaceService.getRecentWorkspaces();
@@ -1881,39 +1938,63 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             !t.url?.includes('workbench-jetski-agent') &&
                             t.url?.includes('workbench')
                     );
-                    for (const page of workbenchPages) {
+
+                    // Query each workbench page's path using WebSocket in parallel
+                    await Promise.all(workbenchPages.map(async (page) => {
                         const title = page.title || '';
+                        let workspacePath: string | null = null;
                         let matchedWorkspace: RecentWorkspace | null = null;
-                        for (const w of recentWorkspaces) {
-                            const cleanName = w.name.replace(/\.code-workspace$/i, '');
-                            if (isTitleMatch(title, cleanName)) {
-                                matchedWorkspace = w;
-                                break;
-                            }
-                        }
 
-                        // Parse project name from title as fallback
-                        const titleParts = title.split(/\s[—–-]\s/);
-                        const parsedProjectName = titleParts.length >= 2 ? titleParts[titleParts.length - 2] : (titleParts[0] || 'Unknown');
-                        const cleanParsedName = parsedProjectName.replace(/\s*\([^)]+\)$/, '').replace(/\.code-workspace$/i, '').trim();
-
-                        // Fallback matching by project name equality
-                        if (!matchedWorkspace && cleanParsedName !== 'Unknown') {
-                            const normParsed = cleanParsedName.toLowerCase();
+                        const cdpInfo = await queryWorkspacePath(page.webSocketDebuggerUrl);
+                        if (cdpInfo && cdpInfo.workspacePath) {
+                            workspacePath = cdpInfo.workspacePath;
+                            const normPath = workspacePath.toLowerCase().replace(/\//g, '\\').trim();
                             matchedWorkspace = recentWorkspaces.find(w => {
-                                const cleanWName = w.name.replace(/\.code-workspace$/i, '').toLowerCase().trim();
-                                return cleanWName === normParsed;
+                                const normWPath = w.path.toLowerCase().replace(/\//g, '\\').trim();
+                                return normWPath === normPath;
                             }) || null;
                         }
 
-                        const projectName = matchedWorkspace ? matchedWorkspace.name : cleanParsedName;
+                        let projectName = '';
+                        if (matchedWorkspace) {
+                            projectName = matchedWorkspace.name;
+                        } else if (workspacePath) {
+                            projectName = path.basename(workspacePath);
+                        } else {
+                            // Fallback to title matching
+                            for (const w of recentWorkspaces) {
+                                const cleanName = w.name.replace(/\.code-workspace$/i, '');
+                                if (isTitleMatch(title, cleanName)) {
+                                    matchedWorkspace = w;
+                                    break;
+                                }
+                            }
+
+                            // Parse project name from title as fallback
+                            const titleParts = title.split(/\s[—–-]\s/);
+                            const parsedProjectName = titleParts.length >= 2 ? titleParts[titleParts.length - 2] : (titleParts[0] || 'Unknown');
+                            const cleanParsedName = parsedProjectName.replace(/\s*\([^)]+\)$/, '').replace(/\.code-workspace$/i, '').trim();
+
+                            // Fallback matching by project name equality
+                            if (!matchedWorkspace && cleanParsedName !== 'Unknown') {
+                                const normParsed = cleanParsedName.toLowerCase();
+                                matchedWorkspace = recentWorkspaces.find(w => {
+                                    const cleanWName = w.name.replace(/\.code-workspace$/i, '').toLowerCase().trim();
+                                    return cleanWName === normParsed;
+                                }) || null;
+                            }
+
+                            projectName = matchedWorkspace ? matchedWorkspace.name : cleanParsedName;
+                            workspacePath = matchedWorkspace ? matchedWorkspace.path : null;
+                        }
+
                         activeWindows.push({
                             port,
                             title,
-                            workspacePath: matchedWorkspace ? matchedWorkspace.path : null,
+                            workspacePath,
                             projectName: projectName.replace(/\.code-workspace$/i, '')
                         });
-                    }
+                    }));
                 }
             } catch (e) {
                 // ignore unreachable port
