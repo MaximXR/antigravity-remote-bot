@@ -3526,29 +3526,30 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             };
             
             bridge.pool.getOrConnect(workspacePath).then((cdp) => {
-                logger.info(`[startup] Proactively connected to workspace: ${binding.workspacePath}`);
+                const projectName = bridge.pool.extractProjectName(binding.workspacePath);
+                logger.info(`[startup] Proactively connected to workspace: ${projectName} (${binding.workspacePath})`);
                 
-                bridge.lastActiveWorkspace = binding.workspacePath;
+                bridge.lastActiveWorkspace = projectName;
                 bridge.lastActiveChannel = channel;
-                registerApprovalWorkspaceChannel(bridge, binding.workspacePath, channel);
-                ensureApprovalDetector(bridge, cdp, binding.workspacePath);
-                ensureErrorPopupDetector(bridge, cdp, binding.workspacePath);
-                ensurePlanningDetector(bridge, cdp, binding.workspacePath);
+                registerApprovalWorkspaceChannel(bridge, projectName, channel);
+                ensureApprovalDetector(bridge, cdp, projectName);
+                ensureErrorPopupDetector(bridge, cdp, projectName);
+                ensurePlanningDetector(bridge, cdp, projectName);
                 
                 const onUserMessageCallback = (info: any): boolean => {
-                    logger.info(`[UserMessageDetector:${binding.workspacePath}] Detected user message from IDE: "${info.text.slice(0, 50)}..."`);
+                    logger.info(`[UserMessageDetector:${projectName}] Detected user message from IDE: "${info.text.slice(0, 50)}..."`);
                     
                     if (promptDispatcher.isBusy(channel, cdp)) {
-                        logger.debug(`[UserMessageDetector:${binding.workspacePath}] Workspace is busy, skipping user message mirror.`);
+                        logger.debug(`[UserMessageDetector:${projectName}] Workspace is busy, skipping user message mirror.`);
                         return true;
                     }
 
                     const normalized = normalizeForHash(info.text);
                     if (telegramSentPrompts.has(normalized)) {
-                        logger.debug(`[UserMessageDetector:${binding.workspacePath}] Message came from Telegram, skipping echo text.`);
+                        logger.debug(`[UserMessageDetector:${projectName}] Message came from Telegram, skipping echo text.`);
                         telegramSentPrompts.delete(normalized);
                     } else {
-                        const cleanProjName = path.basename(binding.workspacePath).replace(/\.code-workspace$/i, '');
+                        const cleanProjName = projectName.replace(/\.code-workspace$/i, '');
                         const userMsgText = `👤 [IDE: ${cleanProjName}]: ${info.text}`;
                         bot.api.sendMessage(channel.chatId, userMsgText, {
                             message_thread_id: channel.threadId,
@@ -3566,7 +3567,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
                     return true;
                 };
-                ensureUserMessageDetector(bridge, cdp, binding.workspacePath, onUserMessageCallback);
+                ensureUserMessageDetector(bridge, cdp, projectName, onUserMessageCallback);
 
                 // Detect if a run is already in progress and start passive monitoring
                 cdp.call('Runtime.evaluate', {
