@@ -1923,6 +1923,10 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
         let cdp: any = null;
 
+        const sessionKeyboard = new InlineKeyboard()
+            .text(`💬 ${t('Dialogs')}`, 'current_dialogs')
+            .text(`📜 ${t('History')}`, 'current_history');
+
         if (config.useTopics && isForum && !ch.threadId) {
             try {
                 const existing = workspaceBindingRepo.findByWorkspacePathAndGuildId(workspacePath, guildId);
@@ -1950,8 +1954,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 if (!silent) {
                     await bot.api.sendMessage(
                         ch.chatId,
-                        `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(cleanFolderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.`,
-                        { parse_mode: 'HTML', message_thread_id: topicId },
+                        `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(cleanFolderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.\n\nUse /chats or /history to manage sessions.`,
+                        { parse_mode: 'HTML', message_thread_id: topicId, reply_markup: sessionKeyboard },
                     );
                 }
                 return { key, fullPath, cleanFolderName, cdp };
@@ -1967,11 +1971,11 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         });
 
         if (!silent) {
-            const text = `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(cleanFolderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.`;
+            const text = `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(cleanFolderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.\n\nUse /chats or /history to manage sessions.`;
             try {
-                await ctx.editMessageText(text, { parse_mode: 'HTML' });
+                await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: sessionKeyboard });
             } catch {
-                await replyHtml(ctx, text);
+                await replyHtml(ctx, text, sessionKeyboard);
             }
         }
 
@@ -2001,14 +2005,13 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
         const activeWindows = await scanActiveWindows();
 
-        // Fetch session info for active windows in parallel
+        // Fetch session info ONLY for already connected windows to avoid CDP connection lag/hangs
         const activeWindowsWithSessions = await Promise.all(
             activeWindows.map(async (win) => {
                 let sessionInfo: { title: string; hasActiveChat: boolean } | null = null;
                 if (win.workspacePath) {
                     try {
-                        const cdp = bridge.pool.getConnected(win.projectName) || 
-                                    await bridge.pool.getOrConnect(win.workspacePath);
+                        const cdp = bridge.pool.getConnected(win.projectName);
                         if (cdp) {
                             sessionInfo = await chatSessionService.getCurrentSessionInfo(cdp);
                         }
@@ -2036,7 +2039,9 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             text += `<b>🖥️ ${t('Open IDE Windows')}:</b> ⚪ ${t('None detected')}\n`;
         }
 
-        // Build inline keyboard to switch to open windows and view dialogs/history
+        text += `\nUse /chats or /history to manage sessions.`;
+
+        // Build inline keyboard to switch to open windows
         const keyboard = new InlineKeyboard();
         let buttonCount = 0;
 
@@ -2046,16 +2051,13 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 const shortId = `sw_${buttonCount++}`;
                 statusWindowPathCache.set(shortId, win.workspacePath);
 
-                // Add row for this window: Connect, Dialogs, History
-                keyboard.text(`🔌 ${cleanName}`, `switch_window:${shortId}`)
-                        .text(`💬 ${t('Dialogs')}`, `show_dialogs:${shortId}`)
-                        .text(`📜 ${t('History')}`, `show_history:${shortId}`)
-                        .row();
+                // Add simple connect button
+                keyboard.text(`🔌 ${cleanName}`, `switch_window:${shortId}`).row();
             }
         }
 
         if (buttonCount > 0) {
-            text += `\n<i>${t('Click buttons below to switch this chat to any open window:')}</i>`;
+            text += `\n\n<i>${t('Click buttons below to switch this chat to any open window:')}</i>`;
             await replyHtml(ctx, text, keyboard);
         } else {
             await replyHtml(ctx, text);
@@ -2774,31 +2776,18 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             return;
         }
 
-        // Show dialogs in specific window click
-        if (data.startsWith('show_dialogs:')) {
-            const shortId = data.replace('show_dialogs:', '');
-            const workspacePath = statusWindowPathCache.get(shortId);
-            if (!workspacePath) {
-                await ctx.answerCallbackQuery({ text: 'Workspace path not found in cache.' });
-                return;
-            }
-
-            if (!workspaceService.exists(workspacePath)) {
-                await ctx.answerCallbackQuery({ text: `Workspace "${workspacePath}" not found.` });
-                return;
-            }
-
-            // Switch workspace first (silently)
-            const switched = await switchWorkspaceInternal(ctx, workspacePath, true);
-            if (!switched || !switched.cdp) {
-                await ctx.answerCallbackQuery({ text: 'Failed to connect to workspace.' });
+        // Show dialogs in current active window
+        if (data === 'current_dialogs') {
+            const resolved = await resolveWorkspaceAndCdp(ch);
+            if (!resolved.ok) {
+                await ctx.answerCallbackQuery({ text: 'Not connected to workspace.' });
                 return;
             }
 
             await ctx.answerCallbackQuery({ text: 'Scanning sessions...' });
             const statusMsg = await ctx.reply('🔍 Scanning sessions in Antigravity...');
             try {
-                const sessions = await chatSessionService.listAllSessions(switched.cdp);
+                const sessions = await chatSessionService.listAllSessions(resolved.cdp);
                 const { text, keyboard } = buildSessionPickerUI(sessions);
                 await bot.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
                 await replyHtml(ctx, text, keyboard);
@@ -2809,31 +2798,18 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             return;
         }
 
-        // Show history of active dialog in specific window click
-        if (data.startsWith('show_history:')) {
-            const shortId = data.replace('show_history:', '');
-            const workspacePath = statusWindowPathCache.get(shortId);
-            if (!workspacePath) {
-                await ctx.answerCallbackQuery({ text: 'Workspace path not found in cache.' });
-                return;
-            }
-
-            if (!workspaceService.exists(workspacePath)) {
-                await ctx.answerCallbackQuery({ text: `Workspace "${workspacePath}" not found.` });
-                return;
-            }
-
-            // Switch workspace first (silently)
-            const switched = await switchWorkspaceInternal(ctx, workspacePath, true);
-            if (!switched || !switched.cdp) {
-                await ctx.answerCallbackQuery({ text: 'Failed to connect to workspace.' });
+        // Show history of active dialog in current active window
+        if (data === 'current_history') {
+            const resolved = await resolveWorkspaceAndCdp(ch);
+            if (!resolved.ok) {
+                await ctx.answerCallbackQuery({ text: 'Not connected to workspace.' });
                 return;
             }
 
             await ctx.answerCallbackQuery({ text: 'Retrieving history...' });
             const statusMsg = await ctx.reply('🔍 ' + t('Scanning sessions in Antigravity...'));
             try {
-                const history = await chatSessionService.getChatHistory(switched.cdp, 5);
+                const history = await chatSessionService.getChatHistory(resolved.cdp, 5);
                 await bot.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
 
                 if (history.length === 0) {
