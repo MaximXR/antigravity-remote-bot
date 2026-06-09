@@ -856,6 +856,7 @@ export class ResponseMonitor {
             try {
                 const baselineClassified = classifyAssistantSegments(structuredBaseline?.result?.value);
                 if (baselineClassified.diagnostics.source === 'dom-structured') {
+                    this.baselineText = baselineClassified.finalOutputText.trim() || null;
                     for (const line of baselineClassified.activityLines) {
                         const key = (line || '').replace(/\r/g, '').trim().slice(0, 200);
                         if (key) this.seenProcessLogKeys.add(key);

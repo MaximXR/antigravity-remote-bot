@@ -150,7 +150,7 @@ export function extractAssistantSegmentsPayloadScript(): string {
     // Scope to the LAST assistant message turn to prevent cross-turn spillover.
     // This is the critical isolation boundary — without it, tool calls, thinking
     // logs, and response text from earlier turns leak into the current extraction.
-    var assistantTurns = rootScope.querySelectorAll('[data-message-author-role="assistant"]');
+    var assistantTurns = rootScope.querySelectorAll('[data-message-author-role="assistant"], [role="article"][aria-label="Agent response"], [aria-label="Agent response"]');
     var scope = assistantTurns.length > 0
         ? assistantTurns[assistantTurns.length - 1]
         : rootScope;
@@ -162,6 +162,8 @@ export function extractAssistantSegmentsPayloadScript(): string {
         '.flex.flex-col.gap-y-3',
         '[data-message-author-role="assistant"]',
         '[data-message-role="assistant"]',
+        '[role="article"][aria-label="Agent response"]',
+        '[aria-label="Agent response"]',
         '[class*="assistant-message"]',
         '[class*="message-content"]',
         '[class*="markdown-body"]',
