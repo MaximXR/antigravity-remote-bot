@@ -3989,15 +3989,15 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             logger.info(`Bot started as @${botInfo.username} | extractionMode=${config.extractionMode}`);
             try {
                 await bot.api.setMyCommands([
+                    { command: 'status', description: t('Bot Status') },
+                    { command: 'project', description: t('Select a workspace') },
                     { command: 'new', description: t('Start a new chat session') },
                     { command: 'chat', description: t('Current session info') },
                     { command: 'chats', description: t('List and select chats') },
                     { command: 'history', description: t('Load history of the active session') },
                     { command: 'screenshot', description: t('Capture Antigravity screen') },
                     { command: 'stop', description: t('Interrupt active generation') },
-                    { command: 'project', description: t('Select a project') },
                     { command: 'active_only', description: t('Toggle active workspace only messages') },
-                    { command: 'status', description: t('Bot status overview') },
                     { command: 'help', description: t('Show all commands') },
                 ]);
                 logger.info('Telegram command menu registered successfully');
