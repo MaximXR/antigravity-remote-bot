@@ -19,7 +19,7 @@ import { ModelService } from '../services/modelService';
 import { TemplateRepository } from '../database/templateRepository';
 import { WorkspaceBindingRepository } from '../database/workspaceBindingRepository';
 import { ChatSessionRepository } from '../database/chatSessionRepository';
-import { WorkspaceService } from '../services/workspaceService';
+import { WorkspaceService, RecentWorkspace } from '../services/workspaceService';
 import { TelegramTopicManager } from '../services/telegramTopicManager';
 import { TitleGeneratorService } from '../services/titleGeneratorService';
 
@@ -28,6 +28,7 @@ import { ChatSessionService } from '../services/chatSessionService';
 import { ResponseMonitor, RESPONSE_SELECTORS } from '../services/responseMonitor';
 import { ensureAntigravityRunning } from '../services/antigravityLauncher';
 import { getAntigravityCdpHint } from '../utils/pathUtils';
+import { CDP_PORTS } from '../utils/cdpPorts';
 import { AutoAcceptService } from '../services/autoAcceptService';
 import { PromptDispatcher } from '../services/promptDispatcher';
 import {
@@ -139,6 +140,7 @@ function stripHtmlForFile(html: string): string {
 }
 
 const userStopRequestedChannels = new Set<string>();
+const statusWindowPathCache = new Map<string, string>();
 
 // Interrupt state is managed by ../services/interruptState.ts
 // (addPendingInterrupt, drainPendingInterrupts, etc.)
@@ -1820,8 +1822,58 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }
     });
 
-    const buildStatusText = (): string => {
-        const activeNames = bridge.pool.getActiveWorkspaceNames();
+    // Scan active IDE windows
+    const scanActiveWindows = async () => {
+        const recentWorkspaces = workspaceService.getRecentWorkspaces();
+        const activeWindows: { port: number; title: string; workspacePath: string | null; projectName: string }[] = [];
+
+        await Promise.all(CDP_PORTS.map(async (port) => {
+            try {
+                // Fetch devtools targets list from port (timeout after 1.5s to avoid blocking)
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 1500);
+                const res = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: controller.signal });
+                clearTimeout(timeoutId);
+
+                if (res.ok) {
+                    const list = await res.json() as any[];
+                    const workbenchPages = list.filter(
+                        (t: any) =>
+                            t.type === 'page' &&
+                            t.webSocketDebuggerUrl &&
+                            !t.title?.includes('Launchpad') &&
+                            !t.url?.includes('workbench-jetski-agent') &&
+                            t.url?.includes('workbench')
+                    );
+                    for (const page of workbenchPages) {
+                        const title = page.title || '';
+                        let matchedWorkspace: RecentWorkspace | null = null;
+                        for (const w of recentWorkspaces) {
+                            const cleanName = w.name.replace(/\.code-workspace$/i, '');
+                            if (title.toLowerCase().includes(cleanName.toLowerCase())) {
+                                matchedWorkspace = w;
+                                break;
+                            }
+                        }
+                        const projectName = matchedWorkspace ? matchedWorkspace.name : (title.split(/\s[—–-]\s/)[0] || 'Unknown');
+                        activeWindows.push({
+                            port,
+                            title,
+                            workspacePath: matchedWorkspace ? matchedWorkspace.path : null,
+                            projectName: projectName.replace(/\.code-workspace$/i, '')
+                        });
+                    }
+                }
+            } catch (e) {
+                // ignore unreachable port
+            }
+        }));
+
+        return activeWindows;
+    };
+
+    // Handle /status command
+    const handleStatus = async (ctx: Context) => {
         const currentMode = modeService.getCurrentMode();
         const autoAcceptStatus = bridge.autoAccept.isEnabled() ? `🟢 ${t('ON')}` : `⚪ ${t('OFF')}`;
 
@@ -1829,27 +1881,54 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         text += `<b>${t('Mode')}:</b> ${escapeHtml(t(MODE_DISPLAY_NAMES[currentMode] || currentMode))}\n`;
         text += `<b>${t('Auto Approve')}:</b> ${autoAcceptStatus}\n`;
 
-        if (activeNames.length > 0) {
-            text += `<b>${t('CDP')}:</b> 🟢 ${t('Connected')}\n\n`;
-            text += `<b>${t('Active Workspaces')}:</b>\n`;
-            for (const name of activeNames) {
-                const cdp = bridge.pool.getConnected(name);
-                const contexts = cdp ? cdp.getContexts().length : 0;
-                const fullPath = (cdp ? cdp.getCurrentWorkspacePath() : null) || '';
-                text += `• <b>${escapeHtml(name)}</b>\n  <code>${escapeHtml(fullPath)}</code>\n  (${t('Contexts')}: ${contexts})\n`;
-            }
-            text += `\n<i>${t('Use /workspace to switch workspaces.')}</i>`;
+        // Get bound workspace for CURRENT chat
+        const ch = getChannel(ctx);
+        const binding = workspaceBindingRepo.findByChannelId(channelKey(ch));
+        if (binding) {
+            const folderName = path.basename(binding.workspacePath);
+            const cleanFolderName = folderName.replace(/\.code-workspace$/i, '');
+            text += `<b>${t('Current Workspace (this chat)')}:</b> 📂 <b>${escapeHtml(cleanFolderName)}</b>\n`;
+            text += `  <code>${escapeHtml(binding.workspacePath)}</code>\n\n`;
         } else {
-            text += `<b>${t('CDP')}:</b> ⚪ ${t('Disconnected')}\n\n`;
-            text += `<i>${t('Use /workspace to select and connect to a workspace.')}</i>`;
+            text += `<b>${t('Current Workspace (this chat)')}:</b> ⚪ ${t('None')}\n\n`;
         }
-        return text;
+
+        const activeWindows = await scanActiveWindows();
+
+        if (activeWindows.length > 0) {
+            text += `<b>🖥️ ${t('Open IDE Windows')}:</b>\n`;
+            for (const win of activeWindows) {
+                const pathStr = win.workspacePath ? `<code>${escapeHtml(win.workspacePath)}</code>` : `<i>${t('Path unknown')}</i>`;
+                text += `• <b>${escapeHtml(win.projectName)}</b> (Port ${win.port})\n  Title: <i>${escapeHtml(win.title)}</i>\n  Path: ${pathStr}\n`;
+            }
+        } else {
+            text += `<b>🖥️ ${t('Open IDE Windows')}:</b> ⚪ ${t('None detected')}\n`;
+        }
+
+        // Build inline keyboard to switch to open windows
+        const keyboard = new InlineKeyboard();
+        let buttonCount = 0;
+
+        for (const win of activeWindows) {
+            if (win.workspacePath) {
+                const cleanName = win.projectName.replace(/\.code-workspace$/i, '');
+                const shortId = `sw_${buttonCount++}`;
+                statusWindowPathCache.set(shortId, win.workspacePath);
+
+                // Add inline button to select this window
+                keyboard.text(`🔌 ${cleanName}`, `switch_window:${shortId}`);
+            }
+        }
+
+        if (buttonCount > 0) {
+            text += `\n<i>${t('Click buttons below to switch this chat to any open window:')}</i>`;
+            await replyHtml(ctx, text, keyboard);
+        } else {
+            await replyHtml(ctx, text);
+        }
     };
 
-    // /status command
-    bot.command('status', async (ctx) => {
-        await replyHtml(ctx, buildStatusText());
-    });
+    bot.command('status', handleStatus);
 
     // /autoaccept command
     bot.command('autoaccept', async (ctx) => {
@@ -2326,9 +2405,159 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             return;
         }
 
-        // Project selection
-        if (data.startsWith(`${PROJECT_SELECT_ID}:`)) {
-            const shortId = data.replace(`${PROJECT_SELECT_ID}:`, '');
+    const selectAndConnectWorkspace = async (
+        ctx: Context,
+        ch: TelegramChannel,
+        workspacePath: string,
+        cleanFolderName: string,
+        fullPath: string,
+        key: string,
+        guildId: string,
+        openInNewWindow: boolean = false,
+        targetPort?: number
+    ) => {
+        const isForum = ctx.chat?.type === 'supergroup' && (ctx.chat as any).is_forum === true;
+
+        if (config.useTopics && isForum && !ch.threadId) {
+            try {
+                const existing = workspaceBindingRepo.findByWorkspacePathAndGuildId(workspacePath, guildId);
+                const existingTopic = existing.find(b => b.channelId.includes(':'));
+
+                let topicId: number;
+                if (existingTopic) {
+                    topicId = Number(existingTopic.channelId.split(':')[1]);
+                    topicManager.registerTopic(workspacePath, topicId);
+                } else {
+                    topicManager.setChatId(ch.chatId);
+                    const sanitized = topicManager.sanitizeName(cleanFolderName);
+                    const result = await topicManager.ensureTopic(sanitized);
+                    topicId = result.topicId;
+                }
+
+                const topicKey = `${ch.chatId}:${topicId}`;
+
+                await bot.api.sendMessage(
+                    ch.chatId,
+                    `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(cleanFolderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.`,
+                    { parse_mode: 'HTML', message_thread_id: topicId },
+                );
+                workspaceBindingRepo.upsert({ channelId: topicKey, workspacePath, guildId });
+                bridge.pool.getOrConnect(fullPath, openInNewWindow, targetPort).catch((err: any) => {
+                    logger.warn(`[WorkspaceSelectTopic] Proactive connection failed for ${workspacePath}:`, err?.message || err);
+                });
+                return;
+            } catch (e: any) {
+                logger.warn(`[WorkspaceSelect] Topic creation failed, falling back: ${e.message}`);
+            }
+        }
+
+        workspaceBindingRepo.upsert({ channelId: key, workspacePath, guildId });
+
+        bridge.pool.getOrConnect(fullPath, openInNewWindow, targetPort).catch((err: any) => {
+            logger.warn(`[WorkspaceSelect] Proactive connection failed for ${workspacePath}:`, err?.message || err);
+        });
+
+        const text = `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(cleanFolderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.`;
+        if (ctx.callbackQuery) {
+            try {
+                await ctx.editMessageText(text, { parse_mode: 'HTML' });
+            } catch {
+                await replyHtml(ctx, text);
+            }
+        } else {
+            await replyHtml(ctx, text);
+        }
+    };
+
+    // Project selection
+    if (data.startsWith(`${PROJECT_SELECT_ID}:`)) {
+        const shortId = data.replace(`${PROJECT_SELECT_ID}:`, '');
+        let workspacePath = projectPathCache.get(shortId);
+        if (!workspacePath) {
+            const workspaces = workspaceService.getRecentWorkspaces().map(w => w.path);
+            if (shortId.startsWith('p')) {
+                const idx = parseInt(shortId.slice(1), 10);
+                if (!isNaN(idx) && idx >= 0 && idx < workspaces.length) {
+                    workspacePath = workspaces[idx];
+                }
+            }
+            if (!workspacePath) {
+                workspacePath = shortId;
+            }
+        }
+
+        if (!workspaceService.exists(workspacePath)) {
+            await ctx.answerCallbackQuery({ text: `Workspace "${workspacePath}" not found.` });
+            return;
+        }
+
+        const folderName = path.basename(workspacePath);
+        const cleanFolderName = folderName.replace(/\.code-workspace$/i, '');
+        const fullPath = workspaceService.getWorkspacePath(workspacePath);
+
+        // 1. Scan active windows
+        const activeWindows = await scanActiveWindows();
+
+        // 2. Check if this workspace is already open in one of the windows
+        const openWindow = activeWindows.find(win => {
+            if (win.workspacePath) {
+                return path.resolve(win.workspacePath) === path.resolve(fullPath);
+            }
+            return win.projectName.toLowerCase() === cleanFolderName.toLowerCase();
+        });
+
+        const key = channelKey(ch);
+        const guildId = String(ch.chatId);
+
+        if (openWindow) {
+            // Already open in some window, just select it
+            await selectAndConnectWorkspace(ctx, ch, workspacePath, cleanFolderName, fullPath, key, guildId, false, undefined);
+            await ctx.answerCallbackQuery({ text: `Connected to open window: ${cleanFolderName}` });
+            return;
+        }
+
+        // 3. Not open. If no windows are open, just launch a new one.
+        if (activeWindows.length === 0) {
+            await selectAndConnectWorkspace(ctx, ch, workspacePath, cleanFolderName, fullPath, key, guildId, false, undefined);
+            await ctx.answerCallbackQuery({ text: `Starting IDE for: ${cleanFolderName}` });
+            return;
+        }
+
+        // 4. There are active windows but this project is not open. Ask user.
+        const keyboard = new InlineKeyboard();
+        keyboard.text(`🆕 ${t('Open in new window')}`, `open_workspace_mode:new:${shortId}`);
+        keyboard.row();
+
+        for (const win of activeWindows) {
+            keyboard.text(`🔄 ${t('Switch window')} (${win.projectName} - Port ${win.port})`, `open_workspace_mode:switch:${win.port}:${shortId}`);
+            keyboard.row();
+        }
+
+        await ctx.editMessageText(
+            `💼 <b>${escapeHtml(cleanFolderName)}</b> ${t('is not open in IDE')}.\n\n` +
+            `${t('Active windows detected')}. ${t('Choose how to open it')}:`,
+            { parse_mode: 'HTML', reply_markup: keyboard }
+        );
+        await ctx.answerCallbackQuery();
+        return;
+    }
+
+
+        // Open workspace mode confirmation
+        if (data.startsWith('open_workspace_mode:')) {
+            const parts = data.split(':');
+            const mode = parts[1]; // 'new' or 'switch'
+            
+            let port: number | undefined;
+            let shortId: string;
+            
+            if (mode === 'switch') {
+                port = parseInt(parts[2], 10);
+                shortId = parts[3];
+            } else {
+                shortId = parts[2];
+            }
+
             let workspacePath = projectPathCache.get(shortId);
             if (!workspacePath) {
                 const workspaces = workspaceService.getRecentWorkspaces().map(w => w.path);
@@ -2344,6 +2573,34 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             }
 
             if (!workspaceService.exists(workspacePath)) {
+                await ctx.answerCallbackQuery({ text: `Workspace not found.` });
+                return;
+            }
+
+            const folderName = path.basename(workspacePath);
+            const cleanFolderName = folderName.replace(/\.code-workspace$/i, '');
+            const fullPath = workspaceService.getWorkspacePath(workspacePath);
+
+            const key = channelKey(ch);
+            const guildId = String(ch.chatId);
+
+            const openInNewWindow = (mode === 'new');
+
+            await selectAndConnectWorkspace(ctx, ch, workspacePath, cleanFolderName, fullPath, key, guildId, openInNewWindow, port);
+            await ctx.answerCallbackQuery({ text: `Opening ${cleanFolderName}...` });
+            return;
+        }
+
+        // Switch window button click
+        if (data.startsWith('switch_window:')) {
+            const shortId = data.replace('switch_window:', '');
+            const workspacePath = statusWindowPathCache.get(shortId);
+            if (!workspacePath) {
+                await ctx.answerCallbackQuery({ text: 'Workspace path not found in cache.' });
+                return;
+            }
+
+            if (!workspaceService.exists(workspacePath)) {
                 await ctx.answerCallbackQuery({ text: `Workspace "${workspacePath}" not found.` });
                 return;
             }
@@ -2351,10 +2608,9 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             let key = channelKey(ch);
             const guildId = String(ch.chatId);
             const isForum = ctx.chat?.type === 'supergroup' && (ctx.chat as any).is_forum === true;
-
             const folderName = path.basename(workspacePath);
+            const cleanFolderName = folderName.replace(/\.code-workspace$/i, '');
 
-            // Auto-create topic if conditions are met
             if (config.useTopics && isForum && !ch.threadId) {
                 try {
                     const existing = workspaceBindingRepo.findByWorkspacePathAndGuildId(workspacePath, guildId);
@@ -2366,29 +2622,27 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         topicManager.registerTopic(workspacePath, topicId);
                     } else {
                         topicManager.setChatId(ch.chatId);
-                        const sanitized = topicManager.sanitizeName(folderName);
+                        const sanitized = topicManager.sanitizeName(cleanFolderName);
                         const result = await topicManager.ensureTopic(sanitized);
                         topicId = result.topicId;
                     }
 
                     key = `${ch.chatId}:${topicId}`;
 
-                    // Send welcome message in the new topic
                     const fullPath = workspaceService.getWorkspacePath(workspacePath);
                     await bot.api.sendMessage(
                         ch.chatId,
-                        `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(folderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.`,
+                        `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(cleanFolderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.`,
                         { parse_mode: 'HTML', message_thread_id: topicId },
                     );
                     workspaceBindingRepo.upsert({ channelId: key, workspacePath, guildId });
                     bridge.pool.getOrConnect(fullPath).catch((err: any) => {
                         logger.warn(`[WorkspaceSelectTopic] Proactive connection failed for ${workspacePath}:`, err?.message || err);
                     });
-                    await ctx.answerCallbackQuery({ text: `Topic created for: ${folderName}` });
+                    await ctx.answerCallbackQuery({ text: `Topic created for: ${cleanFolderName}` });
                     return;
                 } catch (e: any) {
                     logger.warn(`[WorkspaceSelect] Topic creation failed, falling back: ${e.message}`);
-                    // Fall through to default behavior
                 }
             }
 
@@ -2400,10 +2654,10 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             });
 
             await ctx.editMessageText(
-                `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(folderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.`,
+                `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(cleanFolderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.`,
                 { parse_mode: 'HTML' },
             );
-            await ctx.answerCallbackQuery({ text: `Selected: ${folderName}` });
+            await ctx.answerCallbackQuery({ text: `Selected: ${cleanFolderName}` });
             return;
         }
 
@@ -2895,7 +3149,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             }
 
             if (parsed.commandName === 'status') {
-                await replyHtml(ctx, buildStatusText());
+                await handleStatus(ctx);
                 return;
             }
 

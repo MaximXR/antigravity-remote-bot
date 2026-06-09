@@ -331,7 +331,12 @@ export class CdpService extends EventEmitter {
      * @param workspacePath Full workspace path (e.g., /home/user/Code/MyProject)
      * @returns true on successful connection
      */
-    async discoverAndConnectForWorkspace(workspacePath: string, forceVerify: boolean = false): Promise<boolean> {
+    async discoverAndConnectForWorkspace(
+        workspacePath: string,
+        forceVerify: boolean = false,
+        openInNewWindow: boolean = false,
+        targetPort?: number
+    ): Promise<boolean> {
         const projectName = extractProjectNameFromPath(workspacePath);
         this.currentWorkspacePath = workspacePath;
 
@@ -344,7 +349,7 @@ export class CdpService extends EventEmitter {
 
         this.isSwitchingWorkspace = true;
         try {
-            return await this._discoverAndConnectForWorkspaceImpl(workspacePath, projectName);
+            return await this._discoverAndConnectForWorkspaceImpl(workspacePath, projectName, openInNewWindow, targetPort);
         } finally {
             this.isSwitchingWorkspace = false;
         }
@@ -378,28 +383,40 @@ export class CdpService extends EventEmitter {
     private async _discoverAndConnectForWorkspaceImpl(
         workspacePath: string,
         projectName: string,
+        openInNewWindow: boolean = false,
+        targetPort?: number
     ): Promise<boolean> {
         // Scan all ports to collect workbench pages
         let pages: any[] = [];
         let respondingPort: number | null = null;
 
-        for (const port of this.ports) {
+        if (targetPort !== undefined) {
+            respondingPort = targetPort;
             try {
-                const list = await this.getJson(`http://127.0.0.1:${port}/json/list`);
+                const list = await this.getJson(`http://127.0.0.1:${targetPort}/json/list`);
                 pages.push(...list);
-                // Prioritize recording ports that contain workbench pages
-                const hasWorkbench = list.some((t: any) => t.url?.includes('workbench'));
-                if (hasWorkbench && respondingPort === null) {
-                    respondingPort = port;
-                }
             } catch {
-                // No response from this port, next
+                // Ignore port unreachable
+            }
+        } else {
+            for (const port of this.ports) {
+                try {
+                    const list = await this.getJson(`http://127.0.0.1:${port}/json/list`);
+                    pages.push(...list);
+                    // Prioritize recording ports that contain workbench pages
+                    const hasWorkbench = list.some((t: any) => t.url?.includes('workbench'));
+                    if (hasWorkbench && respondingPort === null) {
+                        respondingPort = port;
+                    }
+                } catch {
+                    // No response from this port, next
+                }
             }
         }
 
         if (respondingPort === null && pages.length > 0) {
             // No workbench found but ports responded
-            respondingPort = this.ports[0]; // logging purposes
+            respondingPort = targetPort !== undefined ? targetPort : this.ports[0]; // logging purposes
         }
 
         if (respondingPort === null) {
@@ -444,6 +461,12 @@ export class CdpService extends EventEmitter {
                 return this.connectToPage(singlePage, projectName);
             }
             logger.info(`[CdpService] The single active workbench page is verified to be a different workspace. Will open the requested workspace via CLI.`);
+        }
+
+        // If explicitly requested to open in new window, launch it now
+        if (openInNewWindow) {
+            logger.info(`[CdpService] Workspace "${projectName}" requested in new window. Launching...`);
+            return this.launchAndConnectWorkspace(workspacePath, projectName);
         }
 
         // 3. If not found, open the workspace in the running IDE

@@ -101,5 +101,15 @@
   "Active Workspaces": "Active Workspaces",
   "Contexts": "Contexts",
   "Use /workspace to select and connect to a workspace.": "Use /workspace to select and connect to a workspace.",
-  "Use /workspace to switch workspaces.": "Use /workspace to switch workspaces."
+  "Use /workspace to switch workspaces.": "Use /workspace to switch workspaces.",
+  "Current Workspace (this chat)": "Current Workspace (this chat)",
+  "Open IDE Windows": "Open IDE Windows",
+  "Path unknown": "Path unknown",
+  "None detected": "None detected",
+  "Click buttons below to switch this chat to any open window:": "Click buttons below to switch this chat to any open window:",
+  "is not open in IDE": "is not open in IDE",
+  "Active windows detected": "Active windows detected",
+  "Choose how to open it": "Choose how to open it",
+  "Open in new window": "Open in new window",
+  "Switch window": "Switch window"
 }

@@ -131,5 +131,15 @@
   "Active Workspaces": "Активные рабочие области",
   "Contexts": "Контексты",
   "Use /workspace to select and connect to a workspace.": "Используйте /workspace для выбора и подключения рабочей области.",
-  "Use /workspace to switch workspaces.": "Используйте /workspace для переключения рабочих областей."
+  "Use /workspace to switch workspaces.": "Используйте /workspace для переключения рабочих областей.",
+  "Current Workspace (this chat)": "Текущая рабочая область (этот чат)",
+  "Open IDE Windows": "Открытые окна IDE",
+  "Path unknown": "Путь неизвестен",
+  "None detected": "Не обнаружены",
+  "Click buttons below to switch this chat to any open window:": "Нажмите кнопки ниже, чтобы переключить этот чат на любое открытое окно:",
+  "is not open in IDE": "не открыт в IDE",
+  "Active windows detected": "Обнаружены активные окна",
+  "Choose how to open it": "Выберите, как его открыть",
+  "Open in new window": "Открыть в новом окне",
+  "Switch window": "Переключить окно"
 }
