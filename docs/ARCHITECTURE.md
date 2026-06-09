@@ -35,6 +35,8 @@ Telegram **Forum Topics = Projects**, **Sessions within topics = Chat Sessions**
 - **`/new`**: Starts a new Antigravity chat session within the current project topic.
 - **`/chat`**: Shows the current session info and lists all sessions in the project.
 - **Auto-rename**: On first message, the session topic is renamed based on the prompt content (e.g. `session-1` → `1-react-auth-bug-fix`).
+- **Direct Window Switching**: The bot scans and detects all open IDE windows and allows switching active workspaces via inline keyboard buttons (`[🔌 Перейти в ...]`).
+- **Offline Window Restoration**: If a workspace window is closed, the bot notifies the user and offers a button to restore and relaunch the workspace (`[🔄 Восстановить]`).
 
 ### Data Flow
 1. User sends `/project` → inline keyboard with project list
@@ -56,14 +58,15 @@ src/commands/chatCommandHandler.ts          — /new, /chat commands
 ```
 
 ### Future Extensions
-- Direct workspace switching in Antigravity via CDP (currently uses prompt prefix)
 - LLM API-based title generation (currently text extraction based)
 
-## 4. Context Preservation
+## 4. Context Preservation & Deduplication
 Instructions and results are linked through Telegram's reply chain and SQLite state.
 
 - **Metadata in SQLite:** Message IDs and workspace context are stored in SQLite, allowing reply-based follow-up to restore the full project context.
 - **Reply-based continuation:** When a user replies to a bot message, Remoat loads the associated workspace/session context and forwards the follow-up to Antigravity.
+- **Seen Messages Deduplication (`seen_user_messages`):** Keeps track of processed user messages by their hash in SQLite. If the bot restarts or connection drops, this prevents re-sending or losing messages sent in the interim.
+- **Approval Message Deduplication (`active_approvals`):** Tracks active "Approval Required" prompts sent to Telegram. This prevents duplicating inline approval buttons on bot restart and keeps the original Telegram message ID to correctly edit/resolve it when approved.
 
 ## 5. Scheduled Tasks
 - Backend implementation using `node-cron` with `ScheduleService` and `ScheduleRepository`.
@@ -80,6 +83,8 @@ Instructions and results are linked through Telegram's reply chain and SQLite st
 
 ## 7. Antigravity Process Launch (CLI Spawn) & Resource Control
 - **CLI Spawn:** Antigravity is launched as an independent background process via `child_process.spawn`.
+- **Default IDE Launch:** On bot startup, if no CDP ports are responding (IDE is not running), the bot automatically spawns a default empty instance of Antigravity on port `9223` in the background.
+- **Controlled Reconnection:** During reconnection attempts, auto-launching of workspaces is disabled (`allowLaunch: false`) to avoid opening folder windows without explicit user consent.
 - **Task Queue:** Concurrent task limits (per-workspace and global) prevent resource exhaustion.
 - **Kill Switch:** Process PIDs are tracked; `/stop` force-kills the process tree.
 - **Message Chunking:** Output exceeding Telegram's 4096-character limit is automatically split into multiple messages.
