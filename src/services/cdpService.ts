@@ -513,13 +513,7 @@ export class CdpService extends EventEmitter {
                 return false;
             }
 
-            // If the folder path probe matches, it is NOT different
-            const folderMatch = await this.probeWorkspaceFolderPath(projectName, workspacePath);
-            if (folderMatch) {
-                return false;
-            }
-
-            // It has a stable title, and does not match the project name or path.
+            // It has a stable title, and does not match the project name.
             // So it is definitely a different workspace.
             return true;
         } catch {
@@ -681,10 +675,10 @@ export class CdpService extends EventEmitter {
                     if (t !== document.title) return { found: true, source: 'title-element', value: t };
                 }
                 
-                // Method 2: Check folder name in explorer view
-                const explorerItems = document.querySelectorAll('.explorer-item-label, .monaco-icon-label .label-name');
+                // Method 2: Check folder name in explorer view headers (root folders)
+                const explorerItems = document.querySelectorAll('.pane-header [aria-label*="обозревателя" i], .pane-header [aria-label*="explorer" i], .pane-header [aria-label*="section" i], .pane-header .title');
                 const folderNames = Array.from(explorerItems).map(e => (e.textContent || '').trim()).filter(Boolean);
-                if (folderNames.length > 0) return { found: true, source: 'explorer', value: folderNames.join(',') };
+                if (folderNames.length > 0) return { found: true, source: 'explorer-roots', value: folderNames.join(',') };
                 
                 // Method 3: Get path from tab titles or breadcrumbs
                 const breadcrumbs = document.querySelectorAll('.breadcrumbs-view .folder-icon, .tabs-breadcrumbs .label-name');
