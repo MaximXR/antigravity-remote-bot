@@ -40,15 +40,15 @@ export function isTitleMatch(title: string, projectName: string): boolean {
     if (!title) return false;
     const normProj = projectName.toLowerCase().trim();
     const parts = title.split(/\s[—–-]\s/).map(p => p.toLowerCase().trim());
-    if (parts.length < 2) {
-        return parts[0] === normProj;
-    }
-    // VS Code titles typically end with the application name (e.g. "Visual Studio Code"), 
-    // and the project/workspace name is the segment immediately before it.
-    const projectPart = parts[parts.length - 2];
-    if (projectPart === normProj) return true;
-    if (projectPart === `${normProj} (workspace)`) return true;
-    if (projectPart.endsWith('.code-workspace') && projectPart.slice(0, -'.code-workspace'.length).trim() === normProj) {
+    
+    // Extract segment immediately before application name
+    const projectPart = parts.length < 2 ? parts[0] : parts[parts.length - 2];
+    
+    // Remove workspace suffix (e.g., "(workspace)" or "(рабочая область)")
+    const cleanProjectPart = projectPart.replace(/\s*\([^)]+\)$/, '').trim();
+    
+    if (cleanProjectPart === normProj) return true;
+    if (cleanProjectPart.endsWith('.code-workspace') && cleanProjectPart.slice(0, -'.code-workspace'.length).trim() === normProj) {
         return true;
     }
     return false;

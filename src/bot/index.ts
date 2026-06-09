@@ -1908,6 +1908,76 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         return activeWindows;
     };
 
+    const switchWorkspaceInternal = async (
+        ctx: Context,
+        workspacePath: string,
+        silent: boolean = false
+    ): Promise<{ key: string; fullPath: string; cleanFolderName: string; cdp: any } | null> => {
+        const ch = getChannelFromCb(ctx);
+        let key = channelKey(ch);
+        const guildId = String(ch.chatId);
+        const isForum = ctx.chat?.type === 'supergroup' && (ctx.chat as any).is_forum === true;
+        const folderName = path.basename(workspacePath);
+        const cleanFolderName = folderName.replace(/\.code-workspace$/i, '');
+        const fullPath = workspaceService.getWorkspacePath(workspacePath);
+
+        let cdp: any = null;
+
+        if (config.useTopics && isForum && !ch.threadId) {
+            try {
+                const existing = workspaceBindingRepo.findByWorkspacePathAndGuildId(workspacePath, guildId);
+                const existingTopic = existing.find(b => b.channelId.includes(':'));
+
+                let topicId: number;
+                if (existingTopic) {
+                    topicId = Number(existingTopic.channelId.split(':')[1]);
+                    topicManager.registerTopic(workspacePath, topicId);
+                } else {
+                    topicManager.setChatId(ch.chatId);
+                    const sanitized = topicManager.sanitizeName(cleanFolderName);
+                    const result = await topicManager.ensureTopic(sanitized);
+                    topicId = result.topicId;
+                }
+
+                key = `${ch.chatId}:${topicId}`;
+
+                workspaceBindingRepo.upsert({ channelId: key, workspacePath, guildId });
+                cdp = await bridge.pool.getOrConnect(fullPath).catch((err: any) => {
+                    logger.warn(`[WorkspaceSelectTopic] Proactive connection failed for ${workspacePath}:`, err?.message || err);
+                    return null;
+                });
+
+                if (!silent) {
+                    await bot.api.sendMessage(
+                        ch.chatId,
+                        `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(cleanFolderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.`,
+                        { parse_mode: 'HTML', message_thread_id: topicId },
+                    );
+                }
+                return { key, fullPath, cleanFolderName, cdp };
+            } catch (e: any) {
+                logger.warn(`[WorkspaceSelect] Topic creation failed, falling back: ${e.message}`);
+            }
+        }
+
+        workspaceBindingRepo.upsert({ channelId: key, workspacePath, guildId });
+        cdp = await bridge.pool.getOrConnect(fullPath).catch((err: any) => {
+            logger.warn(`[WorkspaceSelect] Proactive connection failed for ${workspacePath}:`, err?.message || err);
+            return null;
+        });
+
+        if (!silent) {
+            const text = `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(cleanFolderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.`;
+            try {
+                await ctx.editMessageText(text, { parse_mode: 'HTML' });
+            } catch {
+                await replyHtml(ctx, text);
+            }
+        }
+
+        return { key, fullPath, cleanFolderName, cdp };
+    };
+
     // Handle /status command
     const handleStatus = async (ctx: Context) => {
         const currentMode = modeService.getCurrentMode();
@@ -1931,28 +2001,56 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
         const activeWindows = await scanActiveWindows();
 
-        if (activeWindows.length > 0) {
+        // Fetch session info for active windows in parallel
+        const activeWindowsWithSessions = await Promise.all(
+            activeWindows.map(async (win) => {
+                let sessionInfo: { title: string; hasActiveChat: boolean } | null = null;
+                if (win.workspacePath) {
+                    try {
+                        const cdp = bridge.pool.getConnected(win.projectName) || 
+                                    await bridge.pool.getOrConnect(win.workspacePath);
+                        if (cdp) {
+                            sessionInfo = await chatSessionService.getCurrentSessionInfo(cdp);
+                        }
+                    } catch (e) {
+                        logger.debug(`[handleStatus] Failed to get session info for ${win.projectName}:`, e);
+                    }
+                }
+                return { ...win, sessionInfo };
+            })
+        );
+
+        if (activeWindowsWithSessions.length > 0) {
             text += `<b>🖥️ ${t('Open IDE Windows')}:</b>\n`;
-            for (const win of activeWindows) {
+            for (const win of activeWindowsWithSessions) {
                 const pathStr = win.workspacePath ? `<code>${escapeHtml(win.workspacePath)}</code>` : `<i>${t('Path unknown')}</i>`;
-                text += `• <b>${escapeHtml(win.projectName)}</b> (Port ${win.port})\n  Title: <i>${escapeHtml(win.title)}</i>\n  Path: ${pathStr}\n`;
+                let sessionStr = '';
+                if (win.sessionInfo) {
+                    sessionStr = `\n  Active Chat: 💬 <b>${escapeHtml(win.sessionInfo.title)}</b>`;
+                } else {
+                    sessionStr = `\n  Active Chat: <i>${t('Unknown')}</i>`;
+                }
+                text += `• <b>${escapeHtml(win.projectName)}</b> (Port ${win.port})\n  Title: <i>${escapeHtml(win.title)}</i>\n  Path: ${pathStr}${sessionStr}\n`;
             }
         } else {
             text += `<b>🖥️ ${t('Open IDE Windows')}:</b> ⚪ ${t('None detected')}\n`;
         }
 
-        // Build inline keyboard to switch to open windows
+        // Build inline keyboard to switch to open windows and view dialogs/history
         const keyboard = new InlineKeyboard();
         let buttonCount = 0;
 
-        for (const win of activeWindows) {
+        for (const win of activeWindowsWithSessions) {
             if (win.workspacePath) {
                 const cleanName = win.projectName.replace(/\.code-workspace$/i, '');
                 const shortId = `sw_${buttonCount++}`;
                 statusWindowPathCache.set(shortId, win.workspacePath);
 
-                // Add inline button to select this window
-                keyboard.text(`🔌 ${cleanName}`, `switch_window:${shortId}`);
+                // Add row for this window: Connect, Dialogs, History
+                keyboard.text(`🔌 ${cleanName}`, `switch_window:${shortId}`)
+                        .text(`💬 ${t('Dialogs')}`, `show_dialogs:${shortId}`)
+                        .text(`📜 ${t('History')}`, `show_history:${shortId}`)
+                        .row();
             }
         }
 
@@ -2668,59 +2766,102 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 return;
             }
 
-            let key = channelKey(ch);
-            const guildId = String(ch.chatId);
-            const isForum = ctx.chat?.type === 'supergroup' && (ctx.chat as any).is_forum === true;
             const folderName = path.basename(workspacePath);
             const cleanFolderName = folderName.replace(/\.code-workspace$/i, '');
 
-            if (config.useTopics && isForum && !ch.threadId) {
-                try {
-                    const existing = workspaceBindingRepo.findByWorkspacePathAndGuildId(workspacePath, guildId);
-                    const existingTopic = existing.find(b => b.channelId.includes(':'));
+            await switchWorkspaceInternal(ctx, workspacePath, false);
+            await ctx.answerCallbackQuery({ text: `Selected: ${cleanFolderName}` });
+            return;
+        }
 
-                    let topicId: number;
-                    if (existingTopic) {
-                        topicId = Number(existingTopic.channelId.split(':')[1]);
-                        topicManager.registerTopic(workspacePath, topicId);
-                    } else {
-                        topicManager.setChatId(ch.chatId);
-                        const sanitized = topicManager.sanitizeName(cleanFolderName);
-                        const result = await topicManager.ensureTopic(sanitized);
-                        topicId = result.topicId;
-                    }
-
-                    key = `${ch.chatId}:${topicId}`;
-
-                    const fullPath = workspaceService.getWorkspacePath(workspacePath);
-                    await bot.api.sendMessage(
-                        ch.chatId,
-                        `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(cleanFolderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.`,
-                        { parse_mode: 'HTML', message_thread_id: topicId },
-                    );
-                    workspaceBindingRepo.upsert({ channelId: key, workspacePath, guildId });
-                    bridge.pool.getOrConnect(fullPath).catch((err: any) => {
-                        logger.warn(`[WorkspaceSelectTopic] Proactive connection failed for ${workspacePath}:`, err?.message || err);
-                    });
-                    await ctx.answerCallbackQuery({ text: `Topic created for: ${cleanFolderName}` });
-                    return;
-                } catch (e: any) {
-                    logger.warn(`[WorkspaceSelect] Topic creation failed, falling back: ${e.message}`);
-                }
+        // Show dialogs in specific window click
+        if (data.startsWith('show_dialogs:')) {
+            const shortId = data.replace('show_dialogs:', '');
+            const workspacePath = statusWindowPathCache.get(shortId);
+            if (!workspacePath) {
+                await ctx.answerCallbackQuery({ text: 'Workspace path not found in cache.' });
+                return;
             }
 
-            workspaceBindingRepo.upsert({ channelId: key, workspacePath, guildId });
+            if (!workspaceService.exists(workspacePath)) {
+                await ctx.answerCallbackQuery({ text: `Workspace "${workspacePath}" not found.` });
+                return;
+            }
 
-            const fullPath = workspaceService.getWorkspacePath(workspacePath);
-            bridge.pool.getOrConnect(fullPath).catch((err: any) => {
-                logger.warn(`[WorkspaceSelect] Proactive connection failed for ${workspacePath}:`, err?.message || err);
-            });
+            // Switch workspace first (silently)
+            const switched = await switchWorkspaceInternal(ctx, workspacePath, true);
+            if (!switched || !switched.cdp) {
+                await ctx.answerCallbackQuery({ text: 'Failed to connect to workspace.' });
+                return;
+            }
 
-            await ctx.editMessageText(
-                `<b>💼 Workspace Selected</b>\n\n✅ <b>${escapeHtml(cleanFolderName)}</b>\n<code>${escapeHtml(fullPath)}</code>\n\nSend messages here to interact with this workspace.`,
-                { parse_mode: 'HTML' },
-            );
-            await ctx.answerCallbackQuery({ text: `Selected: ${cleanFolderName}` });
+            await ctx.answerCallbackQuery({ text: 'Scanning sessions...' });
+            const statusMsg = await ctx.reply('🔍 Scanning sessions in Antigravity...');
+            try {
+                const sessions = await chatSessionService.listAllSessions(switched.cdp);
+                const { text, keyboard } = buildSessionPickerUI(sessions);
+                await bot.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
+                await replyHtml(ctx, text, keyboard);
+            } catch (e: any) {
+                await bot.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
+                await ctx.reply(`❌ Failed to list sessions: ${e.message}`);
+            }
+            return;
+        }
+
+        // Show history of active dialog in specific window click
+        if (data.startsWith('show_history:')) {
+            const shortId = data.replace('show_history:', '');
+            const workspacePath = statusWindowPathCache.get(shortId);
+            if (!workspacePath) {
+                await ctx.answerCallbackQuery({ text: 'Workspace path not found in cache.' });
+                return;
+            }
+
+            if (!workspaceService.exists(workspacePath)) {
+                await ctx.answerCallbackQuery({ text: `Workspace "${workspacePath}" not found.` });
+                return;
+            }
+
+            // Switch workspace first (silently)
+            const switched = await switchWorkspaceInternal(ctx, workspacePath, true);
+            if (!switched || !switched.cdp) {
+                await ctx.answerCallbackQuery({ text: 'Failed to connect to workspace.' });
+                return;
+            }
+
+            await ctx.answerCallbackQuery({ text: 'Retrieving history...' });
+            const statusMsg = await ctx.reply('🔍 ' + t('Scanning sessions in Antigravity...'));
+            try {
+                const history = await chatSessionService.getChatHistory(switched.cdp, 5);
+                await bot.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
+
+                if (history.length === 0) {
+                    await replyHtml(ctx, t('No messages found in history.'));
+                    return;
+                }
+
+                // Construct formatted HTML output
+                const formattedTurns = history.map(turn => {
+                    if (turn.role === 'user') {
+                        return `👤 <b>${t('You')}:</b>\n${escapeHtml(turn.text || '')}`;
+                    } else {
+                        return `🤖 <b>${t('Assistant')}:</b>\n${htmlToTelegramHtml(turn.html || '')}`;
+                    }
+                });
+
+                // Join turns and send
+                const fullHtml = formattedTurns.join('\n\n---\n\n');
+                const chunks = splitTelegramHtml(fullHtml, TELEGRAM_MSG_LIMIT);
+                for (const chunk of chunks) {
+                    if (chunk.trim()) {
+                        await replyHtml(ctx, chunk);
+                    }
+                }
+            } catch (e: any) {
+                await bot.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
+                await ctx.reply(`❌ Failed to retrieve history: ${e.message}`);
+            }
             return;
         }
 

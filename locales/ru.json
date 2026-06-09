@@ -153,5 +153,8 @@
   "When disabled, messages from all open IDE windows will be forwarded.": "Когда выключено, сообщения из всех открытых окон IDE будут пересылаться.",
   "Messages and progress will only be mirrored from the selected workspace in this chat.": "Сообщения и прогресс будут транслироваться только из выбранной рабочей области в этом чате.",
   "Messages and progress from all open IDE windows will be mirrored.": "Сообщения и прогресс будут транслироваться из всех открытых окон IDE.",
-  "Active workspace only": "Только активный воркспейс"
+  "Active workspace only": "Только активный воркспейс",
+  "Dialogs": "Диалоги",
+  "History": "История",
+  "Unknown": "Неизвестно"
 }
