@@ -64,6 +64,14 @@ Three-layer design: **CLI → Bot → Services/DB**
 - `docs/ANTIGRAVITY_DOM_SELECTORS.md` — DOM selector reference (critical for CDP interaction code)
 - `docs/dom-inspection-guide.md` — How to find new selectors
 
+## Diagnostics & Scripts
+
+All diagnostic and CDP inspection scripts are located in the `diagnostics/` directory:
+- `diagnostics/list_cdp_pages.js` - List active Chrome DevTools targets and ports.
+- `diagnostics/capture_real_screenshot.js` - Capture and save a screenshot of the active Antigravity IDE workbench.
+- `diagnostics/test_cdp_contexts.ts` - Check and log active CDP Execution Contexts.
+- `diagnostics/click_undo.js` - Align and click the Cascade rollback button.
+
 ## Code Conventions
 
 - **Conventional Commits**: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`, `perf:`, `ci:`

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Antigravity is an Electron-based app. When launched with `--remote-debugging-port=9223`, you can inspect its DOM via Chrome DevTools Protocol (CDP), just like a regular browser.
+Antigravity is an Electron-based app. When launched with `--remote-debugging-port=9333` (or ports `9223`/`9222`), you can inspect its DOM via Chrome DevTools Protocol (CDP), just like a regular browser.
 
 This guide covers how to connect DevTools and the investigation flow for creating new DOM selectors.
 
@@ -13,13 +13,13 @@ This guide covers how to connect DevTools and the investigation flow for creatin
 Antigravity must be running with the CDP port enabled:
 
 ```bash
-open -a Antigravity --args --remote-debugging-port=9223
+open -a Antigravity --args --remote-debugging-port=9333
 ```
 
 ### Steps
 
 1. Open `chrome://inspect/#devices` in Chrome (or Edge)
-2. Click **Configure** → add `localhost:9223` (if not already listed)
+2. Click **Configure** → add `localhost:9333` (if not already listed)
 3. The Antigravity page appears under **Remote Target**
 4. Click **inspect** → DevTools opens
 
@@ -163,3 +163,12 @@ In Remoat, DOM selectors are defined in `RESPONSE_SELECTORS` (`src/services/resp
 3. Add or update the selector in the appropriate source file
 4. Update `docs/ANTIGRAVITY_DOM_SELECTORS.md` with the new selector and its verified status
 5. Run `npm test` to verify no regressions
+
+## Automation and Diagnostic Scripts
+
+If you need to query or verify the DOM programmatically from the terminal, useful diagnostics scripts are located in the `diagnostics/` folder:
+- `node diagnostics/list_cdp_pages.js` - Scan ports and list active DevTools target URLs.
+- `node diagnostics/capture_real_screenshot.js` - Save a screenshot of the active IDE window to verify UI state.
+- `node diagnostics/inspect_quick_pick.js` - Dump active VS Code QuickPick items.
+- `node diagnostics/inspect_sidebar.js` - Dump DOM layout of the VS Code sidebar.
+- `npx ts-node diagnostics/test_cdp_contexts.ts` - Print all active execution contexts tracked by `CdpService`.

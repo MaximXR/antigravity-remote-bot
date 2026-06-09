@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS templates (
 | **Поле ввода (Chat Input)** | `div[role="textbox"]:not(.xterm-helper-textarea), div[role="combobox"]:not(.xterm-helper-textarea)` | Фокус + `Runtime.evaluate` / `Input.dispatchKeyEvent` |
 | **Кнопка отправки** | `button` содержащий SVG с классами `lucide-arrow-right`, `lucide-arrow-up`, `lucide-send` | CDP Mouse Click по координатам `getBoundingClientRect()` |
 | **Кнопка отмены (Stop)** | `button` с title/aria-label/class содержащим `stop` или `stop-generation` | CDP Mouse Click по координатам `getBoundingClientRect()` |
-| **Кнопка Undo (Откат)** | `button, [role="button"]` с html/text/title/aria-label содержащим `undo` | CDP Mouse Click по координатам последнего найденного элемента |
+| **Кнопка Undo (Откат)** | `button[data-testid="revert-button"], [role="button"][data-testid="revert-button"]` | Скроллинг на центр экрана + CDP Mouse Click по координатам + подтверждение клавишей `Enter` через CDP |
 | **Кнопка "New Chat"** | `[data-tooltip-id="new-conversation-tooltip"]` | CDP Mouse Click, если курсор имеет стиль `pointer` |
 | **История (Past Conversations)** | `[data-past-conversations-toggle]` или с `data-tooltip-id` содержащим `history` | CDP Mouse Click, закрытие кнопкой `Escape` |
 
@@ -85,9 +85,9 @@ npm run dev
 3. Запустить бота заново в фоне.
 
 ### Порты отладки IDE
-IDE запускается с открытым портом отладки. По умолчанию сканируются порты `9223` и `9222`.
+IDE запускается с открытым портом отладки. По умолчанию сканируются порты `9333`, `9223` и `9222`.
 Убедиться в доступности порта перед подключением:
 ```powershell
 # Проверка открытого порта
-Test-NetConnection -Port 9223 -ComputerName localhost
+Test-NetConnection -Port 9333 -ComputerName localhost
 ```
