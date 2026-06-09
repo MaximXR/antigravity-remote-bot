@@ -28,15 +28,12 @@ export function getAntigravityCliPath(): string {
     return 'antigravity';
 }
 
-/**
- * Helper to extract the project name from a full workspace path.
- * Handles both Windows (backslash) and POSIX (forward slash) paths.
- *
- * @param workspacePath The full path to the workspace directory
- * @returns The final folder name
- */
 export function extractProjectNameFromPath(workspacePath: string): string {
-    return workspacePath.split(/[/\\]/).filter(Boolean).pop() || '';
+    const last = workspacePath.split(/[/\\]/).filter(Boolean).pop() || '';
+    if (last.endsWith('.code-workspace')) {
+        return last.slice(0, -'.code-workspace'.length);
+    }
+    return last;
 }
 
 /**

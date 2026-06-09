@@ -864,10 +864,20 @@ export class CdpService extends EventEmitter {
 
     private async runCommand(command: string, args: string[]): Promise<void> {
         await new Promise<void>((resolve, reject) => {
-            const child = spawn(command, args, {
-                stdio: 'ignore',
-                shell: process.platform === 'win32',
-            });
+            let child;
+            if (process.platform === 'win32') {
+                // On Windows, use PowerShell to execute the command to safely handle spaces in command path and arguments
+                const psCommand = `& "${command}" ${args.map(a => `"${a}"`).join(' ')}`;
+                child = spawn('powershell', ['-NoProfile', '-Command', psCommand], {
+                    stdio: 'ignore',
+                    shell: false,
+                });
+            } else {
+                child = spawn(command, args, {
+                    stdio: 'ignore',
+                    shell: false,
+                });
+            }
 
             child.once('error', (error) => {
                 reject(error);
