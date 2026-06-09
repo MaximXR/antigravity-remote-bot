@@ -1670,6 +1670,61 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         threadId: ctx.callbackQuery?.message?.message_thread_id ?? undefined,
     });
 
+    const setupWorkspaceDetectors = (cdp: any, projectName: string, channel: TelegramChannel) => {
+        bridge.lastActiveWorkspace = projectName;
+        bridge.lastActiveChannel = channel;
+        registerApprovalWorkspaceChannel(bridge, projectName, channel);
+        ensureApprovalDetector(bridge, cdp, projectName);
+        ensureErrorPopupDetector(bridge, cdp, projectName);
+        ensurePlanningDetector(bridge, cdp, projectName);
+
+        const onUserMessageCallback = (info: any): boolean => {
+            const conf = loadConfig();
+            if (conf.onlyActiveWorkspaceMessages) {
+                const binding = workspaceBindingRepo.findByChannelId(channelKey(channel));
+                const activeProjectName = binding ? bridge.pool.extractProjectName(binding.workspacePath) : null;
+                if (activeProjectName !== projectName) {
+                    logger.debug(`[UserMessageDetector:${projectName}] onlyActiveWorkspaceMessages is true and this is not the active workspace (${activeProjectName}), skipping user message mirror.`);
+                    return true;
+                }
+            }
+
+            logger.info(`[UserMessageDetector:${projectName}] Detected user message from IDE: "${info.text.slice(0, 50)}..."`);
+            
+            if (promptDispatcher.isBusy(channel, cdp)) {
+                logger.debug(`[UserMessageDetector:${projectName}] Workspace is busy, skipping user message mirror.`);
+                return true;
+            }
+
+            const normalized = normalizeForHash(info.text);
+            if (telegramSentPrompts.has(normalized)) {
+                logger.debug(`[UserMessageDetector:${projectName}] Message came from Telegram, skipping echo text.`);
+                telegramSentPrompts.delete(normalized);
+            } else {
+                // 1. Send the user message to the Telegram channel
+                const cleanProjName = projectName.replace(/\.code-workspace$/i, '');
+                const userMsgText = `👤 [IDE: ${cleanProjName}]: ${info.text}`;
+                bot.api.sendMessage(channel.chatId, userMsgText, {
+                    message_thread_id: channel.threadId,
+                }).catch(e => logger.error('[UserMessageDetector] Failed to send user message to TG:', e));
+            }
+
+            // 2. Start mirroring the response using acquireLock to block TG commands
+            const mirrorPromise = mirrorResponseToTelegram(bridge, channel, cdp, info.text, {
+                chatSessionService,
+                chatSessionRepo,
+                topicManager,
+                titleGenerator,
+                modelService,
+                workspaceBindingRepo
+            });
+
+            promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
+            return true;
+        };
+        ensureUserMessageDetector(bridge, cdp, projectName, onUserMessageCallback);
+    };
+
     const resolveWorkspaceAndCdp = (ch: TelegramChannel): Promise<ResolveOutcome> =>
         resolveWorkspaceAndCdpImpl(ch, {
             findBinding: (key) => workspaceBindingRepo.findByChannelId(key),
@@ -1677,58 +1732,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             getOrConnect: (fullPath) => bridge.pool.getOrConnect(fullPath),
             extractProjectName: (fullPath) => bridge.pool.extractProjectName(fullPath),
             onConnected: (cdp, projectName, channel) => {
-                bridge.lastActiveWorkspace = projectName;
-                bridge.lastActiveChannel = channel;
-                registerApprovalWorkspaceChannel(bridge, projectName, channel);
-                ensureApprovalDetector(bridge, cdp, projectName);
-                ensureErrorPopupDetector(bridge, cdp, projectName);
-                ensurePlanningDetector(bridge, cdp, projectName);
-
-                const onUserMessageCallback = (info: any): boolean => {
-                    const conf = loadConfig();
-                    if (conf.onlyActiveWorkspaceMessages) {
-                        const binding = workspaceBindingRepo.findByChannelId(channelKey(channel));
-                        const activeProjectName = binding ? bridge.pool.extractProjectName(binding.workspacePath) : null;
-                        if (activeProjectName !== projectName) {
-                            logger.debug(`[UserMessageDetector:${projectName}] onlyActiveWorkspaceMessages is true and this is not the active workspace (${activeProjectName}), skipping user message mirror.`);
-                            return true;
-                        }
-                    }
-
-                    logger.info(`[UserMessageDetector:${projectName}] Detected user message from IDE: "${info.text.slice(0, 50)}..."`);
-                    
-                    if (promptDispatcher.isBusy(channel, cdp)) {
-                        logger.debug(`[UserMessageDetector:${projectName}] Workspace is busy, skipping user message mirror.`);
-                        return true;
-                    }
-
-                    const normalized = normalizeForHash(info.text);
-                    if (telegramSentPrompts.has(normalized)) {
-                        logger.debug(`[UserMessageDetector:${projectName}] Message came from Telegram, skipping echo text.`);
-                        telegramSentPrompts.delete(normalized);
-                    } else {
-                        // 1. Send the user message to the Telegram channel
-                        const cleanProjName = projectName.replace(/\.code-workspace$/i, '');
-                        const userMsgText = `👤 [IDE: ${cleanProjName}]: ${info.text}`;
-                        bot.api.sendMessage(channel.chatId, userMsgText, {
-                            message_thread_id: channel.threadId,
-                        }).catch(e => logger.error('[UserMessageDetector] Failed to send user message to TG:', e));
-                    }
-
-                    // 2. Start mirroring the response using acquireLock to block TG commands
-                    const mirrorPromise = mirrorResponseToTelegram(bridge, channel, cdp, info.text, {
-                        chatSessionService,
-                        chatSessionRepo,
-                        topicManager,
-                        titleGenerator,
-                        modelService,
-                        workspaceBindingRepo
-                    });
-
-                    promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
-                    return true;
-                };
-                ensureUserMessageDetector(bridge, cdp, projectName, onUserMessageCallback);
+                setupWorkspaceDetectors(cdp, projectName, channel);
             },
         });
 
@@ -1764,7 +1768,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             `<b>⚙️ ` + t('Settings') + `</b>\n` +
             `/mode — ` + t('Change execution mode') + `\n` +
             `/model — ` + t('Change LLM model') + `\n` +
-            `/active_only — ` + t('Toggle active workspace only messages') + `\n\n` +
+            `/mirror_all — ` + t('Toggle mirroring from all windows') + `\n\n` +
             `<b>💼 ` + t('Workspaces') + `</b>\n` +
             `/workspace — ` + t('Select a workspace') + `\n` +
             `/setworkspacedir — ` + t('Change workspace base directory') + `\n\n` +
@@ -2053,6 +2057,15 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     return null;
                 });
 
+                if (cdp) {
+                    const projectName = bridge.pool.extractProjectName(workspacePath);
+                    const targetChannel: TelegramChannel = {
+                        chatId: ch.chatId,
+                        threadId: topicId,
+                    };
+                    setupWorkspaceDetectors(cdp, projectName, targetChannel);
+                }
+
                 if (!silent) {
                     let sessionStr = '';
                     if (cdp) {
@@ -2094,6 +2107,11 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             logger.warn(`[WorkspaceSelect] Proactive connection failed for ${workspacePath}:`, err?.message || err);
             return null;
         });
+
+        if (cdp) {
+            const projectName = bridge.pool.extractProjectName(workspacePath);
+            setupWorkspaceDetectors(cdp, projectName, ch);
+        }
 
         if (!silent) {
             let sessionStr = '';
@@ -2235,28 +2253,29 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }
     });
 
-    // /active_only command
-    bot.command('active_only', async (ctx) => {
+    // /mirror_all command
+    bot.command('mirror_all', async (ctx) => {
         const arg = (ctx.match || '').trim().toLowerCase();
         const conf = loadConfig();
         
         if (arg === 'on' || arg === 'true' || arg === 'yes' || arg === '1') {
-            ConfigLoader.save({ onlyActiveWorkspaceMessages: true });
-            await ctx.reply(`🟢 <b>${t('Active Workspace Only: ON')}</b>\n${t('Messages and progress will only be mirrored from the selected workspace in this chat.')}`, { parse_mode: 'HTML' });
-        } else if (arg === 'off' || arg === 'false' || arg === 'no' || arg === '0') {
             ConfigLoader.save({ onlyActiveWorkspaceMessages: false });
-            await ctx.reply(`⚪ <b>${t('Active Workspace Only: OFF')}</b>\n${t('Messages and progress from all open IDE windows will be mirrored.')}`, { parse_mode: 'HTML' });
+            await ctx.reply(`🟢 <b>${t('Mirror All Windows: ON')}</b>\n${t('Messages and progress from all open IDE windows will now be mirrored.')}`, { parse_mode: 'HTML' });
+        } else if (arg === 'off' || arg === 'false' || arg === 'no' || arg === '0') {
+            ConfigLoader.save({ onlyActiveWorkspaceMessages: true });
+            await ctx.reply(`⚪ <b>${t('Mirror All Windows: OFF')}</b>\n${t('Messages will now only be mirrored from the selected active workspace.')}`, { parse_mode: 'HTML' });
         } else {
-            const status = conf.onlyActiveWorkspaceMessages ? '🟢 ' + t('ON') : '⚪ ' + t('OFF');
+            const isMirrorAll = !conf.onlyActiveWorkspaceMessages;
+            const status = isMirrorAll ? '🟢 ' + t('ON') : '⚪ ' + t('OFF');
             const keyboard = new InlineKeyboard()
-                .text('🟢 ' + t('Turn ON'), 'active_only:on')
-                .text('⚪ ' + t('Turn OFF'), 'active_only:off');
+                .text('🟢 ' + t('Turn ON'), 'mirror_all:on')
+                .text('⚪ ' + t('Turn OFF'), 'mirror_all:off');
             
             await replyHtml(ctx,
-                `<b>⚙️ ${t('Active Workspace Only Settings')}</b>\n\n` +
+                `<b>⚙️ ${t('Mirror All Windows Settings')}</b>\n\n` +
                 `${t('Current status:')} <b>${status}</b>\n\n` +
-                `${t('When enabled, the bot will only forward user messages and AI responses/progress from the workspace that is currently selected (active) in this chat.')}\n` +
-                `${t('When disabled, messages from all open IDE windows will be forwarded.')}`,
+                `${t('When enabled, messages and progress from all open IDE windows will be mirrored.')}\n` +
+                `${t('When disabled, messages will only be mirrored from the currently active workspace in this chat.')}`,
                 keyboard
             );
         }
@@ -3421,25 +3440,25 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             try { await ctx.editMessageText(`✅ Cleanup complete — ${processed} session(s) ${action}.`); } catch (e) { logger.debug('[editMsg] Telegram edit failed (expected for unmodified):', e); }
             await ctx.answerCallbackQuery({ text: `${processed} session(s) ${action}` });
             return;
-        }        // Active workspace only settings callback
-        if (data.startsWith('active_only:')) {
-            const action = data.replace('active_only:', '');
+        }        // Mirror all windows settings callback
+        if (data.startsWith('mirror_all:')) {
+            const action = data.replace('mirror_all:', '');
             const enable = action === 'on';
-            ConfigLoader.save({ onlyActiveWorkspaceMessages: enable });
+            ConfigLoader.save({ onlyActiveWorkspaceMessages: !enable });
             const status = enable ? '🟢 ' + t('ON') : '⚪ ' + t('OFF');
             const keyboard = new InlineKeyboard()
-                .text('🟢 ' + t('Turn ON'), 'active_only:on')
-                .text('⚪ ' + t('Turn OFF'), 'active_only:off');
+                .text('🟢 ' + t('Turn ON'), 'mirror_all:on')
+                .text('⚪ ' + t('Turn OFF'), 'mirror_all:off');
             try {
                 await ctx.editMessageText(
-                    `<b>⚙️ ${t('Active Workspace Only Settings')}</b>\n\n` +
+                    `<b>⚙️ ${t('Mirror All Windows Settings')}</b>\n\n` +
                     `${t('Current status:')} <b>${status}</b>\n\n` +
-                    `${t('When enabled, the bot will only forward user messages and AI responses/progress from the workspace that is currently selected (active) in this chat.')}\n` +
-                    `${t('When disabled, messages from all open IDE windows will be forwarded.')}`,
+                    `${t('When enabled, messages and progress from all open IDE windows will be mirrored.')}\n` +
+                    `${t('When disabled, messages will only be mirrored from the currently active workspace in this chat.')}`,
                     { parse_mode: 'HTML', reply_markup: keyboard }
                 );
-            } catch (e) { logger.debug('[active_only] Telegram edit failed:', e); }
-            await ctx.answerCallbackQuery({ text: `${t('Active workspace only')}: ${action.toUpperCase()}` });
+            } catch (e) { logger.debug('[mirror_all] Telegram edit failed:', e); }
+            await ctx.answerCallbackQuery({ text: `${t('Mirror all windows')}: ${action.toUpperCase()}` });
             return;
         }
 
@@ -3880,56 +3899,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 const projectName = bridge.pool.extractProjectName(binding.workspacePath);
                 logger.info(`[startup] Proactively connected to workspace: ${projectName} (${binding.workspacePath})`);
                 
-                bridge.lastActiveWorkspace = projectName;
-                bridge.lastActiveChannel = channel;
-                registerApprovalWorkspaceChannel(bridge, projectName, channel);
-                ensureApprovalDetector(bridge, cdp, projectName);
-                ensureErrorPopupDetector(bridge, cdp, projectName);
-                ensurePlanningDetector(bridge, cdp, projectName);
-                
-                const onUserMessageCallback = (info: any): boolean => {
-                    const conf = loadConfig();
-                    if (conf.onlyActiveWorkspaceMessages) {
-                        const binding = workspaceBindingRepo.findByChannelId(channelKey(channel));
-                        const activeProjectName = binding ? bridge.pool.extractProjectName(binding.workspacePath) : null;
-                        if (activeProjectName !== projectName) {
-                            logger.debug(`[UserMessageDetector:${projectName}] onlyActiveWorkspaceMessages is true and this is not the active workspace (${activeProjectName}), skipping user message mirror.`);
-                            return true;
-                        }
-                    }
-
-                    logger.info(`[UserMessageDetector:${projectName}] Detected user message from IDE: "${info.text.slice(0, 50)}..."`);
-                    
-                    if (promptDispatcher.isBusy(channel, cdp)) {
-                        logger.debug(`[UserMessageDetector:${projectName}] Workspace is busy, skipping user message mirror.`);
-                        return true;
-                    }
-
-                    const normalized = normalizeForHash(info.text);
-                    if (telegramSentPrompts.has(normalized)) {
-                        logger.debug(`[UserMessageDetector:${projectName}] Message came from Telegram, skipping echo text.`);
-                        telegramSentPrompts.delete(normalized);
-                    } else {
-                        const cleanProjName = projectName.replace(/\.code-workspace$/i, '');
-                        const userMsgText = `👤 [IDE: ${cleanProjName}]: ${info.text}`;
-                        bot.api.sendMessage(channel.chatId, userMsgText, {
-                            message_thread_id: channel.threadId,
-                        }).catch(e => logger.error('[UserMessageDetector] Failed to send user message to TG:', e));
-                    }
-
-                    const mirrorPromise = mirrorResponseToTelegram(bridge, channel, cdp, info.text, {
-                        chatSessionService,
-                        chatSessionRepo,
-                        topicManager,
-                        titleGenerator,
-                        modelService,
-                        workspaceBindingRepo
-                    });
-
-                    promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
-                    return true;
-                };
-                ensureUserMessageDetector(bridge, cdp, projectName, onUserMessageCallback);
+                setupWorkspaceDetectors(cdp, projectName, channel);
 
                 // Detect if a run is already in progress and start passive monitoring
                 cdp.call('Runtime.evaluate', {
@@ -3997,7 +3967,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     { command: 'history', description: t('Load history of the active session') },
                     { command: 'screenshot', description: t('Capture Antigravity screen') },
                     { command: 'stop', description: t('Interrupt active generation') },
-                    { command: 'active_only', description: t('Toggle active workspace only messages') },
+                    { command: 'mirror_all', description: t('Toggle mirroring from all windows') },
                     { command: 'help', description: t('Show all commands') },
                 ]);
                 logger.info('Telegram command menu registered successfully');
