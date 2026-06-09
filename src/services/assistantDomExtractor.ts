@@ -150,10 +150,23 @@ export function extractAssistantSegmentsPayloadScript(): string {
     // Scope to the LAST assistant message turn to prevent cross-turn spillover.
     // This is the critical isolation boundary — without it, tool calls, thinking
     // logs, and response text from earlier turns leak into the current extraction.
-    var assistantTurns = rootScope.querySelectorAll('[data-message-author-role="assistant"], [role="article"][aria-label="Agent response"], [aria-label="Agent response"]');
-    var scope = assistantTurns.length > 0
-        ? assistantTurns[assistantTurns.length - 1]
-        : rootScope;
+    // Scope to the LAST assistant message turn that appears after the last user message.
+    var userMessages = rootScope.querySelectorAll('[role="article"][aria-label="User message"], [aria-label="User message"], [data-testid="user-input-step"]');
+    var lastUserMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1] : null;
+
+    var assistantTurns = Array.from(rootScope.querySelectorAll('[data-message-author-role="assistant"], [role="article"][aria-label="Agent response"], [aria-label="Agent response"]'));
+    var scope = null;
+
+    if (lastUserMsg) {
+        assistantTurns = assistantTurns.filter(function(node) {
+            return !!(lastUserMsg.compareDocumentPosition(node) & 4); // Node.DOCUMENT_POSITION_FOLLOWING
+        });
+        scope = assistantTurns.length > 0 ? assistantTurns[assistantTurns.length - 1] : null;
+    } else {
+        scope = assistantTurns.length > 0 ? assistantTurns[assistantTurns.length - 1] : rootScope;
+    }
+
+    if (!scope) return null;
 
     // Same selectors as RESPONSE_TEXT — ordered by specificity
     var selectors = [

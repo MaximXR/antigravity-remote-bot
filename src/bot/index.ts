@@ -562,7 +562,7 @@ async function sendPromptToAntigravity(
             cdpService: cdp,
             pollIntervalMs: 2000,
             maxDurationMs: 1800000,
-            stopGoneConfirmCount: 3,
+            stopGoneConfirmCount: 5,
             onPhaseChange: () => { },
             onProcessLog: (logText) => {
                 if (isFinalized) return;
@@ -1152,7 +1152,19 @@ async function mirrorResponseToTelegram(
             const contextId = cdp.getPrimaryContextId();
             const expression = `(() => {
                 const panel = document.querySelector('.antigravity-agent-side-panel');
-                const scope = panel || document;
+                const rootScope = panel || document;
+                const userMessages = rootScope.querySelectorAll('[role="article"][aria-label="User message"], [aria-label="User message"], [data-testid="user-input-step"]');
+                const lastUserMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1] : null;
+                let assistantTurns = Array.from(rootScope.querySelectorAll('[data-message-author-role="assistant"], [role="article"][aria-label="Agent response"], [aria-label="Agent response"]'));
+                let scope = null;
+                if (lastUserMsg) {
+                    assistantTurns = assistantTurns.filter(node => !!(lastUserMsg.compareDocumentPosition(node) & 4));
+                    scope = assistantTurns.length > 0 ? assistantTurns[assistantTurns.length - 1] : null;
+                } else {
+                    scope = assistantTurns.length > 0 ? assistantTurns[assistantTurns.length - 1] : rootScope;
+                }
+                if (!scope) return '';
+
                 const candidateSelectors = ['.rendered-markdown', '.leading-relaxed.select-text', '.flex.flex-col.gap-y-3', '[data-message-author-role="assistant"]', '[data-message-role="assistant"]', '[class*="assistant-message"]', '[class*="message-content"]', '[class*="markdown-body"]', '.prose'];
                 const looksLikeActivity = (text) => { const n = (text || '').trim().toLowerCase(); if (!n) return true; return /^(?:analy[sz]ing|reading|writing|running|searching|planning|thinking|processing|loading|executing|testing|debugging|analyzed|read|wrote|ran)/i.test(n) && n.length <= 220; };
                 const clean = (text) => (text || '').replace(/\\r/g, '').replace(/\\n{3,}/g, '\\n\\n').trim();
@@ -1210,7 +1222,7 @@ async function mirrorResponseToTelegram(
             cdpService: cdp,
             pollIntervalMs: 2000,
             maxDurationMs: 1800000,
-            stopGoneConfirmCount: 3,
+            stopGoneConfirmCount: 5,
             onPhaseChange: () => { },
             onProcessLog: (logText) => {
                 if (isFinalized) return;

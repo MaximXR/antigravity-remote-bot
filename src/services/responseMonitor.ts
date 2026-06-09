@@ -14,7 +14,20 @@ export const RESPONSE_SELECTORS = {
      *  Reverse iteration (N-1→0) visits newest first; strict > keeps it. */
     RESPONSE_TEXT: `(() => {
         const panel = document.querySelector('.antigravity-agent-side-panel');
-        const scopes = [panel, document].filter(Boolean);
+        const rootScope = panel || document;
+
+        const userMessages = rootScope.querySelectorAll('[role="article"][aria-label="User message"], [aria-label="User message"], [data-testid="user-input-step"]');
+        const lastUserMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1] : null;
+
+        let assistantTurns = Array.from(rootScope.querySelectorAll('[data-message-author-role="assistant"], [role="article"][aria-label="Agent response"], [aria-label="Agent response"]'));
+        let scope = null;
+        if (lastUserMsg) {
+            assistantTurns = assistantTurns.filter(node => !!(lastUserMsg.compareDocumentPosition(node) & 4));
+            scope = assistantTurns.length > 0 ? assistantTurns[assistantTurns.length - 1] : null;
+        } else {
+            scope = assistantTurns.length > 0 ? assistantTurns[assistantTurns.length - 1] : rootScope;
+        }
+        if (!scope) return null;
 
         const selectors = [
             { sel: '.rendered-markdown', score: 10 },
@@ -76,22 +89,20 @@ export const RESPONSE_SELECTORS = {
         const combinedSelector = selectors.map((s) => s.sel).join(', ');
         const seen = new Set();
 
-        for (const scope of scopes) {
-            const nodes = scope.querySelectorAll(combinedSelector);
-            for (let i = nodes.length - 1; i >= 0; i--) {
-                const node = nodes[i];
-                if (!node || seen.has(node)) continue;
-                seen.add(node);
-                if (isInsideExcludedContainer(node)) continue;
-                const text = (node.innerText || node.textContent || '').replace(/\\r/g, '').trim();
-                if (!text || text.length < 2) continue;
-                if (looksLikeActivityLog(text)) continue;
-                if (looksLikeFeedbackFooter(text)) continue;
-                if (looksLikeToolOutput(text)) continue;
-                if (looksLikeQuotaPopup(text)) continue;
-                // Prefer recency first: return the newest acceptable node.
-                return text;
-            }
+        const nodes = scope.querySelectorAll(combinedSelector);
+        for (let i = nodes.length - 1; i >= 0; i--) {
+            const node = nodes[i];
+            if (!node || seen.has(node)) continue;
+            seen.add(node);
+            if (isInsideExcludedContainer(node)) continue;
+            const text = (node.innerText || node.textContent || '').replace(/\\r/g, '').trim();
+            if (!text || text.length < 2) continue;
+            if (looksLikeActivityLog(text)) continue;
+            if (looksLikeFeedbackFooter(text)) continue;
+            if (looksLikeToolOutput(text)) continue;
+            if (looksLikeQuotaPopup(text)) continue;
+            // Prefer recency first: return the newest acceptable node.
+            return text;
         }
 
         return null;
@@ -372,6 +383,21 @@ export const RESPONSE_SELECTORS = {
         const panel = document.querySelector('.antigravity-agent-side-panel');
         const scopes = [panel, document].filter(Boolean);
 
+        // Scope to the LAST assistant message turn that appears after the last user message.
+        const rootScope = panel || document;
+        const userMessages = rootScope.querySelectorAll('[role="article"][aria-label="User message"], [aria-label="User message"], [data-testid="user-input-step"]');
+        const lastUserMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1] : null;
+
+        let assistantTurns = Array.from(rootScope.querySelectorAll('[data-message-author-role="assistant"], [role="article"][aria-label="Agent response"], [aria-label="Agent response"]'));
+        let currentTurnScope = null;
+        if (lastUserMsg) {
+            assistantTurns = assistantTurns.filter(node => !!(lastUserMsg.compareDocumentPosition(node) & 4));
+            currentTurnScope = assistantTurns.length > 0 ? assistantTurns[assistantTurns.length - 1] : null;
+        } else {
+            currentTurnScope = assistantTurns.length > 0 ? assistantTurns[assistantTurns.length - 1] : rootScope;
+        }
+        const turnScopes = currentTurnScope ? [currentTurnScope] : [];
+
         // --- Stop button ---
         let isGenerating = false;
         for (const scope of scopes) {
@@ -392,9 +418,9 @@ export const RESPONSE_SELECTORS = {
                 }
             }
         }
+        let approvalVisible = false;
         if (isGenerating) {
             // Check if approval card is visible in the chat panel
-            let approvalVisible = false;
             for (const scope of scopes) {
                 const candidateSpans = Array.from(scope.querySelectorAll('span, button'));
                 for (const el of candidateSpans) {
@@ -535,7 +561,7 @@ export const RESPONSE_SELECTORS = {
         const combinedSelector = selectors.map((s) => s.sel).join(', ');
         const seen = new Set();
         let responseText = null;
-        for (const s of scopes) {
+        for (const s of turnScopes) {
             const nodes = s.querySelectorAll(combinedSelector);
             for (let i = nodes.length - 1; i >= 0; i--) {
                 const node = nodes[i];
@@ -557,7 +583,7 @@ export const RESPONSE_SELECTORS = {
         // --- Process logs ---
         const logSeen = new Set();
         const processLogs = [];
-        for (const s of scopes) {
+        for (const s of turnScopes) {
             for (const { sel } of selectors) {
                 const nodes = s.querySelectorAll(sel);
                 for (let i = 0; i < nodes.length; i++) {
@@ -571,6 +597,22 @@ export const RESPONSE_SELECTORS = {
                         processLogs.push(text.slice(0, 300));
                     }
                 }
+            }
+        }
+
+        // Ensure approval check is also run at the end of the turn when stop button has disappeared
+        if (!approvalVisible) {
+            for (const s of scopes) {
+                const candidateSpans = Array.from(s.querySelectorAll('span, button'));
+                for (const el of candidateSpans) {
+                    const txt = (el.textContent || '').trim().toLowerCase();
+                    const isClickable = el.classList.contains('cursor-pointer') || el.tagName === 'BUTTON';
+                    if (isClickable && (txt === 'accept all' || txt === 'reject all' || txt === 'allow once' || txt === 'always allow')) {
+                        approvalVisible = true;
+                        break;
+                    }
+                }
+                if (approvalVisible) break;
             }
         }
 
