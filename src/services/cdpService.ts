@@ -435,13 +435,30 @@ export class CdpService extends EventEmitter {
             return true;
         }
 
-        // 2.5 Single active workbench page fallback
+        // 2.5 Single active workbench page fallback (only if not verified to be different)
         if (workbenchPages.length === 1) {
-            logger.warn(`[CdpService] Workspace "${projectName}" not matched by title/probe, but exactly one active workbench page was found. Reusing it.`);
-            return this.connectToPage(workbenchPages[0], projectName);
+            const singlePage = workbenchPages[0];
+            const isDifferent = await this.checkIfPageIsDifferentWorkspace(singlePage, projectName, workspacePath);
+            if (!isDifferent) {
+                logger.warn(`[CdpService] Workspace "${projectName}" not matched by title/probe, but exactly one active workbench page was found (and not verified to be different). Reusing it.`);
+                return this.connectToPage(singlePage, projectName);
+            }
+            logger.info(`[CdpService] The single active workbench page is verified to be a different workspace. Will open the requested workspace via CLI.`);
         }
 
-        // 3. If not found by probe either, launch a new window
+        // 3. If not found, open the workspace in the running IDE
+        logger.info(`[CdpService] Workspace "${projectName}" not found open. Opening it in the running IDE on port ${respondingPort}...`);
+        const opened = await this.openWorkspaceInRunningIde(workspacePath, respondingPort);
+        if (opened) {
+            // Poll for the new workbench page to appear on the existing port
+            try {
+                return await this.pollForWorkspacePage(respondingPort, projectName, workspacePath);
+            } catch (pollErr: any) {
+                logger.warn(`[CdpService] Polling for workspace page failed: ${pollErr.message}. Falling back to full launch.`);
+            }
+        }
+
+        // 4. Fallback: If opening in running IDE failed or polling timed out, launch a new window
         return this.launchAndConnectWorkspace(workspacePath, projectName);
     }
 
@@ -462,6 +479,129 @@ export class CdpService extends EventEmitter {
         logger.debug(`[CdpService] Connected to workspace "${projectName}"`);
 
         return true;
+    }
+
+    /**
+     * Check if a given page is verified to be a DIFFERENT workspace.
+     * If the title is empty, or contains "untitled" or "loading", we assume we cannot verify it as different yet.
+     */
+    private async checkIfPageIsDifferentWorkspace(
+        page: any,
+        projectName: string,
+        workspacePath: string,
+    ): Promise<boolean> {
+        try {
+            this.disconnectQuietly();
+            this.targetUrl = page.webSocketDebuggerUrl;
+            await this.connect();
+
+            const result = await this.call('Runtime.evaluate', {
+                expression: 'document.title',
+                returnByValue: true,
+            });
+            const liveTitle = String(result?.result?.value || '');
+            const normalizedLiveTitle = liveTitle.toLowerCase();
+            const normalizedProject = projectName.toLowerCase();
+
+            // If it's untitled or loading or empty, we cannot confidently say it's different (could be loading the target workspace)
+            if (!liveTitle || normalizedLiveTitle.includes('untitled') || normalizedLiveTitle.includes('loading')) {
+                return false;
+            }
+
+            // If it matches by title, it is NOT different
+            if (normalizedLiveTitle.includes(normalizedProject)) {
+                return false;
+            }
+
+            // If the folder path probe matches, it is NOT different
+            const folderMatch = await this.probeWorkspaceFolderPath(projectName, workspacePath);
+            if (folderMatch) {
+                return false;
+            }
+
+            // It has a stable title, and does not match the project name or path.
+            // So it is definitely a different workspace.
+            return true;
+        } catch {
+            // If we encounter an error, assume it is not different to keep the safe fallback
+            return false;
+        } finally {
+            this.disconnectQuietly();
+        }
+    }
+
+    /**
+     * Ask the running instance of Antigravity IDE to open the new workspace/folder.
+     */
+    private async openWorkspaceInRunningIde(workspacePath: string, port: number): Promise<boolean> {
+        const antigravityCli = getAntigravityCliPath();
+        const args = [`--remote-debugging-port=${port}`, workspacePath];
+        logger.debug(`[CdpService] Opening workspace in running IDE: ${antigravityCli} ${args.join(' ')}`);
+        try {
+            await this.runCommand(antigravityCli, args);
+            return true;
+        } catch (error: any) {
+            if (process.platform === 'darwin') {
+                logger.warn(`[CdpService] CLI open failed, falling back to open -a: ${error?.message || String(error)}`);
+                try {
+                    await this.runCommand('open', ['-a', 'Antigravity', '--args', `--remote-debugging-port=${port}`, workspacePath]);
+                    return true;
+                } catch (macErr: any) {
+                    logger.error(`[CdpService] macOS open -a fallback failed: ${macErr?.message || String(macErr)}`);
+                }
+            } else {
+                logger.warn(`[CdpService] CLI open returned non-zero code or failed (might be non-fatal on Windows): ${error?.message || String(error)}`);
+                return true; // VS Code launcher processes often exit with non-zero code when delegating to an existing instance.
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Poll the debug port until a page matching the target workspace appears, then connect to it.
+     */
+    private async pollForWorkspacePage(
+        port: number,
+        projectName: string,
+        workspacePath: string,
+    ): Promise<boolean> {
+        const maxWaitMs = 30000;
+        const pollIntervalMs = 1000;
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < maxWaitMs) {
+            await new Promise(r => setTimeout(r, pollIntervalMs));
+
+            try {
+                const pages = await this.getJson(`http://127.0.0.1:${port}/json/list`);
+                const workbenchPages = pages.filter(
+                    (t: any) =>
+                        t.type === 'page' &&
+                        t.webSocketDebuggerUrl &&
+                        !t.title?.includes('Launchpad') &&
+                        !t.url?.includes('workbench-jetski-agent') &&
+                        t.url?.includes('workbench'),
+                );
+
+                // Title match
+                const titleMatch = workbenchPages.find((t: any) => t.title?.toLowerCase().includes(projectName.toLowerCase()));
+                if (titleMatch) {
+                    return this.connectToPage(titleMatch, projectName);
+                }
+
+                // CDP probe
+                const probeResult = await this.probeWorkbenchPages(workbenchPages, projectName, workspacePath);
+                if (probeResult) {
+                    return true;
+                }
+            } catch (err: any) {
+                logger.debug(`[CdpService] Error polling pages on port ${port}: ${err.message}`);
+            }
+        }
+
+        throw new Error(
+            `Workbench page for workspace "${projectName}" did not appear in running IDE on port ${port} within 30 seconds`,
+        );
     }
 
     /**
