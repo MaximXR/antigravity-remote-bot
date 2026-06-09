@@ -3895,48 +3895,52 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 threadId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[1]) : undefined,
             };
             
-            bridge.pool.getOrConnect(workspacePath).then((cdp) => {
-                const projectName = bridge.pool.extractProjectName(binding.workspacePath);
-                logger.info(`[startup] Proactively connected to workspace: ${projectName} (${binding.workspacePath})`);
-                
-                setupWorkspaceDetectors(cdp, projectName, channel);
+            const connectProactively = () => {
+                bridge.pool.getOrConnect(workspacePath).then((cdp) => {
+                    const projectName = bridge.pool.extractProjectName(binding.workspacePath);
+                    logger.info(`[startup] Proactively connected to workspace: ${projectName} (${binding.workspacePath})`);
+                    
+                    setupWorkspaceDetectors(cdp, projectName, channel);
 
-                // Detect if a run is already in progress and start passive monitoring
-                cdp.call('Runtime.evaluate', {
-                    expression: RESPONSE_SELECTORS.STOP_BUTTON,
-                    returnByValue: true,
-                }).then((res: any) => {
-                    const isGenerating = res?.result?.value?.isGenerating;
-                    if (isGenerating) {
-                        const conf = loadConfig();
-                        if (conf.onlyActiveWorkspaceMessages) {
-                            const binding = workspaceBindingRepo.findByChannelId(channelKey(channel));
-                            const activeProjectName = binding ? bridge.pool.extractProjectName(binding.workspacePath) : null;
-                            if (activeProjectName !== projectName) {
-                                logger.debug(`[startup] onlyActiveWorkspaceMessages is true and this is not the active workspace (${activeProjectName}), skipping passive monitoring.`);
-                                return;
+                    // Detect if a run is already in progress and start passive monitoring
+                    cdp.call('Runtime.evaluate', {
+                        expression: RESPONSE_SELECTORS.STOP_BUTTON,
+                        returnByValue: true,
+                    }).then((res: any) => {
+                        const isGenerating = res?.result?.value?.isGenerating;
+                        if (isGenerating) {
+                            const conf = loadConfig();
+                            if (conf.onlyActiveWorkspaceMessages) {
+                                const binding = workspaceBindingRepo.findByChannelId(channelKey(channel));
+                                const activeProjectName = binding ? bridge.pool.extractProjectName(binding.workspacePath) : null;
+                                if (activeProjectName !== projectName) {
+                                    logger.debug(`[startup] onlyActiveWorkspaceMessages is true and this is not the active workspace (${activeProjectName}), skipping passive monitoring.`);
+                                    return;
+                                }
                             }
+
+                            logger.info(`[startup] Detected active run in progress for workspace ${binding.workspacePath}. Starting passive monitoring.`);
+                            const lastUserMsg = 'Activity in IDE'; 
+                            const mirrorPromise = mirrorResponseToTelegram(bridge, channel, cdp, lastUserMsg, {
+                                chatSessionService,
+                                chatSessionRepo,
+                                topicManager,
+                                titleGenerator,
+                                modelService,
+                                workspaceBindingRepo
+                            });
+                            promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
                         }
+                    }).catch(err => {
+                        logger.debug(`[startup] Stop button probe failed for ${binding.workspacePath}:`, err);
+                    });
 
-                        logger.info(`[startup] Detected active run in progress for workspace ${binding.workspacePath}. Starting passive monitoring.`);
-                        const lastUserMsg = 'Activity in IDE'; 
-                        const mirrorPromise = mirrorResponseToTelegram(bridge, channel, cdp, lastUserMsg, {
-                            chatSessionService,
-                            chatSessionRepo,
-                            topicManager,
-                            titleGenerator,
-                            modelService,
-                            workspaceBindingRepo
-                        });
-                        promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
-                    }
-                }).catch(err => {
-                    logger.debug(`[startup] Stop button probe failed for ${binding.workspacePath}:`, err);
+                }).catch((err) => {
+                    logger.warn(`[startup] Failed proactive connection for ${binding.workspacePath}: ${err?.message || err}. Retrying in 10s...`);
+                    setTimeout(connectProactively, 10000);
                 });
-
-            }).catch((err) => {
-                logger.warn(`[startup] Failed proactive connection for ${binding.workspacePath}:`, err?.message || err);
-            });
+            };
+            connectProactively();
         }
     } catch (e: any) {
         logger.error('[startup] Proactive workspace connections failed:', e?.message || e);

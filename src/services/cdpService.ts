@@ -227,7 +227,12 @@ export class CdpService extends EventEmitter {
         });
 
         // Initialize Runtime to get execution contexts
-        await this.call('Runtime.enable', {});
+        try {
+            await this.call('Runtime.enable', {});
+        } catch (err) {
+            this.disconnectQuietly();
+            throw err;
+        }
 
         // Enable Network domain for event-based completion detection
         try {
