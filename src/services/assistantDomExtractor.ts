@@ -79,11 +79,12 @@ export function classifyAssistantSegments(payload: unknown): ClassifyResult {
 
         switch (seg.kind) {
             case 'assistant-body':
-                // Only the FIRST assistant-body segment contains the actual response text.
-                // Subsequent segments are artifact card tool-call outputs that leaked into
-                // the DOM and must not be appended to the Telegram message.
-                if (bodyTexts.length === 0 && seg.text && seg.text.trim()) {
-                    bodyTexts.push(seg.text);
+                if (seg.text && seg.text.trim()) {
+                    if (seg.domPath === 'multi-selector') {
+                        bodyTexts.push(seg.text);
+                    } else if (bodyTexts.length === 0) {
+                        bodyTexts.push(seg.text);
+                    }
                 }
                 break;
             case 'thinking':
@@ -210,21 +211,38 @@ export function extractAssistantSegmentsPayloadScript(): string {
     var seen = new Set();
     var bodyFound = false;
 
-    // Pass 1: Find assistant body — last non-excluded content node (recency first)
+    // Pass 1: Find assistant body content nodes in chronological order
     var combinedSelector = selectors.join(', ');
     var nodes = scope.querySelectorAll(combinedSelector);
 
-    for (var i = nodes.length - 1; i >= 0; i--) {
+    var isValidBodyNode = function(n) {
+        if (!n || isInsideExcludedContainer(n)) return false;
+        var t = (n.innerText || n.textContent || '').replace(/\\r/g, '').trim();
+        if (!t || t.length < 2) return false;
+        if (looksLikeActivityLog(t)) return false;
+        if (looksLikeFeedbackFooter(t)) return false;
+        if (looksLikeToolOutput(t)) return false;
+        return true;
+    };
+
+    var isLeafContent = function(node) {
+        var subNodes = node.querySelectorAll(combinedSelector);
+        for (var si = 0; si < subNodes.length; si++) {
+            var sub = subNodes[si];
+            if (sub !== node && isValidBodyNode(sub)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    for (var i = 0; i < nodes.length; i++) {
         var node = nodes[i];
         if (!node || seen.has(node)) continue;
-        seen.add(node);
-        if (isInsideExcludedContainer(node)) continue;
+        if (!isValidBodyNode(node)) continue;
+        if (!isLeafContent(node)) continue;
 
-        var text = (node.innerText || node.textContent || '').replace(/\\r/g, '').trim();
-        if (!text || text.length < 2) continue;
-        if (looksLikeActivityLog(text)) continue;
-        if (looksLikeFeedbackFooter(text)) continue;
-        if (looksLikeToolOutput(text)) continue;
+        seen.add(node);
 
         // This is the assistant body — normalize code blocks then extract innerHTML
         // AG wraps code in <pre><div class="..."> with a header div for language label,
@@ -289,7 +307,6 @@ export function extractAssistantSegmentsPayloadScript(): string {
                 domPath: 'multi-selector'
             });
             bodyFound = true;
-            break; // Only take the last (most recent) output node
         }
     }
 
