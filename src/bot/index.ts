@@ -993,9 +993,13 @@ async function mirrorResponseToTelegram(
     const modelLabel = `${currentModel}`;
     const stopKeyboard = new InlineKeyboard().text('⏹️ Stop', 'stop_generation');
 
+    const workspaceName = cdp.getCurrentWorkspaceName();
+    const cleanProjName = workspaceName ? workspaceName.replace(/\.code-workspace$/i, '') : '';
+    const ideLabel = cleanProjName ? `IDE: ${cleanProjName}` : 'IDE';
+
     let liveActivityMsgId: number | null = null;
     try {
-        const generatingText = `<b>${PHASE_ICONS.thinking} [IDE] · ${escapeHtml(modelLabel)}</b>\n\n<i>Generating...</i>`;
+        const generatingText = `<b>${PHASE_ICONS.thinking} [${ideLabel}] · ${escapeHtml(modelLabel)}</b>\n\n<i>Generating...</i>`;
         logger.info(`[mirror] Sending initial status to Telegram...`);
         const generatingMsg = await api.sendMessage(channel.chatId, generatingText, {
             parse_mode: 'HTML',
@@ -1191,7 +1195,7 @@ async function mirrorResponseToTelegram(
 
     try {
         const startTime = Date.now();
-        const progressTitle = () => `🧠 [IDE] · ${modelLabel}`;
+        const progressTitle = () => `🧠 [${ideLabel}] · ${modelLabel}`;
         const progressFooter = () => `⏱️ ${Math.round((Date.now() - startTime) / 1000)}s`;
 
         let lastProgressTrigger = 0;
@@ -1305,7 +1309,7 @@ async function mirrorResponseToTelegram(
                     if (isQuotaError) {
                         liveActivityUpdateVersion += 1;
                         thinkingActive = false;
-                        await setProgressMessage(`<b>⚠️ [IDE] · Quota Reached</b>\n\n${buildProgressBody()}\n\n<i>⏱️ ${elapsed}s</i>`, { expectedVersion: liveActivityUpdateVersion });
+                        await setProgressMessage(`<b>⚠️ [${ideLabel}] · Quota Reached</b>\n\n${buildProgressBody()}\n\n<i>⏱️ ${elapsed}s</i>`, { expectedVersion: liveActivityUpdateVersion });
                         liveResponseUpdateVersion += 1;
                         await upsertLiveResponse('⚠️ Quota Reached', 'Model quota limit reached. Please wait or switch to a different model.', `⏱️ ${elapsed}s`, { expectedVersion: liveResponseUpdateVersion });
                         resolveMonitorDone();
@@ -1406,7 +1410,7 @@ async function mirrorResponseToTelegram(
                     liveActivityUpdateVersion += 1;
                     thinkingActive = false;
                     const completedBody = buildProgressBody();
-                    await setProgressMessage(`<b>🧠 [IDE] · ${escapeHtml(modelLabel)} · ${elapsed}s</b>\n\n${completedBody}`, { expectedVersion: liveActivityUpdateVersion });
+                    await setProgressMessage(`<b>🧠 [${ideLabel}] · ${escapeHtml(modelLabel)} · ${elapsed}s</b>\n\n${completedBody}`, { expectedVersion: liveActivityUpdateVersion });
 
                     const undoKeyboard = new InlineKeyboard().text('↩️ ' + t('Undo'), 'undo_last');
 
@@ -1674,7 +1678,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         telegramSentPrompts.delete(normalized);
                     } else {
                         // 1. Send the user message to the Telegram channel
-                        const userMsgText = `👤 [IDE]: ${info.text}`;
+                        const cleanProjName = projectName.replace(/\.code-workspace$/i, '');
+                        const userMsgText = `👤 [IDE: ${cleanProjName}]: ${info.text}`;
                         bot.api.sendMessage(channel.chatId, userMsgText, {
                             message_thread_id: channel.threadId,
                         }).catch(e => logger.error('[UserMessageDetector] Failed to send user message to TG:', e));
@@ -3543,7 +3548,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         logger.debug(`[UserMessageDetector:${binding.workspacePath}] Message came from Telegram, skipping echo text.`);
                         telegramSentPrompts.delete(normalized);
                     } else {
-                        const userMsgText = `👤 [IDE]: ${info.text}`;
+                        const cleanProjName = path.basename(binding.workspacePath).replace(/\.code-workspace$/i, '');
+                        const userMsgText = `👤 [IDE: ${cleanProjName}]: ${info.text}`;
                         bot.api.sendMessage(channel.chatId, userMsgText, {
                             message_thread_id: channel.threadId,
                         }).catch(e => logger.error('[UserMessageDetector] Failed to send user message to TG:', e));
