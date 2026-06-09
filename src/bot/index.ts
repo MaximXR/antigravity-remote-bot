@@ -875,6 +875,7 @@ async function mirrorResponseToTelegram(
         modelService: ModelService;
     }
 ): Promise<void> {
+    logger.info(`[mirror] Starting response mirror for channel ${channel.chatId} (prompt: "${userPrompt.slice(0, 30)}...")`);
     const api = bridge.botApi!;
     const monitorTraceId = channelKey(channel);
     const enqueueGeneral = createSerialTaskQueue('general', monitorTraceId);
@@ -884,11 +885,13 @@ async function mirrorResponseToTelegram(
     const sendMsg = async (text: string, replyMarkup?: any): Promise<number | null> => {
         try {
             const truncated = text.length > TELEGRAM_MSG_LIMIT ? text.slice(0, TELEGRAM_MSG_LIMIT - 20) + '\n...(truncated)' : text;
+            logger.info(`[mirror] Sending message to Telegram (${text.slice(0, 40)}...)`);
             const msg = await api.sendMessage(channel.chatId, truncated, {
                 parse_mode: 'HTML',
                 message_thread_id: channel.threadId,
                 reply_markup: replyMarkup,
             });
+            logger.info(`[mirror] Message sent successfully (ID: ${msg.message_id})`);
             return msg.message_id;
         } catch (e) {
             logger.error('[mirror:sendMsg] Failed:', e);
@@ -898,12 +901,14 @@ async function mirrorResponseToTelegram(
 
     const editMsg = async (msgId: number, text: string, replyMarkup?: any, maxRetries = 3): Promise<void> => {
         const truncated = text.length > TELEGRAM_MSG_LIMIT ? text.slice(0, TELEGRAM_MSG_LIMIT - 20) + '\n...(truncated)' : text;
+        logger.info(`[mirror] Editing message ${msgId} (${text.slice(0, 40)}...)`);
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 await api.editMessageText(channel.chatId, msgId, truncated, {
                     parse_mode: 'HTML',
                     reply_markup: replyMarkup,
                 });
+                logger.info(`[mirror] Message ${msgId} edited successfully`);
                 break;
             } catch (e: any) {
                 const desc = e?.description || e?.message || '';
@@ -987,12 +992,14 @@ async function mirrorResponseToTelegram(
     let liveActivityMsgId: number | null = null;
     try {
         const generatingText = `<b>${PHASE_ICONS.thinking} [IDE] · ${escapeHtml(modelLabel)}</b>\n\n<i>Generating...</i>`;
+        logger.info(`[mirror] Sending initial status to Telegram...`);
         const generatingMsg = await api.sendMessage(channel.chatId, generatingText, {
             parse_mode: 'HTML',
             message_thread_id: channel.threadId,
             reply_markup: stopKeyboard,
         });
         liveActivityMsgId = generatingMsg.message_id;
+        logger.info(`[mirror] Initial status message sent (ID: ${liveActivityMsgId})`);
     } catch (e) { logger.error('[mirror] Failed to send initial status:', e); }
 
     let isFinalized = false;
@@ -1262,6 +1269,7 @@ async function mirrorResponseToTelegram(
                 }
             },
             onComplete: async (finalText, meta) => {
+                logger.info(`[mirror] ResponseMonitor fired onComplete (text len: ${finalText.length})`);
                 if (isFinalized) return;
                 isFinalized = true;
                 if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
@@ -1392,6 +1400,7 @@ async function mirrorResponseToTelegram(
                     } else {
                         await upsertLiveResponse(`${PHASE_ICONS.complete} Complete`, t('Failed to extract response. Use /screenshot to verify.'), `⏱️ ${elapsed}s`, { expectedVersion: liveResponseUpdateVersion, replyMarkup: undoKeyboard });
                     }
+                    logger.info(`[mirror] Response successfully mirrored to Telegram`);
 
                     try {
                         const sessionInfo = await options.chatSessionService.getCurrentSessionInfo(cdp);
@@ -1425,9 +1434,11 @@ async function mirrorResponseToTelegram(
                     logger.error('[mirror:onComplete] Failed:', e);
                 } finally {
                     resolveMonitorDone();
+                    logger.info(`[mirror] monitorDone resolved`);
                 }
             },
             onTimeout: async (lastText) => {
+                logger.warn(`[mirror] ResponseMonitor fired onTimeout`);
                 if (isFinalized) return;
                 isFinalized = true;
                 if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
@@ -1435,11 +1446,14 @@ async function mirrorResponseToTelegram(
                 liveActivityUpdateVersion += 1;
                 await setProgressMessage(`<b>⏰ Timeout</b>\n\n<i>⏱️ ${elapsed}s</i>`, { expectedVersion: liveActivityUpdateVersion });
                 resolveMonitorDone();
+                logger.info(`[mirror] monitorDone resolved (timeout)`);
             },
         });
 
+        logger.info(`[mirror] Starting passive monitoring...`);
         await monitor.startPassive();
     } catch (e: any) {
+        logger.error(`[mirror] Error in mirrorResponseToTelegram:`, e);
         isFinalized = true;
         if (elapsedTimer) { clearInterval(elapsedTimer); }
         if (monitor) { await monitor.stop().catch(() => {}); }
@@ -1634,7 +1648,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     
                     if (promptDispatcher.isBusy(channel, cdp)) {
                         logger.debug(`[UserMessageDetector:${projectName}] Workspace is busy, skipping user message mirror.`);
-                        return false;
+                        return true;
                     }
 
                     const normalized = normalizeForHash(info.text);
@@ -3252,7 +3266,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     
                     if (promptDispatcher.isBusy(channel, cdp)) {
                         logger.debug(`[UserMessageDetector:${binding.workspacePath}] Workspace is busy, skipping user message mirror.`);
-                        return false;
+                        return true;
                     }
 
                     const normalized = normalizeForHash(info.text);
