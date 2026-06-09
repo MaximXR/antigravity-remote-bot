@@ -44,6 +44,7 @@ import {
     parseApprovalCustomId,
     parseErrorPopupCustomId,
     parsePlanningCustomId,
+    buildApprovalCustomId,
 } from '../services/cdpBridgeManager';
 import {
     resolveWorkspaceAndCdp as resolveWorkspaceAndCdpImpl,
@@ -630,7 +631,8 @@ async function sendPromptToAntigravity(
                 const wasStoppedByUser = userStopRequestedChannels.delete(channelKey(channel));
                 if (wasStoppedByUser) {
                     logger.info(`[sendPrompt:${monitorTraceId}] Stopped by user`);
-                    await sendMsg('⏹️ Generation stopped.');
+                    const keyboard = new InlineKeyboard().text('↩️ ' + t('Undo'), 'undo_last');
+                    await sendMsg('⏹️ Generation stopped.', keyboard);
                     resolveMonitorDone?.();
                     return;
                 }
@@ -1288,7 +1290,8 @@ async function mirrorResponseToTelegram(
                 const wasStoppedByUser = userStopRequestedChannels.delete(channelKey(channel));
                 if (wasStoppedByUser) {
                     logger.info(`[mirror:${monitorTraceId}] Stopped by user`);
-                    await sendMsg('⏹️ Generation stopped.');
+                    const keyboard = new InlineKeyboard().text('↩️ ' + t('Undo'), 'undo_last');
+                    await sendMsg('⏹️ Generation stopped.', keyboard);
                     resolveMonitorDone?.();
                     return;
                 }
@@ -1941,12 +1944,15 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             const result = await cdp.call('Runtime.evaluate', callParams);
             const value = result?.result?.value;
 
+            userStopRequestedChannels.add(channelKey(ch));
+            const keyboard = new InlineKeyboard().text('↩️ ' + t('Undo'), 'undo_last');
+
             if (value?.ok) {
-                const ch = getChannel(ctx);
-                userStopRequestedChannels.add(channelKey(ch));
-                await replyHtml(ctx, `<b>⏹️ Generation Interrupted</b>\nAI response generation was safely stopped.`);
+                await replyHtml(ctx, `<b>⏹️ Generation Interrupted</b>\nAI response generation was safely stopped.`, keyboard);
             } else {
-                await replyHtml(ctx, `<b>⚠️ Could Not Stop</b>\n${escapeHtml(value?.error || 'Stop button not found.')}`);
+                // Even if stop button is not found (e.g. already in approval state or already stopped),
+                // allow user to undo any pending changes.
+                await replyHtml(ctx, `<b>⏹️ Generation Interrupted / Already Stopped</b>\nCould not click Stop button in IDE (${escapeHtml(value?.error || 'not found')}), but you can still undo any pending changes.`, keyboard);
             }
         } catch (e: any) {
             await ctx.reply(`❌ Error during stop: ${e.message}`);
@@ -2191,17 +2197,32 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 return;
             }
             try {
+                // Clear the Stop button immediately to avoid double clicks
+                try { await ctx.editMessageReplyMarkup({ reply_markup: undefined }); } catch (e) { logger.debug('[stop:markup] Failed to clear markup:', e); }
+
                 const contextId = cdp.getPrimaryContextId();
                 const callParams: Record<string, unknown> = { expression: RESPONSE_SELECTORS.CLICK_STOP_BUTTON, returnByValue: true, awaitPromise: false };
                 if (contextId !== null) callParams.contextId = contextId;
                 const result = await cdp.call('Runtime.evaluate', callParams);
                 const value = result?.result?.value;
 
+                userStopRequestedChannels.add(channelKey(ch));
+                const keyboard = new InlineKeyboard().text('↩️ ' + t('Undo'), 'undo_last');
+
                 if (value?.ok) {
-                    userStopRequestedChannels.add(channelKey(ch));
                     await ctx.answerCallbackQuery({ text: 'Stopping Antigravity generation...' });
+                    await bot.api.sendMessage(ch.chatId, '<b>⏹️ Generation Interrupted</b>\nAI response generation was safely stopped.', {
+                        parse_mode: 'HTML',
+                        message_thread_id: ch.threadId,
+                        reply_markup: keyboard
+                    });
                 } else {
-                    await ctx.answerCallbackQuery({ text: value?.error || 'Stop button not found in IDE.', show_alert: true });
+                    await ctx.answerCallbackQuery({ text: 'Stop button not found, but you can undo changes.' });
+                    await bot.api.sendMessage(ch.chatId, '<b>⏹️ Generation Interrupted / Already Stopped</b>\nCould not click Stop button in IDE, but you can still undo any pending changes.', {
+                        parse_mode: 'HTML',
+                        message_thread_id: ch.threadId,
+                        reply_markup: keyboard
+                    });
                 }
             } catch (e: any) {
                 await ctx.answerCallbackQuery({ text: `Error: ${e.message}`, show_alert: true });
