@@ -2174,6 +2174,18 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
         const activeWindows = await scanActiveWindows();
 
+        // Proactively connect to any newly discovered open windows in the background
+        activeWindows.forEach((win) => {
+            if (win.workspacePath && !bridge.pool.getConnected(win.projectName)) {
+                bridge.pool.getOrConnect(win.workspacePath).then((cdp) => {
+                    setupWorkspaceDetectors(cdp, win.projectName, ch);
+                    logger.info(`[status] Proactively connected to open window: ${win.projectName}`);
+                }).catch((err) => {
+                    logger.debug(`[status] Failed proactive connection to open window ${win.projectName}:`, err?.message || err);
+                });
+            }
+        });
+
         // Fetch session info ONLY for already connected windows to avoid CDP connection lag/hangs
         const activeWindowsWithSessions = await Promise.all(
             activeWindows.map(async (win) => {

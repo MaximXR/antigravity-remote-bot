@@ -230,8 +230,7 @@ export class CdpService extends EventEmitter {
         try {
             await this.call('Runtime.enable', {});
         } catch (err) {
-            this.disconnectQuietly();
-            throw err;
+            logger.warn('[CdpService] Runtime.enable failed or timed out — continuing connection:', err);
         }
 
         // Enable Network domain for event-based completion detection
