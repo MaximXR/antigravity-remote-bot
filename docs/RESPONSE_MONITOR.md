@@ -192,6 +192,14 @@ stopGoneCount >= stopGoneConfirmCount (default: 3) -> complete
 **Important:** Text changes do NOT reset `stopGoneCount`. The AI may stream trailing tokens
 after the stop button disappears. Resetting on text change would cause infinite loops.
 
+### 4.6 Background Detector Coordination (Soft Pause)
+
+During active AI generation, background DOM polling from other detectors can compound CPU load and cause severe UI lag in Cascade. To mitigate this:
+1. `ResponseMonitor` emits `response-monitor:start` when transitioning to `thinking`/`generating` states, and `response-monitor:stop` upon `complete`/`timeout`.
+2. `CdpConnectionPool` listens to these events and calls `.pause()` / `.resume()` on non-critical detectors:
+   - **Paused**: `PlanningDetector`, `ErrorPopupDetector`.
+   - **Active**: `ApprovalDetector` (remains active to handle instant auto-accept), `UserMessageDetector` (remains active to allow queueing corrections/new prompts mid-turn).
+
 ---
 
 ## 5. Callback Flow (bot/index.ts)

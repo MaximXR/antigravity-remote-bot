@@ -18,6 +18,19 @@ All scripts scope queries to the side panel first, falling back to `document`.
 
 ---
 
+## Selector Performance & Polling Rules (CRITICAL)
+
+To prevent severe CPU lags in the Antigravity IDE (e.g. scroll freezes in Cascade chat during AI generation), all DOM-querying scripts executed via CDP MUST follow these performance rules:
+
+1. **NO Full-Page Scans with Generic Selectors**:
+   - **CRITICAL**: Never execute queries like `querySelectorAll('button, div, span, [role="button"]')` across the entire document. Scanning and filtering thousands of `div` or `span` elements in JS blocks the browser's GUI thread.
+   - Use narrow selectors on the C++ side of the browser: `button, [role="button"], .cursor-pointer`.
+   - Only query `div` or `span` tags if scoped under a small, specific parent container.
+2. **Soft Pause During Generation**:
+   - Background polling of non-critical detectors (e.g., `PlanningDetector`, `ErrorPopupDetector`) must be paused while the AI is responding. Use `ResponseMonitor` start/stop events to trigger this pause.
+
+---
+
 ## 1. User Message Bubble
 
 The message a user types directly in the Antigravity chat input.

@@ -78,3 +78,7 @@ All diagnostic and CDP inspection scripts are located in the `diagnostics/` dire
 - Prefer `interface` over `type` for object definitions
 - Prefer `const` over `let`; avoid direct object/array mutation (use spread)
 - No linter configured — rely on `tsc` for type checking
+
+### CDP & Performance Conventions (CRITICAL)
+- **NO Generic Selectors**: Never use generic selectors (`div`, `span`, `*`) for full-page background polling (e.g. in detectors). This causes massive CPU lag in the Cascade UI thread. Always narrow down queries on the browser side using specific classes, roles, or tags (e.g., `button, [role="button"], .cursor-pointer`).
+- **Detector Pausing**: Non-critical background detectors (e.g., `PlanningDetector`, `ErrorPopupDetector`) must be paused during active AI response generation (when `ResponseMonitor` is active) to free up CPU resources.
