@@ -2375,22 +2375,31 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }
     });
 
-    // /mirror command
-    bot.command('mirror', async (ctx) => {
-        const arg = (ctx.match || '').trim().toLowerCase();
-        if (['all', 'active', 'telegram_only'].includes(arg)) {
-            ConfigLoader.save({ mirrorMode: arg as any, onlyActiveWorkspaceMessages: arg === 'active' });
-            const label = t(arg);
-            await ctx.reply(`✅ <b>${t('Mirror Mode')}: ${label}</b>`, { parse_mode: 'HTML' });
+    const handleMirrorCommand = async (ctx: Context) => {
+        const matchVal = ctx.match;
+        const arg = (typeof matchVal === 'string' ? matchVal : (Array.isArray(matchVal) ? matchVal[0] : '')).trim().toLowerCase();
+        if (arg === 'all' || arg === 'on' || arg === 'true' || arg === 'yes' || arg === '1') {
+            ConfigLoader.save({ mirrorMode: 'all', onlyActiveWorkspaceMessages: false });
+            await ctx.reply(`🟢 <b>${t('Mirror Mode')}: ${t('all')}</b>\n${t('Messages and progress from all open IDE windows will now be mirrored.')}`, { parse_mode: 'HTML' });
+            return;
+        }
+        if (arg === 'active' || arg === 'off' || arg === 'false' || arg === 'no' || arg === '0') {
+            ConfigLoader.save({ mirrorMode: 'active', onlyActiveWorkspaceMessages: true });
+            await ctx.reply(`⚪ <b>${t('Mirror Mode')}: ${t('active')}</b>\n${t('Messages will now only be mirrored from the selected active workspace.')}`, { parse_mode: 'HTML' });
+            return;
+        }
+        if (arg === 'telegram_only' || arg === 'telegram') {
+            ConfigLoader.save({ mirrorMode: 'telegram_only', onlyActiveWorkspaceMessages: false });
+            await ctx.reply(`✉️ <b>${t('Mirror Mode')}: ${t('telegram_only')}</b>\n${t('Mirror answers only if the prompt was sent from Telegram.')}`, { parse_mode: 'HTML' });
             return;
         }
 
         const conf = loadConfig();
         const mirrorMode = conf.mirrorMode || (conf.onlyActiveWorkspaceMessages ? 'active' : 'all');
         const keyboard = new InlineKeyboard()
-            .text(mirrorMode === 'all' ? `🟢 ${t('all')}` : t('all'), 'set_mirror_mode:all').row()
-            .text(mirrorMode === 'active' ? `🟢 ${t('active')}` : t('active'), 'set_mirror_mode:active').row()
-            .text(mirrorMode === 'telegram_only' ? `🟢 ${t('telegram_only')}` : t('telegram_only'), 'set_mirror_mode:telegram_only');
+            .text(mirrorMode === 'all' ? `🟢 ${t('all')}` : `⚪ ${t('all')}`, 'set_mirror_mode:all').row()
+            .text(mirrorMode === 'active' ? `🟢 ${t('active')}` : `⚪ ${t('active')}`, 'set_mirror_mode:active').row()
+            .text(mirrorMode === 'telegram_only' ? `🟢 ${t('telegram_only')}` : `⚪ ${t('telegram_only')}`, 'set_mirror_mode:telegram_only');
 
         await replyHtml(ctx,
             `<b>⚙️ ${t('Mirror Settings')}</b>\n\n` +
@@ -2400,36 +2409,10 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             `• <b>${t('telegram_only')}</b>: ${t('Mirror answers only if the prompt was sent from Telegram.')}`,
             keyboard
         );
-    });
+    };
 
-    // /mirror_all command (backward compatibility)
-    bot.command('mirror_all', async (ctx) => {
-        const arg = (ctx.match || '').trim().toLowerCase();
-        
-        if (arg === 'on' || arg === 'true' || arg === 'yes' || arg === '1') {
-            ConfigLoader.save({ onlyActiveWorkspaceMessages: false, mirrorMode: 'all' });
-            await ctx.reply(`🟢 <b>${t('Mirror All Windows: ON')}</b>\n${t('Messages and progress from all open IDE windows will now be mirrored.')}`, { parse_mode: 'HTML' });
-        } else if (arg === 'off' || arg === 'false' || arg === 'no' || arg === '0') {
-            ConfigLoader.save({ onlyActiveWorkspaceMessages: true, mirrorMode: 'active' });
-            await ctx.reply(`⚪ <b>${t('Mirror All Windows: OFF')}</b>\n${t('Messages will now only be mirrored from the selected active workspace.')}`, { parse_mode: 'HTML' });
-        } else {
-            const conf = loadConfig();
-            const mirrorMode = conf.mirrorMode || (conf.onlyActiveWorkspaceMessages ? 'active' : 'all');
-            const isMirrorAll = mirrorMode === 'all';
-            const status = isMirrorAll ? '🟢 ' + t('ON') : '⚪ ' + t('OFF');
-            const keyboard = new InlineKeyboard()
-                .text('🟢 ' + t('Turn ON'), 'mirror_all:on')
-                .text('⚪ ' + t('Turn OFF'), 'mirror_all:off');
-            
-            await replyHtml(ctx,
-                `<b>⚙️ ${t('Mirror All Windows Settings')}</b>\n\n` +
-                `${t('Current status:')} <b>${status}</b>\n\n` +
-                `${t('When enabled, messages and progress from all open IDE windows will be mirrored.')}\n` +
-                `${t('When disabled, messages will only be mirrored from the currently active workspace in this chat.')}`,
-                keyboard
-            );
-        }
-    });
+    bot.command('mirror', handleMirrorCommand);
+    bot.command('mirror_all', handleMirrorCommand);
 
     // /cleanup command
     bot.command('cleanup', async (ctx) => {
@@ -2937,16 +2920,22 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }
 
         // Mirror mode callbacks
-        if (data.startsWith('set_mirror_mode:')) {
-            const mode = data.substring('set_mirror_mode:'.length) as any;
+        if (data.startsWith('set_mirror_mode:') || data.startsWith('mirror_all:')) {
+            let mode: 'all' | 'active' | 'telegram_only' = 'active';
+            if (data.startsWith('set_mirror_mode:')) {
+                mode = data.substring('set_mirror_mode:'.length) as any;
+            } else {
+                const isMirrorAll = data.substring('mirror_all:'.length) === 'on';
+                mode = isMirrorAll ? 'all' : 'active';
+            }
             ConfigLoader.save({ mirrorMode: mode, onlyActiveWorkspaceMessages: mode === 'active' });
             
             const conf = loadConfig();
             const mirrorMode = conf.mirrorMode || (conf.onlyActiveWorkspaceMessages ? 'active' : 'all');
             const keyboard = new InlineKeyboard()
-                .text(mirrorMode === 'all' ? `🟢 ${t('all')}` : t('all'), 'set_mirror_mode:all').row()
-                .text(mirrorMode === 'active' ? `🟢 ${t('active')}` : t('active'), 'set_mirror_mode:active').row()
-                .text(mirrorMode === 'telegram_only' ? `🟢 ${t('telegram_only')}` : t('telegram_only'), 'set_mirror_mode:telegram_only');
+                .text(mirrorMode === 'all' ? `🟢 ${t('all')}` : `⚪ ${t('all')}`, 'set_mirror_mode:all').row()
+                .text(mirrorMode === 'active' ? `🟢 ${t('active')}` : `⚪ ${t('active')}`, 'set_mirror_mode:active').row()
+                .text(mirrorMode === 'telegram_only' ? `🟢 ${t('telegram_only')}` : `⚪ ${t('telegram_only')}`, 'set_mirror_mode:telegram_only');
 
             await ctx.editMessageText(
                 `<b>⚙️ ${t('Mirror Settings')}</b>\n\n` +
@@ -2957,27 +2946,6 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 { parse_mode: 'HTML', reply_markup: keyboard }
             ).catch(() => {});
             await ctx.answerCallbackQuery({ text: `${t('Mirror Mode')}: ${t(mirrorMode)}` });
-            return;
-        }
-
-        if (data.startsWith('mirror_all:')) {
-            const arg = data.substring('mirror_all:'.length);
-            const isMirrorAll = arg === 'on';
-            ConfigLoader.save({ onlyActiveWorkspaceMessages: !isMirrorAll, mirrorMode: isMirrorAll ? 'all' : 'active' });
-            
-            const status = isMirrorAll ? '🟢 ' + t('ON') : '⚪ ' + t('OFF');
-            const keyboard = new InlineKeyboard()
-                .text('🟢 ' + t('Turn ON'), 'mirror_all:on')
-                .text('⚪ ' + t('Turn OFF'), 'mirror_all:off');
-
-            await ctx.editMessageText(
-                `<b>⚙️ ${t('Mirror All Windows Settings')}</b>\n\n` +
-                `${t('Current status:')} <b>${status}</b>\n\n` +
-                `${t('When enabled, messages and progress from all open IDE windows will be mirrored.')}\n` +
-                `${t('When disabled, messages will only be mirrored from the currently active workspace in this chat.')}`,
-                { parse_mode: 'HTML', reply_markup: keyboard }
-            ).catch(() => {});
-            await ctx.answerCallbackQuery({ text: `${t('Mirror All Windows')}: ${status}` });
             return;
         }
 
