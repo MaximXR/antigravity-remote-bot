@@ -1,4 +1,6 @@
 import { t } from "../utils/i18n";
+import { ConfigLoader } from "../utils/configLoader";
+import { ApprovalType } from "./approvalDetector";
 
 export type AutoAcceptAction = 'on' | 'off' | 'status';
 
@@ -9,15 +11,64 @@ export interface AutoAcceptCommandResult {
     message: string;
 }
 
-export class AutoAcceptService {
-    private enabled: boolean;
+export interface AutoAcceptSettings {
+    enabled: boolean;
+    fileEdits: boolean;
+    consoleCommands: boolean;
+    readAccess: boolean;
+    urlAccess: boolean;
+    otherRequests: boolean;
+}
 
-    constructor(initialEnabled: boolean = false) {
-        this.enabled = initialEnabled;
+export class AutoAcceptService {
+    private settings: AutoAcceptSettings;
+
+    constructor(initialSettings: AutoAcceptSettings) {
+        this.settings = { ...initialSettings };
     }
 
     isEnabled(): boolean {
-        return this.enabled;
+        return this.settings.enabled;
+    }
+
+    isCategoryEnabled(category: ApprovalType): boolean {
+        if (!this.settings.enabled) return false;
+        switch (category) {
+            case 'file_edits': return this.settings.fileEdits;
+            case 'console_commands': return this.settings.consoleCommands;
+            case 'read_access': return this.settings.readAccess;
+            case 'url_access': return this.settings.urlAccess;
+            case 'other_requests': return this.settings.otherRequests;
+            default: return false;
+        }
+    }
+
+    getSettings(): AutoAcceptSettings {
+        return this.settings;
+    }
+
+    toggleMaster(enabled: boolean): void {
+        this.settings.enabled = enabled;
+        ConfigLoader.save({ autoApprove: enabled });
+    }
+
+    toggleCategory(category: keyof Omit<AutoAcceptSettings, 'enabled'>, enabled: boolean): void {
+        this.settings[category] = enabled;
+        const configKey = this.mapSettingToConfigKey(category);
+        if (configKey) {
+            ConfigLoader.save({ [configKey]: enabled });
+        }
+    }
+
+    private mapSettingToConfigKey(setting: keyof Omit<AutoAcceptSettings, 'enabled'>): string | null {
+        switch (setting) {
+            case 'fileEdits': return 'autoApproveFileEdits';
+            case 'consoleCommands': return 'autoApproveConsoleCommands';
+            case 'readAccess': return 'autoApproveReadAccess';
+            case 'urlAccess': return 'autoApproveUrlAccess';
+            case 'otherRequests': return 'autoApproveOtherRequests';
+            default: return null;
+        }
     }
 
     handle(rawAction?: string): AutoAcceptCommandResult {
@@ -25,7 +76,7 @@ export class AutoAcceptService {
         if (!action) {
             return {
                 success: false,
-                enabled: this.enabled,
+                enabled: this.settings.enabled,
                 changed: false,
                 message: t('⚠️ Invalid argument. Usage: `/autoaccept [on/off/status]`'),
             };
@@ -34,14 +85,14 @@ export class AutoAcceptService {
         if (action === 'status') {
             return {
                 success: true,
-                enabled: this.enabled,
+                enabled: this.settings.enabled,
                 changed: false,
-                message: t(`⚙️ Auto-accept mode: **${this.enabled ? 'ON' : 'OFF'}**`),
+                message: t(`⚙️ Auto-accept mode: **${this.settings.enabled ? 'ON' : 'OFF'}**`),
             };
         }
 
         if (action === 'on') {
-            if (this.enabled) {
+            if (this.settings.enabled) {
                 return {
                     success: true,
                     enabled: true,
@@ -49,7 +100,7 @@ export class AutoAcceptService {
                     message: t('ℹ️ Auto-accept mode is already **ON**.'),
                 };
             }
-            this.enabled = true;
+            this.toggleMaster(true);
             return {
                 success: true,
                 enabled: true,
@@ -58,7 +109,7 @@ export class AutoAcceptService {
             };
         }
 
-        if (!this.enabled) {
+        if (!this.settings.enabled) {
             return {
                 success: true,
                 enabled: false,
@@ -67,7 +118,7 @@ export class AutoAcceptService {
             };
         }
 
-        this.enabled = false;
+        this.toggleMaster(false);
         return {
             success: true,
             enabled: false,

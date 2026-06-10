@@ -13,6 +13,85 @@ export interface ApprovalInfo {
     description: string;
 }
 
+export type ApprovalType = 'file_edits' | 'console_commands' | 'read_access' | 'url_access' | 'other_requests';
+
+export function classifyApproval(info: ApprovalInfo): ApprovalType {
+    const desc = (info.description || '').toLowerCase();
+    const approve = (info.approveText || '').toLowerCase();
+
+    // 1. Console commands
+    if (
+        desc.includes('run command') ||
+        desc.includes('run_command') ||
+        desc.includes('execute command') ||
+        desc.includes('execute terminal') ||
+        desc.includes('terminal command') ||
+        desc.includes('shell command') ||
+        desc.includes('terminal') ||
+        approve.includes('run') ||
+        approve.includes('execute')
+    ) {
+        return 'console_commands';
+    }
+
+    // 2. File edits
+    if (
+        desc.includes('write_file') ||
+        desc.includes('write file') ||
+        desc.includes('write_to_file') ||
+        desc.includes('edit file') ||
+        desc.includes('modify file') ||
+        desc.includes('create file') ||
+        desc.includes('replace_file_content') ||
+        desc.includes('multi_replace_file_content') ||
+        desc.includes('replace content') ||
+        desc.includes('save file') ||
+        desc.includes('change file') ||
+        desc.includes('write') ||
+        desc.includes('edit')
+    ) {
+        return 'file_edits';
+    }
+
+    // 3. Read access
+    if (
+        desc.includes('read_file') ||
+        desc.includes('read file') ||
+        desc.includes('view_file') ||
+        desc.includes('view file') ||
+        desc.includes('list_dir') ||
+        desc.includes('list directory') ||
+        desc.includes('read directory') ||
+        desc.includes('list contents') ||
+        desc.includes('read_browser_page') ||
+        desc.includes('read browser page') ||
+        desc.includes('read') ||
+        desc.includes('view')
+    ) {
+        return 'read_access';
+    }
+
+    // 4. URL/Web access
+    if (
+        desc.includes('read_url') ||
+        desc.includes('read url') ||
+        desc.includes('fetch url') ||
+        desc.includes('web request') ||
+        desc.includes('search_web') ||
+        desc.includes('search web') ||
+        desc.includes('access url') ||
+        desc.includes('http request') ||
+        desc.includes('fetch website') ||
+        desc.includes('url') ||
+        desc.includes('http') ||
+        desc.includes('website')
+    ) {
+        return 'url_access';
+    }
+
+    return 'other_requests';
+}
+
 export interface ApprovalDetectorOptions {
     /** CDP service instance */
     cdpService: CdpService;

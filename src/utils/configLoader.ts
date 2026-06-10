@@ -15,11 +15,17 @@ export interface PersistedConfig {
     telegramBotToken?: string;
     allowedUserIds?: string[];
     workspaceBaseDir?: string;
+    autoApprove?: boolean;
     autoApproveFileEdits?: boolean;
+    autoApproveConsoleCommands?: boolean;
+    autoApproveReadAccess?: boolean;
+    autoApproveUrlAccess?: boolean;
+    autoApproveOtherRequests?: boolean;
     logLevel?: LogLevel;
     extractionMode?: 'legacy' | 'structured';
     useTopics?: boolean;
     onlyActiveWorkspaceMessages?: boolean;
+    mirrorMode?: 'all' | 'active' | 'telegram_only';
 }
 
 function getConfigDir(): string {
@@ -71,6 +77,37 @@ function mergeConfig(persisted: PersistedConfig): AppConfig {
         false,
     );
 
+    const autoApproveConsoleCommands = resolveBoolean(
+        process.env.AUTO_APPROVE_CONSOLE_COMMANDS,
+        persisted.autoApproveConsoleCommands,
+        false,
+    );
+
+    const autoApproveReadAccess = resolveBoolean(
+        process.env.AUTO_APPROVE_READ_ACCESS,
+        persisted.autoApproveReadAccess,
+        false,
+    );
+
+    const autoApproveUrlAccess = resolveBoolean(
+        process.env.AUTO_APPROVE_URL_ACCESS,
+        persisted.autoApproveUrlAccess,
+        false,
+    );
+
+    const autoApproveOtherRequests = resolveBoolean(
+        process.env.AUTO_APPROVE_OTHER_REQUESTS,
+        persisted.autoApproveOtherRequests,
+        false,
+    );
+
+    // Master switch autoApprove defaults to true if autoApproveFileEdits was true, otherwise false
+    const autoApprove = resolveBoolean(
+        process.env.AUTO_APPROVE,
+        persisted.autoApprove,
+        autoApproveFileEdits,
+    );
+
     const logLevel = resolveLogLevel(
         process.env.LOG_LEVEL,
         persisted.logLevel,
@@ -87,21 +124,37 @@ function mergeConfig(persisted: PersistedConfig): AppConfig {
         true,
     );
 
-    const onlyActiveWorkspaceMessages = resolveBoolean(
-        process.env.ONLY_ACTIVE_WORKSPACE_MESSAGES,
-        persisted.onlyActiveWorkspaceMessages,
-        true,
-    );
+    // Resolve mirrorMode: 'all' | 'active' | 'telegram_only'
+    const mirrorModeRaw = process.env.MIRROR_MODE ?? persisted.mirrorMode;
+    let mirrorMode: 'all' | 'active' | 'telegram_only' = 'active';
+    if (mirrorModeRaw === 'all' || mirrorModeRaw === 'active' || mirrorModeRaw === 'telegram_only') {
+        mirrorMode = mirrorModeRaw;
+    } else {
+        const onlyActive = resolveBoolean(
+            process.env.ONLY_ACTIVE_WORKSPACE_MESSAGES,
+            persisted.onlyActiveWorkspaceMessages,
+            true,
+        );
+        mirrorMode = onlyActive ? 'active' : 'all';
+    }
+
+    const onlyActiveWorkspaceMessages = mirrorMode === 'active';
 
     return {
         telegramBotToken: token,
         allowedUserIds,
         workspaceBaseDir,
+        autoApprove,
         autoApproveFileEdits,
+        autoApproveConsoleCommands,
+        autoApproveReadAccess,
+        autoApproveUrlAccess,
+        autoApproveOtherRequests,
         logLevel,
         extractionMode,
         useTopics,
         onlyActiveWorkspaceMessages,
+        mirrorMode,
     };
 }
 

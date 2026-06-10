@@ -7,11 +7,17 @@ export interface AppConfig {
     telegramBotToken: string;
     allowedUserIds: string[];
     workspaceBaseDir: string;
+    autoApprove: boolean;
     autoApproveFileEdits: boolean;
+    autoApproveConsoleCommands: boolean;
+    autoApproveReadAccess: boolean;
+    autoApproveUrlAccess: boolean;
+    autoApproveOtherRequests: boolean;
     logLevel: LogLevel;
     extractionMode: ExtractionMode;
     useTopics: boolean;
     onlyActiveWorkspaceMessages: boolean;
+    mirrorMode: 'all' | 'active' | 'telegram_only';
 }
 
 export type ResponseDeliveryMode = 'stream';

@@ -30,7 +30,7 @@ import { ResponseMonitor, RESPONSE_SELECTORS } from '../services/responseMonitor
 import { ensureAntigravityRunning } from '../services/antigravityLauncher';
 import { getAntigravityCdpHint, isTitleMatch } from '../utils/pathUtils';
 import { CDP_PORTS } from '../utils/cdpPorts';
-import { AutoAcceptService } from '../services/autoAcceptService';
+import { AutoAcceptService, AutoAcceptSettings } from '../services/autoAcceptService';
 import { PromptDispatcher } from '../services/promptDispatcher';
 import {
     CdpBridge,
@@ -69,7 +69,14 @@ import { checkWhisperAvailability, downloadTelegramVoice, transcribeVoice } from
 import { buildModeUI, sendModeUI } from '../ui/modeUi';
 import { buildModelsUI, sendModelsUI } from '../ui/modelsUi';
 import { sendTemplateUI, TEMPLATE_BTN_PREFIX, parseTemplateButtonId } from '../ui/templateUi';
-import { sendAutoAcceptUI, AUTOACCEPT_BTN_ON, AUTOACCEPT_BTN_OFF, AUTOACCEPT_BTN_REFRESH } from '../ui/autoAcceptUi';
+import {
+    sendAutoAcceptUI,
+    AUTOACCEPT_TOGGLE_MASTER,
+    AUTOACCEPT_TOGGLE_CAT_PREFIX,
+    AUTOACCEPT_ALL_ON,
+    AUTOACCEPT_ALL_OFF,
+    AUTOACCEPT_BTN_REFRESH,
+} from '../ui/autoAcceptUi';
 import { handleScreenshot } from '../ui/screenshotUi';
 import { buildWorkspaceListUI, PROJECT_SELECT_ID, PROJECT_PAGE_PREFIX, parseProjectPageId, projectPathCache } from '../ui/projectListUi';
 import { buildSessionPickerUI, SESSION_SELECT_ID, isSessionSelectId, sessionTitleCache } from '../ui/sessionPickerUi';
@@ -1530,7 +1537,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
     await ensureAntigravityRunning();
 
-    const bridge = initCdpBridge(config.autoApproveFileEdits);
+    const bridge = initCdpBridge();
     (bridge as any).db = db;
     bridge.botToken = config.telegramBotToken;
 
@@ -1742,11 +1749,26 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
         const onUserMessageCallback = (info: any): boolean => {
             const conf = loadConfig();
-            if (conf.onlyActiveWorkspaceMessages) {
+            const normalized = normalizeForHash(info.text);
+            const wasFromTelegram = telegramSentPrompts.has(normalized);
+
+            if (wasFromTelegram) {
+                telegramSentPrompts.delete(normalized);
+            }
+
+            // Check mirror mode
+            const mirrorMode = conf.mirrorMode || (conf.onlyActiveWorkspaceMessages ? 'active' : 'all');
+
+            if (mirrorMode === 'telegram_only') {
+                if (!wasFromTelegram) {
+                    logger.debug(`[UserMessageDetector:${projectName}] mirrorMode is telegram_only and this message did not originate from Telegram, skipping.`);
+                    return true;
+                }
+            } else if (mirrorMode === 'active') {
                 const binding = workspaceBindingRepo.findByChannelId(channelKey(channel));
                 const activeProjectName = binding ? bridge.pool.extractProjectName(binding.workspacePath) : null;
                 if (activeProjectName !== projectName) {
-                    logger.debug(`[UserMessageDetector:${projectName}] onlyActiveWorkspaceMessages is true and this is not the active workspace (${activeProjectName}), skipping user message mirror.`);
+                    logger.debug(`[UserMessageDetector:${projectName}] mirrorMode is active and this is not the active workspace (${activeProjectName}), skipping user message mirror.`);
                     return true;
                 }
             }
@@ -1758,11 +1780,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 return true;
             }
 
-            const normalized = normalizeForHash(info.text);
-            if (telegramSentPrompts.has(normalized)) {
-                logger.debug(`[UserMessageDetector:${projectName}] Message came from Telegram, skipping echo text.`);
-                telegramSentPrompts.delete(normalized);
-            } else {
+            if (!wasFromTelegram) {
                 // 1. Send the user message to the Telegram channel
                 const cleanProjName = projectName.replace(/\.code-workspace$/i, '');
                 const userMsgText = `👤 [IDE: ${cleanProjName}]: ${info.text}`;
@@ -1830,7 +1848,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             `<b>⚙️ ` + t('Settings') + `</b>\n` +
             `/mode — ` + t('Change execution mode') + `\n` +
             `/model — ` + t('Change LLM model') + `\n` +
-            `/mirror_all — ` + t('Toggle mirroring from all windows') + `\n\n` +
+            `/mirror — ` + t('Set Mirror Mode') + `\n` +
+            `/autoaccept — ` + t('Toggle auto-approve mode') + `\n\n` +
             `<b>💼 ` + t('Workspaces') + `</b>\n` +
             `/workspace — ` + t('Select a workspace') + `\n` +
             `/setworkspacedir — ` + t('Change workspace base directory') + `\n\n` +
@@ -2211,12 +2230,38 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
     // Handle /status command
     const handleStatus = async (ctx: Context) => {
+        const conf = loadConfig();
         const currentMode = modeService.getCurrentMode();
-        const autoAcceptStatus = bridge.autoAccept.isEnabled() ? `🟢 ${t('ON')}` : `⚪ ${t('OFF')}`;
+        
+        // Detailed auto accept status
+        const s = bridge.autoAccept.getSettings();
+        let autoAcceptStatus = '';
+        if (!s.enabled) {
+            autoAcceptStatus = `⚪ ${t('OFF')}`;
+        } else {
+            const activeCats: string[] = [];
+            if (s.fileEdits) activeCats.push(t('File Edits'));
+            if (s.consoleCommands) activeCats.push(t('Console'));
+            if (s.readAccess) activeCats.push(t('Read'));
+            if (s.urlAccess) activeCats.push(t('URL'));
+            if (s.otherRequests) activeCats.push(t('Other'));
+
+            if (activeCats.length === 5) {
+                autoAcceptStatus = `🟢 ${t('ON')} (${t('all')})`;
+            } else if (activeCats.length > 0) {
+                autoAcceptStatus = `🟢 ${t('ON')} (${activeCats.join(', ')})`;
+            } else {
+                autoAcceptStatus = `🟢 ${t('ON')} (${t('(None)')})`;
+            }
+        }
+
+        const mirrorMode = conf.mirrorMode || (conf.onlyActiveWorkspaceMessages ? 'active' : 'all');
+        const mirrorModeText = t(mirrorMode);
 
         let text = `<b>🔧 ${t('Bot Status')}</b>\n\n`;
         text += `<b>${t('Mode')}:</b> ${escapeHtml(t(MODE_DISPLAY_NAMES[currentMode] || currentMode))}\n`;
-        text += `<b>${t('Auto Approve')}:</b> ${autoAcceptStatus}\n\n`;
+        text += `<b>${t('Auto Approve')}:</b> ${autoAcceptStatus}\n`;
+        text += `<b>${t('Mirror Mode')}:</b> 🖥️ ${escapeHtml(mirrorModeText)}\n\n`;
 
         // Get bound workspace for CURRENT chat
         const ch = getChannel(ctx);
@@ -2315,10 +2360,13 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
     // /autoaccept command
     bot.command('autoaccept', async (ctx) => {
-        const requestedMode = (ctx.match || '').trim();
-        if (requestedMode === 'on' || requestedMode === 'off') {
-            const result = bridge.autoAccept.handle(requestedMode);
-            await ctx.reply(result.message);
+        const requestedMode = (ctx.match || '').trim().toLowerCase();
+        if (requestedMode === 'on' || requestedMode === 'enable' || requestedMode === 'true') {
+            bridge.autoAccept.toggleMaster(true);
+            await ctx.reply(t('✅ Auto-accept mode turned **ON**. Future dialogs will be auto-allowed.'));
+        } else if (requestedMode === 'off' || requestedMode === 'disable' || requestedMode === 'false') {
+            bridge.autoAccept.toggleMaster(false);
+            await ctx.reply(t('✅ Auto-accept mode turned **OFF**. Returned to manual approval.'));
         } else {
             await sendAutoAcceptUI(
                 async (text, keyboard) => { await replyHtml(ctx, text, keyboard); },
@@ -2327,19 +2375,47 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }
     });
 
-    // /mirror_all command
+    // /mirror command
+    bot.command('mirror', async (ctx) => {
+        const arg = (ctx.match || '').trim().toLowerCase();
+        if (['all', 'active', 'telegram_only'].includes(arg)) {
+            ConfigLoader.save({ mirrorMode: arg as any, onlyActiveWorkspaceMessages: arg === 'active' });
+            const label = t(arg);
+            await ctx.reply(`✅ <b>${t('Mirror Mode')}: ${label}</b>`, { parse_mode: 'HTML' });
+            return;
+        }
+
+        const conf = loadConfig();
+        const mirrorMode = conf.mirrorMode || (conf.onlyActiveWorkspaceMessages ? 'active' : 'all');
+        const keyboard = new InlineKeyboard()
+            .text(mirrorMode === 'all' ? `🟢 ${t('all')}` : t('all'), 'set_mirror_mode:all').row()
+            .text(mirrorMode === 'active' ? `🟢 ${t('active')}` : t('active'), 'set_mirror_mode:active').row()
+            .text(mirrorMode === 'telegram_only' ? `🟢 ${t('telegram_only')}` : t('telegram_only'), 'set_mirror_mode:telegram_only');
+
+        await replyHtml(ctx,
+            `<b>⚙️ ${t('Mirror Settings')}</b>\n\n` +
+            `${t('Current mirror mode:')} <b>${t(mirrorMode)}</b>\n\n` +
+            `• <b>${t('all')}</b>: ${t('Mirror all open VS Code windows.')}\n` +
+            `• <b>${t('active')}</b>: ${t('Mirror only the active (bound) workspace.')}\n` +
+            `• <b>${t('telegram_only')}</b>: ${t('Mirror answers only if the prompt was sent from Telegram.')}`,
+            keyboard
+        );
+    });
+
+    // /mirror_all command (backward compatibility)
     bot.command('mirror_all', async (ctx) => {
         const arg = (ctx.match || '').trim().toLowerCase();
-        const conf = loadConfig();
         
         if (arg === 'on' || arg === 'true' || arg === 'yes' || arg === '1') {
-            ConfigLoader.save({ onlyActiveWorkspaceMessages: false });
+            ConfigLoader.save({ onlyActiveWorkspaceMessages: false, mirrorMode: 'all' });
             await ctx.reply(`🟢 <b>${t('Mirror All Windows: ON')}</b>\n${t('Messages and progress from all open IDE windows will now be mirrored.')}`, { parse_mode: 'HTML' });
         } else if (arg === 'off' || arg === 'false' || arg === 'no' || arg === '0') {
-            ConfigLoader.save({ onlyActiveWorkspaceMessages: true });
+            ConfigLoader.save({ onlyActiveWorkspaceMessages: true, mirrorMode: 'active' });
             await ctx.reply(`⚪ <b>${t('Mirror All Windows: OFF')}</b>\n${t('Messages will now only be mirrored from the selected active workspace.')}`, { parse_mode: 'HTML' });
         } else {
-            const isMirrorAll = !conf.onlyActiveWorkspaceMessages;
+            const conf = loadConfig();
+            const mirrorMode = conf.mirrorMode || (conf.onlyActiveWorkspaceMessages ? 'active' : 'all');
+            const isMirrorAll = mirrorMode === 'all';
             const status = isMirrorAll ? '🟢 ' + t('ON') : '⚪ ' + t('OFF');
             const keyboard = new InlineKeyboard()
                 .text('🟢 ' + t('Turn ON'), 'mirror_all:on')
@@ -2787,15 +2863,67 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             return;
         }
 
-        // Auto-accept buttons
-        if (data === AUTOACCEPT_BTN_ON || data === AUTOACCEPT_BTN_OFF) {
-            const action = data === AUTOACCEPT_BTN_ON ? 'on' : 'off';
-            bridge.autoAccept.handle(action);
+        // Auto-accept Master toggle
+        if (data === AUTOACCEPT_TOGGLE_MASTER) {
+            bridge.autoAccept.toggleMaster(!bridge.autoAccept.isEnabled());
             await sendAutoAcceptUI(
                 async (text, keyboard) => { try { await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: keyboard }); } catch (e) { logger.debug('[editMsg] Telegram edit failed (expected for unmodified):', e); } },
                 bridge.autoAccept,
             );
-            await ctx.answerCallbackQuery({ text: `Auto-accept: ${action.toUpperCase()}` });
+            await ctx.answerCallbackQuery({ text: t('Auto-accept status updated') });
+            return;
+        }
+
+        // Auto-accept Category toggle
+        if (data.startsWith(AUTOACCEPT_TOGGLE_CAT_PREFIX)) {
+            const cat = data.substring(AUTOACCEPT_TOGGLE_CAT_PREFIX.length) as keyof Omit<AutoAcceptSettings, 'enabled'>;
+            const s = bridge.autoAccept.getSettings();
+            bridge.autoAccept.toggleCategory(cat, !s[cat]);
+            await sendAutoAcceptUI(
+                async (text, keyboard) => { try { await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: keyboard }); } catch (e) { logger.debug('[editMsg] Telegram edit failed (expected for unmodified):', e); } },
+                bridge.autoAccept,
+            );
+            
+            const catLabels: Record<keyof Omit<AutoAcceptSettings, 'enabled'>, string> = {
+                fileEdits: t('File Edits'),
+                consoleCommands: t('Console'),
+                readAccess: t('Read'),
+                urlAccess: t('URL'),
+                otherRequests: t('Other')
+            };
+            const label = catLabels[cat] || cat;
+            await ctx.answerCallbackQuery({ text: `${label}: ${!s[cat] ? 'ON' : 'OFF'}` });
+            return;
+        }
+
+        // Auto-accept bulk actions
+        if (data === AUTOACCEPT_ALL_ON) {
+            bridge.autoAccept.toggleMaster(true);
+            bridge.autoAccept.toggleCategory('fileEdits', true);
+            bridge.autoAccept.toggleCategory('consoleCommands', true);
+            bridge.autoAccept.toggleCategory('readAccess', true);
+            bridge.autoAccept.toggleCategory('urlAccess', true);
+            bridge.autoAccept.toggleCategory('otherRequests', true);
+            await sendAutoAcceptUI(
+                async (text, keyboard) => { try { await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: keyboard }); } catch (e) { logger.debug('[editMsg] Telegram edit failed (expected for unmodified):', e); } },
+                bridge.autoAccept,
+            );
+            await ctx.answerCallbackQuery({ text: t('All categories enabled') });
+            return;
+        }
+
+        if (data === AUTOACCEPT_ALL_OFF) {
+            bridge.autoAccept.toggleMaster(false);
+            bridge.autoAccept.toggleCategory('fileEdits', false);
+            bridge.autoAccept.toggleCategory('consoleCommands', false);
+            bridge.autoAccept.toggleCategory('readAccess', false);
+            bridge.autoAccept.toggleCategory('urlAccess', false);
+            bridge.autoAccept.toggleCategory('otherRequests', false);
+            await sendAutoAcceptUI(
+                async (text, keyboard) => { try { await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: keyboard }); } catch (e) { logger.debug('[editMsg] Telegram edit failed (expected for unmodified):', e); } },
+                bridge.autoAccept,
+            );
+            await ctx.answerCallbackQuery({ text: t('All categories disabled') });
             return;
         }
 
@@ -2804,7 +2932,52 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 async (text, keyboard) => { try { await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: keyboard }); } catch (e) { logger.debug('[editMsg] Telegram edit failed (expected for unmodified):', e); } },
                 bridge.autoAccept,
             );
-            await ctx.answerCallbackQuery({ text: 'Refreshed' });
+            await ctx.answerCallbackQuery({ text: t('Refreshed') });
+            return;
+        }
+
+        // Mirror mode callbacks
+        if (data.startsWith('set_mirror_mode:')) {
+            const mode = data.substring('set_mirror_mode:'.length) as any;
+            ConfigLoader.save({ mirrorMode: mode, onlyActiveWorkspaceMessages: mode === 'active' });
+            
+            const conf = loadConfig();
+            const mirrorMode = conf.mirrorMode || (conf.onlyActiveWorkspaceMessages ? 'active' : 'all');
+            const keyboard = new InlineKeyboard()
+                .text(mirrorMode === 'all' ? `🟢 ${t('all')}` : t('all'), 'set_mirror_mode:all').row()
+                .text(mirrorMode === 'active' ? `🟢 ${t('active')}` : t('active'), 'set_mirror_mode:active').row()
+                .text(mirrorMode === 'telegram_only' ? `🟢 ${t('telegram_only')}` : t('telegram_only'), 'set_mirror_mode:telegram_only');
+
+            await ctx.editMessageText(
+                `<b>⚙️ ${t('Mirror Settings')}</b>\n\n` +
+                `${t('Current mirror mode:')} <b>${t(mirrorMode)}</b>\n\n` +
+                `• <b>${t('all')}</b>: ${t('Mirror all open VS Code windows.')}\n` +
+                `• <b>${t('active')}</b>: ${t('Mirror only the active (bound) workspace.')}\n` +
+                `• <b>${t('telegram_only')}</b>: ${t('Mirror answers only if the prompt was sent from Telegram.')}`,
+                { parse_mode: 'HTML', reply_markup: keyboard }
+            ).catch(() => {});
+            await ctx.answerCallbackQuery({ text: `${t('Mirror Mode')}: ${t(mirrorMode)}` });
+            return;
+        }
+
+        if (data.startsWith('mirror_all:')) {
+            const arg = data.substring('mirror_all:'.length);
+            const isMirrorAll = arg === 'on';
+            ConfigLoader.save({ onlyActiveWorkspaceMessages: !isMirrorAll, mirrorMode: isMirrorAll ? 'all' : 'active' });
+            
+            const status = isMirrorAll ? '🟢 ' + t('ON') : '⚪ ' + t('OFF');
+            const keyboard = new InlineKeyboard()
+                .text('🟢 ' + t('Turn ON'), 'mirror_all:on')
+                .text('⚪ ' + t('Turn OFF'), 'mirror_all:off');
+
+            await ctx.editMessageText(
+                `<b>⚙️ ${t('Mirror All Windows Settings')}</b>\n\n` +
+                `${t('Current status:')} <b>${status}</b>\n\n` +
+                `${t('When enabled, messages and progress from all open IDE windows will be mirrored.')}\n` +
+                `${t('When disabled, messages will only be mirrored from the currently active workspace in this chat.')}`,
+                { parse_mode: 'HTML', reply_markup: keyboard }
+            ).catch(() => {});
+            await ctx.answerCallbackQuery({ text: `${t('Mirror All Windows')}: ${status}` });
             return;
         }
 

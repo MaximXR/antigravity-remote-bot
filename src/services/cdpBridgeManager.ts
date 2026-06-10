@@ -3,7 +3,7 @@ import { Api, InlineKeyboard } from 'grammy';
 import { t } from '../utils/i18n';
 import { logger } from '../utils/logger';
 import { escapeHtml } from '../utils/telegramFormatter';
-import { ApprovalDetector, ApprovalInfo } from './approvalDetector';
+import { ApprovalDetector, ApprovalInfo, classifyApproval } from './approvalDetector';
 import { AutoAcceptService } from './autoAcceptService';
 import { CdpConnectionPool } from './cdpConnectionPool';
 import { CdpService } from './cdpService';
@@ -12,6 +12,7 @@ import { PlanningDetector, PlanningInfo } from './planningDetector';
 import { QuotaService } from './quotaService';
 import { UserMessageDetector, UserMessageInfo } from './userMessageDetector';
 import { buildPlanNotificationUI } from '../ui/planUi';
+import { loadConfig } from '../utils/config';
 
 /** Represents a Telegram chat target: either a chat_id or chat_id + message_thread_id */
 export interface TelegramChannel {
@@ -185,7 +186,7 @@ export function parseErrorPopupCustomId(customId: string): { action: 'dismiss' |
     return null;
 }
 
-export function initCdpBridge(autoApproveDefault: boolean): CdpBridge {
+export function initCdpBridge(): CdpBridge {
     const pool = new CdpConnectionPool({
         cdpCallTimeout: 15000,
         maxReconnectAttempts: 3,
@@ -193,7 +194,15 @@ export function initCdpBridge(autoApproveDefault: boolean): CdpBridge {
     });
 
     const quota = new QuotaService();
-    const autoAccept = new AutoAcceptService(autoApproveDefault);
+    const conf = loadConfig();
+    const autoAccept = new AutoAcceptService({
+        enabled: conf.autoApprove,
+        fileEdits: conf.autoApproveFileEdits,
+        consoleCommands: conf.autoApproveConsoleCommands,
+        readAccess: conf.autoApproveReadAccess,
+        urlAccess: conf.autoApproveUrlAccess,
+        otherRequests: conf.autoApproveOtherRequests,
+    });
 
     return {
         pool,
@@ -339,11 +348,13 @@ export function ensureApprovalDetector(
                 }
             }
 
-            if (bridge.autoAccept.isEnabled()) {
+            const approvalType = classifyApproval(info);
+            if (bridge.autoAccept.isCategoryEnabled(approvalType)) {
                 const accepted = await detector.alwaysAllowButton() || await detector.approveButton();
+                const categoryLabel = t(approvalType);
                 const text = accepted
-                    ? `✅ <b>Auto-approved</b>\nAn action was automatically approved.\n<b>Workspace:</b> ${escapeHtml(projectName)}`
-                    : `⚠️ <b>Auto-approve failed</b>\nManual approval required.\n<b>Workspace:</b> ${escapeHtml(projectName)}`;
+                    ? `✅ <b>Auto-approved (${categoryLabel})</b>\nAn action was automatically approved.\n<b>Workspace:</b> ${escapeHtml(projectName)}`
+                    : `⚠️ <b>Auto-approve failed (${categoryLabel})</b>\nManual approval required.\n<b>Workspace:</b> ${escapeHtml(projectName)}`;
                 await sendTelegramMessage(bridge.botApi, targetChannel, text);
                 if (accepted) return;
             }
