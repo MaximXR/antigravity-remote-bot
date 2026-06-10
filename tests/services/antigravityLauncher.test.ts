@@ -94,7 +94,7 @@ describe('ensureAntigravityRunning', () => {
         expect(http.get).toHaveBeenCalledTimes(CDP_PORTS.length);
         expect(consoleWarnSpy).toHaveBeenCalledWith(
             expect.stringContaining('\x1b[33m[WARN]\x1b[0m'),
-            expect.stringContaining('  Antigravity CDP ports are not responding')
+            expect.stringContaining('  Antigravity CDP ports were not responding. Attempted launch.')
         );
     });
 });

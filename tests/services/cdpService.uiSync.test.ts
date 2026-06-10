@@ -96,8 +96,8 @@ describe('CdpService - UI sync (Step 9)', () => {
 
             // Verify expression contains UI name mapping
             const callArgs = callSpy.mock.calls[0][1];
-            expect(callArgs.expression).toContain('Planning');
-            expect(callArgs.expression).toContain('Fast');
+            expect(callArgs.expression).toContain('planning');
+            expect(callArgs.expression).toContain('fast');
             expect(result.ok).toBe(true);
             expect(result.mode).toBe('Planning');
         });

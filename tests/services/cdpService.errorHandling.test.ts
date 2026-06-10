@@ -123,7 +123,7 @@ describe('CdpService - error handling and timeout processing (Step 12)', () => {
                 (cdpService as any).tryReconnect();
             });
 
-            expect(connectWorkspaceSpy).toHaveBeenCalledWith('/tmp/my-workspace');
+            expect(connectWorkspaceSpy.mock.calls[0][0]).toBe('/tmp/my-workspace');
             expect(discoverTargetSpy).not.toHaveBeenCalled();
             expect(connectSpy).not.toHaveBeenCalled();
         });

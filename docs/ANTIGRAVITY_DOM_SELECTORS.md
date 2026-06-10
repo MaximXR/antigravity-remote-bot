@@ -1,316 +1,60 @@
-# Antigravity DOM Selectors Reference
+# Antigravity DOM Selectors Codebase Map
 
-Central reference for all CSS selectors and DOM structures used to interact with the Antigravity (Windsurf/Cascade) UI via CDP.
-
-> Verified against live Antigravity DOM. Selectors may change with Antigravity updates.
+A reference catalog of all CSS selectors and browser script templates used by Remoat to operate the Antigravity IDE (Windsurf/Cascade panel).
 
 ---
 
-## Root Scope
+## 1. Codebase Declarations
 
-All scripts scope queries to the side panel first, falling back to `document`.
+This index maps each DOM selector to the exact file where it is declared in the Remoat codebase:
 
-```
-.antigravity-agent-side-panel
-```
-
-**Used by**: All detectors, all scripts
-
----
-
-## Selector Performance & Polling Rules (CRITICAL)
-
-To prevent severe CPU lags in the Antigravity IDE (e.g. scroll freezes in Cascade chat during AI generation), all DOM-querying scripts executed via CDP MUST follow these performance rules:
-
-1. **NO Full-Page Scans with Generic Selectors**:
-   - **CRITICAL**: Never execute queries like `querySelectorAll('button, div, span, [role="button"]')` across the entire document. Scanning and filtering thousands of `div` or `span` elements in JS blocks the browser's GUI thread.
-   - Use narrow selectors on the C++ side of the browser: `button, [role="button"], .cursor-pointer`.
-   - Only query `div` or `span` tags if scoped under a small, specific parent container.
-2. **Soft Pause During Generation**:
-   - Background polling of non-critical detectors (e.g., `PlanningDetector`, `ErrorPopupDetector`) must be paused while the AI is responding. Use `ResponseMonitor` start/stop events to trigger this pause.
-
----
-
-## 1. User Message Bubble
-
-The message a user types directly in the Antigravity chat input.
-
-### Verified DOM Structure
-
-```html
-<div class="bg-gray-500/15 p-2 rounded-lg w-full text-sm select-text">
-  <div class="flex flex-row items-end gap-2">
-    <div class="flex-1 flex flex-col gap-2">
-      <div>
-        <div class="whitespace-pre-wrap text-sm" style="word-break: break-word;">
-          {user message text}
-        </div>
-      </div>
-    </div>
-    <div> <!-- undo button: div[role="button"][data-tooltip-id^="undo-tooltip-"] --> </div>
-  </div>
-</div>
-```
-
-### Selectors
-
-| Selector | Purpose | Strategy | File |
-|----------|---------|----------|------|
-| `[class*="bg-gray-500/15"][class*="select-text"] .whitespace-pre-wrap` | Direct text element query (last match = most recent) | A (primary) | `userMessageDetector.ts` |
-| `[class*="bg-gray-500/15"][class*="rounded-lg"][class*="select-text"]` | User message bubble container (filtered: excludes parents with nested bubbles) | B (fallback) | `userMessageDetector.ts` |
-| `.whitespace-pre-wrap` | User message text element inside bubble | B (fallback) | `userMessageDetector.ts` |
-| `[style*="word-break"]` | User message text element (secondary fallback) | B (fallback) | `userMessageDetector.ts` |
-
-> **Note**: Strategy A directly queries innermost text elements to avoid the parent-container problem where a wrapper div matches and returns concatenated text from multiple messages. Strategy B adds a filter to exclude parent containers that contain nested bubble elements.
+| UI Component | Selector / Expression | Codebase Declaration File |
+|:---|:---|:---|
+| **Chat Side-Panel Root** | `.antigravity-agent-side-panel` | [src/services/cdpService.ts](file:///e:/Desktop/Remoat/src/services/cdpService.ts) (L50)<br/>[src/services/chatSessionService.ts](file:///e:/Desktop/Remoat/src/services/chatSessionService.ts) (L40) |
+| **New Chat Button** | `[data-tooltip-id="new-conversation-tooltip"]` | [src/services/chatSessionService.ts](file:///e:/Desktop/Remoat/src/services/chatSessionService.ts) (L22) |
+| **Active Chat Title** | `div[class*="border-b"]` and `div[class*="text-ellipsis"]` inside side-panel root | [src/services/chatSessionService.ts](file:///e:/Desktop/Remoat/src/services/chatSessionService.ts) (L42-L44) |
+| **Past Conversations Toggle** | `[data-past-conversations-toggle]`, `[data-tooltip-id]` containing `history` / `past-conversations`, or `svg.lucide-history` | [src/services/chatSessionService.ts](file:///e:/Desktop/Remoat/src/services/chatSessionService.ts) (L66-L80) |
+| **Past Conversations Container** | `div[class*="overflow-auto"]`, `div[class*="overflow-y-scroll"]`, or `#fastpick-listbox` | [src/services/chatSessionService.ts](file:///e:/Desktop/Remoat/src/services/chatSessionService.ts) (L104-L108) |
+| **Other Conversations Header** | `div[class*="text-xs"][class*="opacity"]` matching `/^Other\s+Conversations?$/i` | [src/services/chatSessionService.ts](file:///e:/Desktop/Remoat/src/services/chatSessionService.ts) (L113-L117) |
+| **Conversation Session Rows** | `div[class*="cursor-pointer"]` | [src/services/chatSessionService.ts](file:///e:/Desktop/Remoat/src/services/chatSessionService.ts) (L124) |
+| **Conversation Row Title** | `span.text-sm span, span.text-sm` (skipping timestamp patterns) | [src/services/chatSessionService.ts](file:///e:/Desktop/Remoat/src/services/chatSessionService.ts) (L130) |
+| **Active Row Class** | `/focusBackground/i` (regex test on className) | [src/services/chatSessionService.ts](file:///e:/Desktop/Remoat/src/services/chatSessionService.ts) (L145) |
+| **Show More Button** | `div, span` matching `/^Show\s+\d+\s+more/i` | [src/services/chatSessionService.ts](file:///e:/Desktop/Remoat/src/services/chatSessionService.ts) (L157-L161) |
+| **QuickInput Widget** | `.quick-input-widget, [class*="quick-input-widget"]` | [src/services/chatSessionService.ts](file:///e:/Desktop/Remoat/src/services/chatSessionService.ts) (L811) |
+| **QuickInput Filter Input** | `.quick-input-filter input` | [src/services/chatSessionService.ts](file:///e:/Desktop/Remoat/src/services/chatSessionService.ts) (L815) |
+| **QuickInput Rows / Options** | `.monaco-list-row, [role="option"], [role="button"]` | [src/services/chatSessionService.ts](file:///e:/Desktop/Remoat/src/services/chatSessionService.ts) (L826) |
+| **AI Response Text** | `.rendered-markdown` (Score 10)<br/>`.leading-relaxed.select-text` (Score 9)<br/>`.flex.flex-col.gap-y-3` (Score 8) | [src/services/responseMonitor.ts](file:///e:/Desktop/Remoat/src/services/responseMonitor.ts) (L14-L24) |
+| **User Message Bubble** | `[class*="bg-gray-500/15"][class*="select-text"] .whitespace-pre-wrap` (A)<br/>`[class*="bg-gray-500/15"][class*="rounded-lg"][class*="select-text"]` (B) | [src/services/cdpBridgeManager.ts](file:///e:/Desktop/Remoat/src/services/cdpBridgeManager.ts) (L42)<br/>[src/detectors/userMessageDetector.ts](file:///e:/Desktop/Remoat/src/detectors/userMessageDetector.ts) |
+| **Stop Button** | `[data-tooltip-id="input-send-button-cancel-tooltip"]` | [src/services/responseMonitor.ts](file:///e:/Desktop/Remoat/src/services/responseMonitor.ts) (L34) |
+| **Undo / Rollback Button** | `button[data-testid="revert-button"], [role="button"][data-testid="revert-button"]` | [src/services/chatSessionService.ts](file:///e:/Desktop/Remoat/src/services/chatSessionService.ts) (L1031) |
+| **Approval Modal Container** | `[role="dialog"], .modal, .dialog, .approval-container, .permission-dialog` | [src/services/cdpBridgeManager.ts](file:///e:/Desktop/Remoat/src/services/cdpBridgeManager.ts) (L39)<br/>[src/detectors/approvalDetector.ts](file:///e:/Desktop/Remoat/src/detectors/approvalDetector.ts) |
+| **Planning Notification** | `.notify-user-container` | [src/services/cdpBridgeManager.ts](file:///e:/Desktop/Remoat/src/services/cdpBridgeManager.ts) (L41)<br/>[src/detectors/planningDetector.ts](file:///e:/Desktop/Remoat/src/detectors/planningDetector.ts) |
+| **Planning Modal Content** | `div.relative.pl-4.pr-4.py-1, div.relative.pl-4.pr-4` | [src/detectors/planningDetector.ts](file:///e:/Desktop/Remoat/src/detectors/planningDetector.ts) |
+| **Error Popup Dialog** | `[role="dialog"], [role="alertdialog"], .modal, .dialog` | [src/services/cdpBridgeManager.ts](file:///e:/Desktop/Remoat/src/services/cdpBridgeManager.ts) (L40)<br/>[src/detectors/errorPopupDetector.ts](file:///e:/Desktop/Remoat/src/detectors/errorPopupDetector.ts) |
 
 ---
 
-## 2. AI Response Content
-
-The assistant's response body, rendered with markdown formatting.
-
-### Key Selectors (ordered by score/specificity)
-
-| Score | Selector | Status | File |
-|-------|----------|--------|------|
-| 10 | `.rendered-markdown` | **Verified** | `responseMonitor.ts`, `assistantDomExtractor.ts` |
-| 9 | `.leading-relaxed.select-text` | **Verified** | `responseMonitor.ts`, `planningDetector.ts`, `assistantDomExtractor.ts` |
-| 8 | `.flex.flex-col.gap-y-3` | Unverified — generic | `responseMonitor.ts`, `assistantDomExtractor.ts` |
-| 7 | `[data-message-author-role="assistant"]` | **NOT FOUND** in DOM | `responseMonitor.ts`, `assistantDomExtractor.ts` |
-| 6 | `[data-message-role="assistant"]` | **NOT FOUND** in DOM | `responseMonitor.ts`, `assistantDomExtractor.ts` |
-| 5 | `[class*="assistant-message"]` | **NOT FOUND** in DOM | `responseMonitor.ts`, `assistantDomExtractor.ts` |
-| 4 | `[class*="message-content"]` | **NOT FOUND** in DOM | `responseMonitor.ts`, `assistantDomExtractor.ts` |
-| 3 | `[class*="markdown-body"]` | **NOT FOUND** in DOM | `responseMonitor.ts`, `assistantDomExtractor.ts` |
-| 2 | `.prose` | Unverified | `responseMonitor.ts`, `assistantDomExtractor.ts` |
-
-> **Note**: Selectors scored 3-7 appear to be inherited from ChatGPT/generic patterns and do **not** exist in Antigravity's DOM. They are harmless (scored lower, never matched) but add noise. The top selectors (`.rendered-markdown`, `.leading-relaxed.select-text`) are the ones that actually match.
-
-### Exclusion Containers
-
-Nodes inside these containers are skipped during response extraction:
-
-| Selector | Purpose |
-|----------|---------|
-| `details` | Thinking/tool-call collapsible sections |
-| `[class*="feedback"], footer` | Good/Bad feedback buttons |
-| `.notify-user-container` | Planning mode notification |
-| `[role="dialog"]` | Modal dialogs (error popup, etc.) |
-
----
-
-## 3. Chat Title (Header)
-
-The currently active conversation title shown in the panel header.
-
-### Selectors
-
-| Selector | Purpose | File |
-|----------|---------|------|
-| `.antigravity-agent-side-panel` | Panel root | `chatSessionService.ts`, `cdpBridgeManager.ts` |
-| `div[class*="border-b"]` | Header bar (first match inside panel) | `chatSessionService.ts`, `cdpBridgeManager.ts` |
-| `div[class*="text-ellipsis"]` | Title text element (inside header) | `chatSessionService.ts`, `cdpBridgeManager.ts` |
-
-Default/empty chat title: `"Agent"` (treated as no active chat)
-
----
-
-## 4. New Chat Button
-
-| Selector | Purpose | File |
-|----------|---------|------|
-| `[data-tooltip-id="new-conversation-tooltip"]` | New conversation button | `chatSessionService.ts` |
-
-State detection: `cursor: pointer` = enabled, `cursor: not-allowed` = already empty chat
-
----
-
-## 5. Stop / Cancel Button
-
-| Selector | Purpose | File |
-|----------|---------|------|
-| `[data-tooltip-id="input-send-button-cancel-tooltip"]` | Stop generation button (primary) | `responseMonitor.ts` |
-| `button, [role="button"]` with stop text patterns | Stop button (text fallback) | `responseMonitor.ts` |
-
-Text patterns: `stop`, `stop generating`, `stop response`, `停止`, `生成を停止`, `応答を停止`
-
----
-
-## 6. Past Conversations Panel
-
-Selectors for opening, browsing, and selecting past conversations.
-
-### Opening the Panel
-
-| Priority | Selector | Purpose | File |
-|----------|----------|---------|------|
-| 1 | `[data-past-conversations-toggle]` | Toggle button (data attribute) | `chatSessionService.ts` |
-| 2 | `[data-tooltip-id]` containing `history` or `past-conversations` | Tooltip-based lookup | `chatSessionService.ts` |
-| 3 | `svg.lucide-history` | SVG icon class | `chatSessionService.ts` |
-
-### Scraping Sessions
-
-| Selector | Purpose | File |
-|----------|---------|------|
-| `div[class*="overflow-auto"], div[class*="overflow-y-scroll"]` | Scrollable conversation list container | `chatSessionService.ts` |
-| `div[class*="text-xs"][class*="opacity"]` | Section header (e.g. "Other Conversations") — used as boundary to exclude other-project sessions | `chatSessionService.ts` |
-| `div[class*="cursor-pointer"]` | Session row items (rows below "Other Conversations" boundary are skipped) | `chatSessionService.ts` |
-| `span.text-sm span, span.text-sm` | Session title text | `chatSessionService.ts` |
-| `/focusBackground/i` (className regex) | Active/current session indicator | `chatSessionService.ts` |
-
-### Show More
-
-| Selector | Purpose | File |
-|----------|---------|------|
-| `div, span` with text matching `/^Show\s+\d+\s+more/i` | "Show N more..." link | `chatSessionService.ts` |
-
----
-
-## 7. Approval Buttons
-
-Tool permission dialog (Allow/Deny).
-
-### Detection
-
-| Selector | Purpose | File |
-|----------|---------|------|
-| `button` (all visible) | Scan for allow/deny text patterns | `approvalDetector.ts` |
-| `[role="dialog"], .modal, .dialog, .approval-container, .permission-dialog` | Dialog container | `approvalDetector.ts` |
-| `p, .description, [data-testid="description"]` | Action description text | `approvalDetector.ts` |
-
-### Button Text Patterns
-
-- **Allow Once**: `allow once`, `allow one time`, `今回のみ許可`, `1回のみ許可`, `一度許可`
-- **Always Allow**: `allow this conversation`, `allow this chat`, `always allow`, `常に許可`, `この会話を許可`
-- **Allow**: `allow`, `permit`, `許可`, `承認`, `確認`
-- **Deny**: `deny`, `拒否`, `decline`
-
----
-
-## 8. Planning Mode / Artifact Cards
-
-Open button (with optional Proceed button) for plan and artifact review.
-
-### Detection
-
-**Crucial Note:** The assistant container `[data-message-author-role="assistant"]` does NOT exist in Antigravity. To prevent erroneously detecting older planning cards or infinite "Planning dialog active" deferral loops, all artifact card searches must be positionally scoped to follow the last user message using `Node.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING` (value 4). Furthermore, you must **reverse-iterate** over found artifact cards to interact with the newest one first.
-
-| Selector | Purpose | File |
-|----------|---------|------|
-| `.notify-user-container` (last in DOM, or within latest msg) | Planning notification container | `planningDetector.ts` |
-| `div[class*="border"][class*="rounded-lg"]` (within latest msg) | Fallback card container for artifact chips | `planningDetector.ts` |
-| `span[class*="inline-flex"][class*="cursor-pointer"]` | Clickable artifact chip (for auto-expansion if buttons are hidden) | `planningDetector.ts` |
-| `span.inline-flex.break-all` | Plan title (file name) | `planningDetector.ts` |
-| `span.text-sm` | Plan summary text | `planningDetector.ts` |
-| `.leading-relaxed.select-text` | Plan description body | `planningDetector.ts` |
-
-### Plan Content (after Open)
-
-| Selector | Purpose | File |
-|----------|---------|------|
-| `div.relative.pl-4.pr-4.py-1, div.relative.pl-4.pr-4` | Plan content container | `planningDetector.ts` |
-| `.leading-relaxed.select-text` (inside container) | Rendered plan content | `planningDetector.ts` |
-
----
-
-## 9. Error Popup
-
-Agent termination / unexpected error dialogs.
-
-### Detection
-
-| Selector | Purpose | File |
-|----------|---------|------|
-| `[role="dialog"], [role="alertdialog"], .modal, .dialog` | Dialog elements | `errorPopupDetector.ts` |
-| `div[class*="fixed"], div[class*="absolute"]` with z-index > 10 | Overlay fallback | `errorPopupDetector.ts` |
-| `h1, h2, h3, h4, [class*="title"], [class*="heading"]` | Error title extraction | `errorPopupDetector.ts` |
-
-### Error Text Patterns
-
-`agent terminated`, `terminated due to error`, `unexpected error`, `something went wrong`, `an error occurred`
-
----
-
-## 10. Quota Error
-
-Model quota reached / rate limit detection.
-
-### Detection
-
-| Selector | Purpose | File |
-|----------|---------|------|
-| `h3 span, h3` | Quota popup heading text | `responseMonitor.ts` |
-| `span` (all) | Inline quota error text | `responseMonitor.ts` |
-| `[role="alert"], [class*="error"], [class*="warning"], [class*="toast"], [class*="banner"], [class*="notification"], [class*="alert"], [class*="quota"], [class*="rate-limit"]` | Semantic error containers | `responseMonitor.ts` |
-
-### Quota Keywords
-
-`model quota reached`, `rate limit`, `quota exceeded`, `exhausted your quota`, `exhausted quota`
-
-### isInsideResponse Guard
-
-Quota text is only matched outside response containers to avoid false positives:
-
-```
-.rendered-markdown, .prose, pre, code,
-[data-message-author-role="assistant"],
-[data-message-role="assistant"],
-[class*="message-content"]
-```
-
----
-
-## 11. Code Blocks (inside AI response)
-
-Antigravity renders code blocks in a non-standard way.
-
-### Structure
-
-```html
-<pre>
-  <div class="font-sans text-sm ..."> <!-- language label header --> </div>
-  <div class="...rounded-t...border-b..."> <!-- copy button header bar --> </div>
-  <style>...</style> <!-- injected CSS -->
-  <div class="code-line">line 1</div>
-  <div class="code-line">line 2</div>
-</pre>
-```
-
-### Selectors (used in normalization)
-
-| Selector | Purpose | File |
-|----------|---------|------|
-| `.font-sans.text-sm` | Language label div | `assistantDomExtractor.ts` |
-| `[class*="text-sm"][class*="opacity"]` | Language label fallback | `assistantDomExtractor.ts` |
-| `style` | Injected CSS (removed during normalization) | `assistantDomExtractor.ts` |
-| `[class*="rounded-t"][class*="border-b"]` | Header bar (removed during normalization) | `assistantDomExtractor.ts` |
-| `.code-line, [class*="code-line"]` | Individual code lines | `assistantDomExtractor.ts` |
-
----
-
-## Maintenance Notes
-
-### When Antigravity updates its DOM
-
-See [DOM Inspection Guide](dom-inspection-guide.md) for the full verification procedure (DevTools connection, selector testing, stability evaluation).
-
-1. Connect DevTools to Antigravity and inspect the current DOM structure
-2. Update this document with new selectors and their verified status
-3. Update the affected detector/extractor source files
-4. Run `npm test` to verify no regressions
-
-### Known dead selectors (safe to remove)
-
-The following selectors exist in `responseMonitor.ts` and `assistantDomExtractor.ts` but have **never matched** in Antigravity's DOM. They are inherited from ChatGPT/generic patterns and only serve as defensive fallbacks:
-
-- `[data-message-author-role="assistant"]` (score 7)
-- `[data-message-role="assistant"]` (score 6)
-- `[class*="assistant-message"]` (score 5)
-- `[class*="message-content"]` (score 4)
-- `[class*="markdown-body"]` (score 3)
-
-These can be safely removed if desired, as they never match and the higher-scored selectors (`.rendered-markdown`, `.leading-relaxed.select-text`) are the ones that actually work.
-
-### Previously broken selectors (fixed)
-
-- `[data-message-author-role="user"]` — Used in `userMessageDetector.ts` before fix. **Does not exist** in Antigravity DOM. Replaced with `[class*="bg-gray-500/15"][class*="rounded-lg"][class*="select-text"]` (commit `8285624`).
-- Single bubble query `[class*="bg-gray-500/15"][class*="rounded-lg"][class*="select-text"]` without parent filter — Matched parent wrapper containers containing multiple user messages, causing echo duplication and previous-prompt pickup bugs. Fixed by adding Strategy A (direct text element query) + Strategy B (parent filter).
+## 2. Key Action Scraped Selector Logic
+
+### User Message Bubble Selection (`userMessageDetector.ts`)
+Queries the User Message container inside the sidebar:
+- Selector: `[class*="bg-gray-500/15"][class*="rounded-lg"][class*="select-text"]`
+- Logic: When a new user bubble appears, the detector extracts the inner message text and triggers a sync callback to Telegram to mirror the user's prompt in the Telegram channel.
+
+### Stop Button Checking (`responseMonitor.ts`)
+ResponseMonitor checks the stop button status on every poll cycle (2s) to identify active generation:
+- Selector: `[data-tooltip-id="input-send-button-cancel-tooltip"]`
+- Fallback: scans all buttons (`button, [role="button"]`) containing words matching `stop`, `stop generating`, `stop response`, `停止`, `生成を停止`, `応答を停止`.
+
+### Undo Button Click Logic (`chatSessionService.ts`)
+To rollback changes:
+1. Locates `button[data-testid="revert-button"]` center coordinates.
+2. Clicks the coordinates via `Input.dispatchMouseEvent`.
+3. Dispatches `Enter` keystroke via `Input.dispatchKeyEvent` to confirm the prompt dialog.
+
+### Code Block Parsing (`assistantDomExtractor.ts`)
+Normalizes raw response code blocks:
+- Scopes to `pre` blocks.
+- Identifies the language label using `.font-sans.text-sm` or `[class*="text-sm"][class*="opacity"]`.
+- Locates line blocks using `.code-line, [class*="code-line"]`.
+- Ignores injected `<style>` blocks and header bars matching `[class*="rounded-t"][class*="border-b"]`.

@@ -36,6 +36,7 @@ function createMockCdpService() {
     return {
         call: jest.fn().mockResolvedValue({ result: { value: null } }),
         getPrimaryContextId: jest.fn().mockReturnValue(1),
+        emit: jest.fn(),
     };
 }
 

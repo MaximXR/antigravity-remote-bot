@@ -4,7 +4,7 @@ import { EventEmitter } from 'events';
 import * as http from 'http';
 import * as net from 'net';
 import { spawn } from 'child_process';
-import { getAntigravityCliPath, extractProjectNameFromPath, isTitleMatch, isWorkspaceMatch } from '../utils/pathUtils';
+import { getAntigravityCliPath, extractProjectNameFromPath, isTitleMatch, isWorkspaceMatch, isUntitledTitle } from '../utils/pathUtils';
 import WebSocket from 'ws';
 
 export interface CdpServiceOptions {
@@ -629,7 +629,7 @@ export class CdpService extends EventEmitter {
             const normalizedProject = projectName.toLowerCase();
 
             // If it's untitled or loading or empty, we cannot confidently say it's different (could be loading the target workspace)
-            if (!liveTitle || normalizedLiveTitle.includes('untitled') || normalizedLiveTitle.includes('loading')) {
+            if (!liveTitle || isUntitledTitle(liveTitle) || normalizedLiveTitle.includes('loading')) {
                 return false;
             }
 
@@ -760,7 +760,7 @@ export class CdpService extends EventEmitter {
                 }
 
                 // If title is "Untitled (Workspace)", verify by folder path
-                if (normalizedLiveTitle.includes('untitled') && workspacePath) {
+                if (isUntitledTitle(liveTitle) && workspacePath) {
                     const folderMatch = await this.probeWorkspaceFolderPath(projectName, workspacePath);
                     if (folderMatch) {
                         return true;
@@ -958,7 +958,7 @@ export class CdpService extends EventEmitter {
                 const newUntitledPages = workbenchPages.filter(
                     (t: any) =>
                         !knownPageIds.has(t.id) &&
-                        (t.title?.includes('Untitled') || t.title === ''),
+                        (isUntitledTitle(t.title) || t.title === ''),
                 );
                 if (newUntitledPages.length === 1) {
                     logger.debug(`[CdpService] New Untitled page detected. Connecting as "${projectName}" (page.id=${newUntitledPages[0].id})`);

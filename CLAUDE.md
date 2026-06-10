@@ -59,6 +59,7 @@ Three-layer design: **CLI → Bot → Services/DB**
 
 ## Documentation
 
+- `docs/DEVELOPER_INDEX.md` — Conceptual map and directory index for developers and AI agents (start here)
 - `docs/ARCHITECTURE.md` — System overview and design rationale
 - `docs/RESPONSE_MONITOR.md` — DOM polling strategy, dual output streams, scored selectors
 - `docs/ANTIGRAVITY_DOM_SELECTORS.md` — DOM selector reference (critical for CDP interaction code)

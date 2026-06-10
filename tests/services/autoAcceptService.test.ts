@@ -1,13 +1,22 @@
-import { AutoAcceptService } from '../../src/services/autoAcceptService';
+import { AutoAcceptService, AutoAcceptSettings } from '../../src/services/autoAcceptService';
+
+const makeSettings = (enabled: boolean): AutoAcceptSettings => ({
+    enabled,
+    fileEdits: false,
+    consoleCommands: false,
+    readAccess: false,
+    urlAccess: false,
+    otherRequests: false,
+});
 
 describe('AutoAcceptService', () => {
     it('initial state matches the constructor argument', () => {
-        expect(new AutoAcceptService().isEnabled()).toBe(false);
-        expect(new AutoAcceptService(true).isEnabled()).toBe(true);
+        expect(new AutoAcceptService(makeSettings(false)).isEnabled()).toBe(false);
+        expect(new AutoAcceptService(makeSettings(true)).isEnabled()).toBe(true);
     });
 
     it('enables the service with "on"', () => {
-        const service = new AutoAcceptService(false);
+        const service = new AutoAcceptService(makeSettings(false));
         const result = service.handle('on');
 
         expect(result.success).toBe(true);
@@ -17,7 +26,7 @@ describe('AutoAcceptService', () => {
     });
 
     it('disables the service with "off"', () => {
-        const service = new AutoAcceptService(true);
+        const service = new AutoAcceptService(makeSettings(true));
         const result = service.handle('off');
 
         expect(result.success).toBe(true);
@@ -27,7 +36,7 @@ describe('AutoAcceptService', () => {
     });
 
     it('does not change state with "status"', () => {
-        const service = new AutoAcceptService(true);
+        const service = new AutoAcceptService(makeSettings(true));
         const result = service.handle('status');
 
         expect(result.success).toBe(true);
@@ -37,7 +46,7 @@ describe('AutoAcceptService', () => {
     });
 
     it('returns an error for invalid arguments without changing state', () => {
-        const service = new AutoAcceptService(false);
+        const service = new AutoAcceptService(makeSettings(false));
         const result = service.handle('invalid');
 
         expect(result.success).toBe(false);

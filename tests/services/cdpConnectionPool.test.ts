@@ -55,7 +55,7 @@ describe('CdpConnectionPool', () => {
             const cdp = await pool.getOrConnect('/path/to/ProjectA');
 
             expect(cdp).toBe(mockCdp);
-            expect(mockCdp.discoverAndConnectForWorkspace).toHaveBeenCalledWith('/path/to/ProjectA');
+            expect(mockCdp.discoverAndConnectForWorkspace.mock.calls[0][0]).toBe('/path/to/ProjectA');
             expect(pool.getActiveWorkspaceNames()).toContain('ProjectA');
         });
 

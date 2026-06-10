@@ -1,304 +1,112 @@
-# Chat Sessions Management Guide (CDP Integration)
+# Chat Sessions Integration & Automation Guide
 
-This document provides a comprehensive developer and AI agent guide on how Remoat lists, switches, and manages conversation sessions inside the Antigravity IDE (Windsurf/Cascade) over the Chrome DevTools Protocol (CDP).
-
-It contains exact DOM selectors, browser scripts, and click strategies needed to replicate this functionality in another extension or automation bot.
+This guide details how Remoat lists, creates, and switches conversation sessions inside the Antigravity IDE (Windsurf/Cascade panel) using the Chrome DevTools Protocol (CDP).
 
 ---
 
-## 1. Architecture Overview
+## 1. CDP Event Dispatch Strategy
 
-Antigravity IDE runs a Chromium-based Electron runtime. Since extensions or external tools cannot directly access the private internal React state of the Cascade panel, Remoat uses **Chrome DevTools Protocol (CDP)** to inject and run JavaScript directly inside the browser context of the Cascade sidebar.
+Antigravity’s sidebar is built using Electron and React. Normal DOM events (such as `element.click()` or `element.dispatchEvent(new Event('input'))`) are ignored or blocked by React event boundaries.
 
-### Three-Step Action Pipeline
+**Rule for Replicating Actions:**
+- **DO NOT** use DOM `.click()` blindly.
+- **DO** query elements to get their bounding client rect (`getBoundingClientRect()`).
+- **DO** calculate the center coordinates (`x`, `y`).
+- **DO** dispatch physical click events via CDP `Input.dispatchMouseEvent` at those coordinates:
+
+```typescript
+// Click Simulation Template
+await cdp.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+await cdp.call('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+await cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+```
+
+---
+
+## 2. Command Flow: Listing Sessions (`/chats`)
+
+### Execution Path
+1. **Telegram Command Trigger:** User sends `/chats`.
+2. **Router:** [src/bot/index.ts](file:///e:/Desktop/Remoat/src/bot/index.ts) routes the update to the `/chats` handler -> resolves workspace -> calls `chatSessionService.listAllSessions(cdp)`.
+3. **Execution Steps:**
+   - **Step 2.1:** Call `cdpService.ensureSidebarOpen()`.
+   - **Step 2.2:** Evaluate `FIND_PAST_CONVERSATIONS_BUTTON_SCRIPT` (in [src/services/chatSessionService.ts](file:///e:/Desktop/Remoat/src/services/chatSessionService.ts)) to scan for:
+     - `[data-past-conversations-toggle]`
+     - `[data-tooltip-id*="history"]` or `[data-tooltip-id*="past-conversations"]`
+     - `svg.lucide-history`
+   - **Step 2.3:** Simulates a CDP click at the returned coordinates to open the "Past Conversations" panel.
+   - **Step 2.4:** Wait 500ms for panel animation.
+   - **Step 2.5:** Evaluate `SCRAPE_PAST_CONVERSATIONS_SCRIPT` to extract rows (`div[class*="cursor-pointer"]`).
+     - **Boundary Check:** Skip all rows below the "Other Conversations" section header (`boundaryTop = el.getBoundingClientRect().top`).
+     - **Title Scrape:** Locate the text in `span.text-sm`, skipping timestamps.
+     - **Active Check:** Row matching `/focusBackground/i` class is the active session.
+   - **Step 2.6:** If fewer than 20 sessions are returned, find and click "Show N more..." via coordinates, wait 500ms, and re-scrape.
+   - **Step 2.7:** Send CDP `Input.dispatchKeyEvent` for `Escape` to close the panel.
+   - **Step 2.8:** Telegram Bot renders the list via `buildSessionPickerUI` ([src/ui/sessionPickerUi.ts](file:///e:/Desktop/Remoat/src/ui/sessionPickerUi.ts)).
+
+---
+
+## 3. Command Flow: Starting New Chat (`/new`)
+
+### Execution Path
+1. **Telegram Command Trigger:** User sends `/new`.
+2. **Router:** [src/bot/index.ts](file:///e:/Desktop/Remoat/src/bot/index.ts) handles `/new` -> calls `chatSessionService.startNewChat(cdp)`.
+3. **Execution Steps:**
+   - **Step 3.1:** Call `cdpService.ensureSidebarOpen()`.
+   - **Step 3.2:** Wait for Cascade contexts to be ready.
+   - **Step 3.3:** Evaluate `GET_NEW_CHAT_BUTTON_SCRIPT` to query `[data-tooltip-id="new-conversation-tooltip"]`.
+   - **Step 3.4:** Read CSS `cursor` style of the button:
+     - **`cursor === 'not-allowed'`**: The current chat is already empty. **Stop flow** (success).
+     - **`cursor === 'pointer'`**: Active button. **Proceed to Step 3.5**.
+   - **Step 3.5:** Simulates CDP click at button coordinates.
+   - **Step 3.6:** Wait 1500ms for DOM update.
+   - **Step 3.7:** Verify `cursor` is now `not-allowed`.
+   - **Step 3.8:** Update local database mapping to clear active session pointers.
+
+---
+
+## 4. Session Switching Flow
+
+When a user selects a session title from the Telegram interface, Remoat executes `chatSessionService.activateSessionByTitle(cdp, title)`:
 
 ```mermaid
 graph TD
-    A[Bot Command: /chats or /new] --> B[CDP Client: Runtime.evaluate]
-    B --> C[Browser Context: DOM Query & Coordinates Extract]
-    C --> D[CDP Client: Input.dispatchMouseEvent]
-    D --> E[IDE GUI Action Executed]
+    A[Switch Command] --> B{Title matches current title?}
+    B -->|Yes| C[Return Success]
+    B -->|No| D[Try Strategy 1: Direct Click]
+    D -->|Success| E[Wait 500ms & Verify]
+    D -->|Failure| F[Try Strategy 2: Past Conversations Search]
+    F -->|Success| E
+    F -->|Failure| G[Return Error]
+    E --> H{Title verified?}
+    H -->|Yes| I[Resolve QuickPick Dialogs]
+    H -->|No| J[Try Strategy 2 Force Reset]
 ```
 
-1. **Query & Evaluate:** The bot sends a script using `Runtime.evaluate` to scan the DOM and find the coordinates (`x`, `y`) of target elements.
-2. **CDP Click Simulation:** Instead of calling `.click()` in the DOM (which is often ignored by React/Electron event boundaries), the bot dispatches physical mouse events via `Input.dispatchMouseEvent`.
-3. **QuickPick Resolution:** When a session is selected, VS Code displays a QuickPick menu overlay. The bot detects it in the main window context and clicks the desired option.
+### Strategy 1: Direct Click Script
+If the session is already rendered in the current panel list, Remoat evaluates the script generated by `buildActivateChatByTitleScript(title)`:
+- Scans all visible `button`, `[role="button"]`, `a`, `li`, `div`, `span` nodes inside `.antigravity-agent-side-panel`.
+- Matches against normalized target title (exact or loose substring).
+- Finds the closest clickable ancestor (`closest('button, [role="button"], a, li')`).
+- Calls `.click()`.
+
+### Strategy 2: Past Conversations Search Script
+If the session is not visible, Remoat evaluates the script generated by `buildActivateViaPastConversationsScript(title)`:
+- Opens the Past Conversations panel (using same selectors as `/chats`).
+- Searches for the search input element (`findSearchInput()`) by scanning placeholders matching `select a conversation`, `search conversation`, `search`.
+- Focuses the input, sets its `value` to the target title, and dispatches React-compatible `input` and `change` events.
+- Selects the matching search result row and simulates a click.
 
 ---
 
-## 2. Locate and Connect to the IDE
+## 5. Resolving Monaco QuickPick Dialogs
 
-Before sending commands, you must establish a CDP WebSocket connection.
+When a session is switched, the IDE workbench may display a VS Code overlay dialog (e.g., asking "Select where to open the conversation" or "Select workspace"). This overlay blocks standard inputs and must be resolved immediately.
 
-1. **Scanned Ports:** Remoat scans ports `[61390, 61114, 61113, 9222, 9223, 9333, 9444, 9555, 9666]` by requesting `http://127.0.0.1:${port}/json/list`.
-2. **Identify Target:** It looks for a page where:
-   - `type === "page"`
-   - `webSocketDebuggerUrl` is present.
-   - `url` contains `/workbench` or the title contains `"Antigravity"` or `"Cascade"`.
-3. **Active Context:** Once connected, it calls `Runtime.enable` and tracks active execution contexts. The primary execution context ID is retrieved by searching for the context with name containing `"Extension"` or URL containing `"cascade-panel"`.
-
----
-
-## 3. Session Listing (`/chats` command)
-
-To get a list of recent sessions, the bot must programmatically open the **Past Conversations** sidebar panel, scrape the contents, and then close the panel.
-
-```mermaid
-sequenceDiagram
-    participant Bot as Remoat Bot
-    participant IDE as IDE Browser Context
-    Bot->>IDE: Find History Button Coordinates
-    Note over IDE: Strategy 1: [data-past-conversations-toggle]<br/>Strategy 2: [data-tooltip-id*='history']<br/>Strategy 3: svg.lucide-history
-    IDE-->>Bot: Returns { found: true, x, y }
-    Bot->>IDE: Input.dispatchMouseEvent (Click x, y)
-    Note over IDE: Past Conversations sidebar opens
-    Bot->>IDE: Scrape Visible Session Rows
-    Note over IDE: Filter out 'Other Conversations' boundary<br/>Get span.text-sm titles & active state
-    IDE-->>Bot: Returns Session List Array
-    Bot->>IDE: Input.dispatchKeyEvent (Press Escape)
-    Note over IDE: Past Conversations sidebar closes
-```
-
-### Browser Script: Find History Button
-This script scans the DOM for the "History" or "Past Conversations" toggle button and returns its center coordinates:
-
-```javascript
-(() => {
-    const isVisible = (el) => { 
-        if (!el) return false; 
-        const rect = el.getBoundingClientRect(); 
-        if (rect.width === 0 || rect.height === 0) return false; 
-        const style = window.getComputedStyle(el); 
-        return style.display !== 'none' && style.visibility !== 'hidden'; 
-    };
-    const getRect = (el) => {
-        const rect = el.getBoundingClientRect();
-        return { found: true, x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
-    };
-
-    // Strategy 1 (primary): data-past-conversations-toggle attribute
-    const toggle = document.querySelector('[data-past-conversations-toggle]');
-    if (toggle && isVisible(toggle)) return getRect(toggle);
-
-    // Strategy 2: data-tooltip-id containing "history"
-    const tooltipEls = Array.from(document.querySelectorAll('[data-tooltip-id]'));
-    for (const el of tooltipEls) {
-        if (!isVisible(el)) continue;
-        const tid = (el.getAttribute('data-tooltip-id') || '').toLowerCase();
-        if (tid.includes('history') || tid.includes('past-conversations')) {
-            return getRect(el);
-        }
-    }
-
-    // Strategy 3: SVG with lucide-history class
-    const icons = Array.from(document.querySelectorAll('svg.lucide-history, svg[class*="lucide-history"]'));
-    for (const icon of icons) {
-        const parent = icon.closest('a, button, [role="button"], div[class*="cursor-pointer"]');
-        const target = parent instanceof HTMLElement && isVisible(parent) ? parent : icon;
-        if (isVisible(target)) return getRect(target);
-    }
-
-    return { found: false, x: 0, y: 0 };
-})()
-```
-
-### Browser Script: Scrape Visible Sessions
-Once the panel is open, the bot runs this script to extract session titles:
-
-```javascript
-(() => {
-    const isVisible = (el) => { if (!el) return false; const rect = el.getBoundingClientRect(); if (rect.width === 0 || rect.height === 0) return false; const style = window.getComputedStyle(el); return style.display !== 'none' && style.visibility !== 'hidden'; };
-    const normalize = (text) => (text || '').trim();
-
-    const items = [];
-    const seen = new Set();
-
-    // Find the scrollable list container
-    const containers = Array.from(document.querySelectorAll('div[class*="overflow-auto"], div[class*="overflow-y-scroll"]'));
-    const container = document.getElementById('fastpick-listbox') ||
-        document.querySelector('div[class*="jetski-fast-pick"] div[class*="overflow"]') ||
-        containers.find((c) => isVisible(c) && c.querySelectorAll('div[class*="cursor-pointer"]').length > 0) ||
-        document;
-
-    // Boundary check: skip other-project conversations
-    let boundaryTop = Infinity;
-    const headerCandidates = container.querySelectorAll('div[class*="text-xs"][class*="opacity"]');
-    for (const el of headerCandidates) {
-        if (!isVisible(el)) continue;
-        const t = normalize(el.textContent || '');
-        if (/^Other\s+Conversations?$/i.test(t)) {
-            boundaryTop = el.getBoundingClientRect().top;
-            break;
-        }
-    }
-
-    // Scrape session rows
-    const rows = Array.from(container.querySelectorAll('div[class*="cursor-pointer"]'));
-    for (const row of rows) {
-        if (!isVisible(row)) continue;
-        if (row.getBoundingClientRect().top >= boundaryTop) continue; // Skip other-project items
-        
-        const spans = Array.from(row.querySelectorAll('span.text-sm span, span.text-sm'));
-        let title = '';
-        for (const span of spans) {
-            const t = normalize(span.textContent || '');
-            if (/^\d+\s+(min|hr|hour|day|sec|week|month|year)s?\s+ago$/i.test(t)) continue; // skip timestamp
-            if (t.length < 2 || t.length > 200) continue;
-            title = t;
-            break;
-        }
-        if (!title || seen.has(title)) continue;
-        seen.add(title);
-        
-        const isActive = /focusBackground/i.test(row.className || '');
-        items.push({ title, isActive });
-    }
-    return { sessions: items };
-})()
-```
-
----
-
-## 4. Session Activation / Switching
-
-To switch to a different conversation, the bot uses two strategies:
-
-### Strategy 1: Direct Side-Panel Link Click
-If the target conversation is already visible in the side panel:
-
-```javascript
-(async () => {
-    const wanted = "Target Conversation Title".toLowerCase().trim();
-    const panel = document.querySelector('.antigravity-agent-side-panel') || document;
-    const isVisible = (el) => { if (!el) return false; const rect = el.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; };
-    
-    const nodes = Array.from(panel.querySelectorAll('button, [role="button"], a, li, div, span')).filter(isVisible);
-    const target = nodes.find(n => (n.textContent || '').toLowerCase().trim() === wanted);
-    if (target) {
-        const clickable = target.closest('button, [role="button"], a, li') || target;
-        clickable.click();
-        return { ok: true };
-    }
-    return { ok: false, error: 'Not found in direct sidebar' };
-})()
-```
-
-### Strategy 2: Past Conversations Search & Select
-If the conversation is not visible, the bot:
-1. Opens the **Past Conversations** sidebar.
-2. Finds the search input field (`findSearchInput()` searches for placeholders matching `search`, `select a conversation`).
-3. Focuses and types the target conversation title.
-4. Clicks the filtered option inside the popup.
-
----
-
-## 5. Resolving VS Code QuickPick Dropdowns
-
-When selecting a chat, the IDE runtime may trigger a VS Code native overlay asking **"Select where to open the conversation"** or **"Select workspace"**. This overlay blocks GUI actions and must be resolved automatically.
-
-```html
-<!-- Widget Selector -->
-.quick-input-widget
-```
-
-### QuickPick Resolution Script
-This script detects the open QuickPick widget, analyzes the options, and returns the coordinates for clicking the appropriate choice:
-
-```javascript
-(() => {
-    const isVisible = (el) => {
-        if (!el || !(el instanceof HTMLElement)) return false;
-        const style = window.getComputedStyle(el);
-        if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') === 0) return false;
-        const rect = el.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0;
-    };
-    
-    const widgets = Array.from(document.querySelectorAll('.quick-input-widget, [class*="quick-input-widget"]'));
-    const visibleWidget = widgets.find(isVisible);
-    if (!visibleWidget) return { found: false };
-    
-    const inputEl = visibleWidget.querySelector('.quick-input-filter input');
-    const placeholder = ((inputEl ? inputEl.getAttribute('placeholder') : '') || '').toLowerCase();
-    const widgetText = (visibleWidget.textContent || '').toLowerCase();
-    
-    const isWindowDialog = placeholder.includes('where to open') || placeholder.includes('open the conversation') || widgetText.includes('where to open');
-    const isWorkspaceDialog = placeholder.includes('workspace') || placeholder.includes('select workspace') || widgetText.includes('select workspace') || widgetText.includes('workspace to open');
-    
-    if (!isWindowDialog && !isWorkspaceDialog) {
-        return { found: true, type: 'unknown' };
-    }
-    
-    const rows = Array.from(visibleWidget.querySelectorAll('.monaco-list-row, [role="option"], [role="button"]'));
-    const visibleRows = rows.filter(isVisible);
-    
-    // 1. If asking "where to open", select "current window" or "current workspace"
-    if (isWindowDialog) {
-        for (const row of visibleRows) {
-            const rowText = (row.textContent || '').toLowerCase();
-            if (rowText.includes('current window') || rowText.includes('current workspace')) {
-                const rect = row.getBoundingClientRect();
-                return {
-                    found: true,
-                    type: 'window',
-                    text: row.textContent.trim(),
-                    x: Math.round(rect.left + rect.width / 2),
-                    y: Math.round(rect.top + rect.height / 2)
-                };
-            }
-        }
-    }
-    
-    // 2. If asking for workspace, choose Desktop/Remoat or first focused option
-    if (isWorkspaceDialog) {
-        for (const row of visibleRows) {
-            const rowText = (row.textContent || '').toLowerCase();
-            if (rowText.includes('desktop') || rowText.includes('remoat')) {
-                const rect = row.getBoundingClientRect();
-                return {
-                    found: true,
-                    type: 'workspace',
-                    text: row.textContent.trim(),
-                    x: Math.round(rect.left + rect.width / 2),
-                    y: Math.round(rect.top + rect.height / 2)
-                };
-            }
-        }
-        
-        // Take focused row fallback
-        for (const row of visibleRows) {
-            if (row.classList.contains('focused') || row.getAttribute('aria-selected') === 'true') {
-                const rect = row.getBoundingClientRect();
-                return {
-                    found: true,
-                    type: 'workspace',
-                    text: row.textContent.trim(),
-                    x: Math.round(rect.left + rect.width / 2),
-                    y: Math.round(rect.top + rect.height / 2)
-                };
-            }
-        }
-    }
-    
-    return { found: true, error: 'No clickable options found' };
-})()
-```
-
----
-
-## 6. How to Replicate (For Extension Developers / Other Bots)
-
-If you are writing a VS Code extension or another assistant bot and need to listing/managing dialogs:
-
-1. **Don't use `document.querySelector('button').click()` blindly.** The sidebar uses shadow rendering or custom focus handlers. Always use absolute viewport coordinates for click dispatching:
-   ```typescript
-   // CDP Example
-   await cdp.call('Input.dispatchMouseEvent', {
-       type: 'mousePressed', x, y, button: 'left', clickCount: 1
-   });
-   await cdp.call('Input.dispatchMouseEvent', {
-       type: 'mouseReleased', x, y, button: 'left', clickCount: 1
-   });
-   ```
-2. **Handle QuickPicks.** Whenever your code clicks a session link, poll the DOM for `.quick-input-widget` for at least 3 seconds. If it appears, resolve it by clicking `current window`.
-3. **Session boundary filtering.** When listing chats, always parse headers inside the scrollable container. If you see the text "Other Conversations", stop scraping, because everything below it belongs to different directories or workspaces.
+- **Overlay Detector:** Query for `.quick-input-widget, [class*="quick-input-widget"]` in the main execution context.
+- **Type Classifications:**
+  - **Window Dialog:** Placeholder or text matches `where to open` or `open the conversation`.
+  - **Workspace Dialog:** Placeholder or text matches `workspace` or `select workspace`.
+- **Resolution Scripts:**
+  - **Window Dialog:** Iterate rows (`.monaco-list-row, [role="option"], [role="button"]`) to find text containing `current window` or `current workspace`, and dispatch CDP click at coordinates.
+  - **Workspace Dialog:** Search rows for workspace names like `desktop` or `remoat`, or fall back to the row with `.focused` or `aria-selected="true"`.

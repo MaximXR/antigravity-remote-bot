@@ -157,3 +157,32 @@ export function getAntigravityCdpHint(port: number = 9222): string {
             return `${APP_NAME.toLowerCase()} --remote-debugging-port=${port}`;
     }
 }
+
+/**
+ * Check if the given window or workspace title represents an "untitled" (empty/unsaved) workspace page,
+ * supporting multiple localization patterns (English, Russian, French, German, Spanish, Japanese, Chinese, etc.).
+ */
+export function isUntitledTitle(title: string): boolean {
+    if (!title) return true;
+    const normalized = title.toLowerCase().trim();
+    if (normalized === '') return true;
+
+    const untitledKeywords = [
+        'untitled',
+        'без названия',
+        'без имени',
+        'без_названия',
+        'без_имени',
+        'unbenannt',
+        'sans titre',
+        'sans_titre',
+        'sin título',
+        'sin_título',
+        'без назви',
+        '無題',
+        '无标题'
+    ];
+
+    return untitledKeywords.some(keyword => normalized.includes(keyword));
+}
+

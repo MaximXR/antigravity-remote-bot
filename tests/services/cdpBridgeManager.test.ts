@@ -19,14 +19,14 @@ jest.mock('../../src/services/cdpService');
 
 describe('cdpBridgeManager', () => {
     it('initCdpBridge builds the initial state', () => {
-        const bridge = initCdpBridge(false);
+        const bridge = initCdpBridge();
         expect(bridge.lastActiveWorkspace).toBeNull();
         expect(bridge.lastActiveChannel).toBeNull();
         expect(bridge.autoAccept.isEnabled()).toBe(false);
     });
 
     it('getCurrentCdp returns null when not connected', () => {
-        const bridge = initCdpBridge(false);
+        const bridge = initCdpBridge();
         expect(getCurrentCdp(bridge)).toBeNull();
     });
 
@@ -42,7 +42,7 @@ describe('cdpBridgeManager', () => {
     });
 
     it('routes approval notifications by session title when linked', () => {
-        const bridge = initCdpBridge(false);
+        const bridge = initCdpBridge();
         const channel = { chatId: 1001, threadId: 1 } as any;
         registerApprovalSessionChannel(bridge, 'ws-a', 'Session Alpha', channel);
 
@@ -50,7 +50,7 @@ describe('cdpBridgeManager', () => {
     });
 
     it('falls back to workspace channel when session title does not match', () => {
-        const bridge = initCdpBridge(false);
+        const bridge = initCdpBridge();
         const wsChannel = { chatId: 1001 } as any;
         registerApprovalWorkspaceChannel(bridge, 'ws-a', wsChannel);
 
@@ -58,7 +58,7 @@ describe('cdpBridgeManager', () => {
     });
 
     it('falls back to workspace channel when currentChatTitle is null', () => {
-        const bridge = initCdpBridge(false);
+        const bridge = initCdpBridge();
         const wsChannel = { chatId: 1001 } as any;
         registerApprovalWorkspaceChannel(bridge, 'ws-a', wsChannel);
 
@@ -66,7 +66,7 @@ describe('cdpBridgeManager', () => {
     });
 
     it('falls back to workspace channel when currentChatTitle is empty', () => {
-        const bridge = initCdpBridge(false);
+        const bridge = initCdpBridge();
         const wsChannel = { chatId: 1001 } as any;
         registerApprovalWorkspaceChannel(bridge, 'ws-a', wsChannel);
 
@@ -74,7 +74,7 @@ describe('cdpBridgeManager', () => {
     });
 
     it('prefers session channel over workspace channel', () => {
-        const bridge = initCdpBridge(false);
+        const bridge = initCdpBridge();
         const wsChannel = { chatId: 1001 } as any;
         const sessionChannel = { chatId: 1001, threadId: 2 } as any;
         registerApprovalWorkspaceChannel(bridge, 'ws-a', wsChannel);
@@ -84,7 +84,7 @@ describe('cdpBridgeManager', () => {
     });
 
     it('returns null when neither session nor workspace is registered', () => {
-        const bridge = initCdpBridge(false);
+        const bridge = initCdpBridge();
 
         expect(resolveApprovalChannelForCurrentChat(bridge, 'ws-unknown', 'Some Title')).toBeNull();
         expect(resolveApprovalChannelForCurrentChat(bridge, 'ws-unknown', null)).toBeNull();
@@ -145,7 +145,7 @@ describe('ensureApprovalDetector', () => {
     }
 
     it('creates and starts an ApprovalDetector for the workspace', () => {
-        const bridge = initCdpBridge(false);
+        const bridge = initCdpBridge();
         const cdp = makeCdp();
 
         ensureApprovalDetector(bridge, cdp, 'my-project');
@@ -156,7 +156,7 @@ describe('ensureApprovalDetector', () => {
     });
 
     it('does not create a second detector when one is already active', () => {
-        const bridge = initCdpBridge(false);
+        const bridge = initCdpBridge();
         const cdp = makeCdp();
 
         mockIsActive.mockReturnValue(true);
@@ -173,7 +173,7 @@ describe('ensureApprovalDetector', () => {
     });
 
     it('onResolved removes the keyboard markup from the last approval message', () => {
-        const bridge = initCdpBridge(false);
+        const bridge = initCdpBridge();
         const cdp = makeCdp();
         const mockEditMarkup = jest.fn().mockResolvedValue(undefined);
         bridge.botApi = { editMessageReplyMarkup: mockEditMarkup } as any;
@@ -191,7 +191,7 @@ describe('ensureApprovalDetector', () => {
     });
 
     it('onResolved handles editMessageReplyMarkup failure without throwing', async () => {
-        const bridge = initCdpBridge(false);
+        const bridge = initCdpBridge();
         const cdp = makeCdp();
         const mockEditMarkup = jest.fn().mockRejectedValue(new Error('400: Bad Request: message is not modified'));
         bridge.botApi = { editMessageReplyMarkup: mockEditMarkup } as any;
