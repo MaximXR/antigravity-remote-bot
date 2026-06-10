@@ -470,6 +470,7 @@ export class PlanningDetector {
     private lastClickedChip: { text: string; at: number } | null = null;
     /** Set of already auto-opened artifact texts to prevent infinite loops */
     private autoOpenedChips = new Set<string>();
+    private isPaused: boolean = false;
 
     /**
      * Baseline artifact counts captured when monitoring starts.
@@ -565,6 +566,22 @@ export class PlanningDetector {
         return this.isRunning;
     }
 
+    pause(): void {
+        this.isPaused = true;
+    }
+
+    resume(): void {
+        if (!this.isPaused) return;
+        this.isPaused = false;
+        if (this.isRunning) {
+            if (this.pollTimer) {
+                clearTimeout(this.pollTimer);
+                this.pollTimer = null;
+            }
+            this.poll();
+        }
+    }
+
     /**
      * Click the Open button via CDP.
      * @param buttonText Text of the button to click (default: detected openText or "Open")
@@ -640,6 +657,7 @@ export class PlanningDetector {
      *   3. Reset lastDetectedKey / lastDetectedInfo when buttons disappear
      */
     private async poll(): Promise<void> {
+        if (this.isPaused) return;
         try {
             // Expire click-guard state after 10 seconds
             if (this.lastClickedChip && Date.now() - this.lastClickedChip.at > 10000) {

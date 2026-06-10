@@ -821,6 +821,7 @@ export class ResponseMonitor {
 
     /** Start monitoring */
     async start(): Promise<void> {
+        this.cdpService.emit('response-monitor:start');
         return this.initMonitoring(false);
     }
 
@@ -831,6 +832,7 @@ export class ResponseMonitor {
      * Used when joining an existing session that may already be generating.
      */
     async startPassive(): Promise<void> {
+        this.cdpService.emit('response-monitor:start');
         return this.initMonitoring(true);
     }
 
@@ -940,6 +942,7 @@ export class ResponseMonitor {
     /** Stop monitoring */
     async stop(): Promise<void> {
         this.isRunning = false;
+        this.cdpService.emit('response-monitor:stop');
         if (this.pollTimer) {
             clearTimeout(this.pollTimer);
             this.pollTimer = null;

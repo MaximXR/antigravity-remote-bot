@@ -130,6 +130,7 @@ export class ErrorPopupDetector {
     private lastDetectedInfo: ErrorPopupInfo | null = null;
     /** Timestamp of last notification (for cooldown-based dedup) */
     private lastNotifiedAt: number = 0;
+    private isPaused: boolean = false;
     /** Cooldown period in ms to suppress duplicate notifications (10s for error popups) */
     private static readonly COOLDOWN_MS = 10000;
 
@@ -167,6 +168,22 @@ export class ErrorPopupDetector {
     /** Returns whether monitoring is currently active. */
     isActive(): boolean {
         return this.isRunning;
+    }
+
+    pause(): void {
+        this.isPaused = true;
+    }
+
+    resume(): void {
+        if (!this.isPaused) return;
+        this.isPaused = false;
+        if (this.isRunning) {
+            if (this.pollTimer) {
+                clearTimeout(this.pollTimer);
+                this.pollTimer = null;
+            }
+            this.poll();
+        }
     }
 
     /**
@@ -226,6 +243,7 @@ export class ErrorPopupDetector {
      *   3. Reset lastDetectedKey / lastDetectedInfo when popup disappears
      */
     private async poll(): Promise<void> {
+        if (this.isPaused) return;
         try {
             const contextId = this.cdpService.getPrimaryContextId();
             const callParams: Record<string, unknown> = {

@@ -200,6 +200,9 @@ export class CdpService extends EventEmitter {
                     const idx = this.contexts.findIndex(c => c.id === data.params.executionContextId);
                     if (idx !== -1) this.contexts.splice(idx, 1);
                 }
+                if (data.method === 'Runtime.executionContextsCleared') {
+                    this.contexts = [];
+                }
 
                 // Forward CDP events via EventEmitter (Network.*, Runtime.*, etc.)
                 if (data.method) {
@@ -244,7 +247,7 @@ export class CdpService extends EventEmitter {
         this.startHeartbeat();
     }
 
-    async call(method: string, params: any = {}): Promise<any> {
+    private async callDirect(method: string, params: any = {}): Promise<any> {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             throw new Error('WebSocket is not connected');
         }
@@ -261,6 +264,53 @@ export class CdpService extends EventEmitter {
             this.pendingCalls.set(id, { resolve, reject, timeoutId });
             this.ws!.send(JSON.stringify({ id, method, params }));
         });
+    }
+
+    async refreshContexts(): Promise<void> {
+        try {
+            this.contexts = [];
+            await this.callDirect('Runtime.disable', {});
+            await this.callDirect('Runtime.enable', {});
+            await new Promise(r => setTimeout(r, 100));
+            logger.debug(`[CdpService] Contexts refreshed. Current count: ${this.contexts.length}`);
+        } catch (err: any) {
+            logger.warn(`[CdpService] Failed to refresh contexts: ${err?.message || err}`);
+        }
+    }
+
+    async call(method: string, params: any = {}): Promise<any> {
+        try {
+            return await this.callDirect(method, params);
+        } catch (error: any) {
+            const errorStr = String(error?.message || error || '');
+            const isContextError = errorStr.includes('Cannot find context with specified id');
+
+            if (isContextError && method === 'Runtime.evaluate') {
+                logger.warn(`[CdpService] Context error detected for ${method}. Refreshing contexts and retrying...`);
+                
+                if (params && typeof params.contextId === 'number') {
+                    const idx = this.contexts.findIndex(c => c.id === params.contextId);
+                    if (idx !== -1) {
+                        this.contexts.splice(idx, 1);
+                    }
+                }
+
+                await this.refreshContexts();
+
+                if (params && 'contextId' in params) {
+                    const newContextId = this.getPrimaryContextId();
+                    if (newContextId !== null) {
+                        params.contextId = newContextId;
+                    } else {
+                        delete params.contextId;
+                    }
+                }
+
+                return await this.callDirect(method, params);
+            }
+
+            throw error;
+        }
     }
 
     /**

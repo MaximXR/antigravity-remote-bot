@@ -125,7 +125,7 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
     const panel = document.querySelector('.antigravity-agent-side-panel');
     const scope = panel || document;
 
-    const allClickables = Array.from(scope.querySelectorAll('button, span, div, [role="button"]'))
+    const allClickables = Array.from(scope.querySelectorAll('button, [role="button"], .cursor-pointer'))
         .filter(el => {
             const isButton = el.tagName === 'BUTTON' || el.getAttribute('role') === 'button';
             const hasCursorPointer = el.classList.contains('cursor-pointer');
@@ -181,7 +181,7 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
     }
     if (!container) container = scope;
 
-    const containerClickables = Array.from(container.querySelectorAll('button, span, div, [role="button"]'))
+    const containerClickables = Array.from(container.querySelectorAll('button, [role="button"], .cursor-pointer'))
         .filter(btn => {
             const isButton = btn.tagName === 'BUTTON' || btn.getAttribute('role') === 'button';
             const hasCursorPointer = btn.classList.contains('cursor-pointer');
@@ -330,7 +330,7 @@ export function buildClickScript(buttonText: string): string {
         const wanted = normalize(text);
         const panel = document.querySelector('.antigravity-agent-side-panel');
         const scope = panel || document;
-        const allClickables = Array.from(scope.querySelectorAll('button, span, div, [role="button"]'))
+        const allClickables = Array.from(scope.querySelectorAll('button, [role="button"], .cursor-pointer'))
             .filter(el => {
                 const isButton = el.tagName === 'BUTTON' || el.getAttribute('role') === 'button';
                 const hasCursorPointer = el.classList.contains('cursor-pointer');

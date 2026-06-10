@@ -108,6 +108,40 @@ export class CdpConnectionPool extends EventEmitter {
 
 
     /**
+     * Pause Planning and ErrorPopup detectors during AI generation to reduce CPU load.
+     */
+    pauseDetectors(projectName: string): void {
+        const planning = this.planningDetectors.get(projectName);
+        if (planning) {
+            planning.pause();
+        }
+
+        const errorPopup = this.errorPopupDetectors.get(projectName);
+        if (errorPopup) {
+            errorPopup.pause();
+        }
+
+        logger.debug(`[CdpConnectionPool] Paused Planning and ErrorPopup detectors for "${projectName}"`);
+    }
+
+    /**
+     * Resume Planning and ErrorPopup detectors after AI generation finishes.
+     */
+    resumeDetectors(projectName: string): void {
+        const planning = this.planningDetectors.get(projectName);
+        if (planning) {
+            planning.resume();
+        }
+
+        const errorPopup = this.errorPopupDetectors.get(projectName);
+        if (errorPopup) {
+            errorPopup.resume();
+        }
+
+        logger.debug(`[CdpConnectionPool] Resumed Planning and ErrorPopup detectors for "${projectName}"`);
+    }
+
+    /**
      * Disconnect the specified workspace.
      */
     disconnectWorkspace(projectName: string): void {
@@ -293,6 +327,14 @@ export class CdpConnectionPool extends EventEmitter {
         cdp.on('reconnected', () => {
             logger.info(`[CdpConnectionPool] Workspace "${projectName}" reconnected`);
             this.emit('workspace:reconnected', projectName);
+        });
+
+        cdp.on('response-monitor:start', () => {
+            this.pauseDetectors(projectName);
+        });
+
+        cdp.on('response-monitor:stop', () => {
+            this.resumeDetectors(projectName);
         });
 
         cdp.on('reconnectFailed', () => {
