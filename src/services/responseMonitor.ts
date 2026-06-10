@@ -174,6 +174,48 @@ export const RESPONSE_SELECTORS = {
     })()`,
     /** Check if planning dialog (Open/Proceed buttons) is active — now baseline-aware */
     PLANNING_ACTIVE: '(() => false)()', // Deprecated: use COMBINED_POLL with baseline counts
+    /** Extract quick replies / choice buttons from the last assistant message */
+    CHOICES: `(() => {
+        const panel = document.querySelector('.antigravity-agent-side-panel');
+        const rootScope = panel || document;
+
+        const userMessages = rootScope.querySelectorAll('[role="article"][aria-label="User message"], [aria-label="User message"], [data-testid="user-input-step"]');
+        const lastUserMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1] : null;
+
+        let assistantTurns = Array.from(rootScope.querySelectorAll('[data-message-author-role="assistant"], [role="article"][aria-label="Agent response"], [aria-label="Agent response"]'));
+        let lastTurn = null;
+        if (lastUserMsg) {
+            assistantTurns = assistantTurns.filter(node => !!(lastUserMsg.compareDocumentPosition(node) & 4));
+            lastTurn = assistantTurns.length > 0 ? assistantTurns[assistantTurns.length - 1] : null;
+        } else {
+            lastTurn = assistantTurns.length > 0 ? assistantTurns[assistantTurns.length - 1] : null;
+        }
+        if (!lastTurn) return null;
+
+        const SYSTEM_BUTTON_TEXTS = [
+            'good', 'bad', 'copy', 'regenerate', 'stop', 'allow', 'deny', 'dismiss', 'retry', 'proceed', 'open', 'view',
+            'accept all', 'reject all', 'allow once', 'always allow', 'allow this conversation', 'allow this chat'
+        ];
+
+        const buttons = Array.from(lastTurn.querySelectorAll('button, [role="button"], .cursor-pointer'))
+            .filter(el => {
+                const rect = el.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) return false;
+                
+                const text = (el.textContent || '').trim().toLowerCase();
+                if (!text || text.length > 80) return false;
+
+                if (SYSTEM_BUTTON_TEXTS.some(p => text === p || text.startsWith(p) || text.endsWith(p))) return false;
+                if (text.includes('worked for') || text.includes('seconds') || text.includes('credits') || text.includes('gemini') || text.includes('claude')) return false;
+                if (el.closest('pre') || el.closest('code') || el.closest('details')) return false;
+
+                return true;
+            });
+
+        if (buttons.length === 0) return null;
+
+        return buttons.map(btn => (btn.textContent || '').trim());
+    })()`,
     /** Click stop button via tooltip-id + text fallback */
     CLICK_STOP_BUTTON: `(() => {
         const panel = document.querySelector('.antigravity-agent-side-panel');
@@ -738,7 +780,7 @@ export interface ResponseMonitorOptions {
     /** Text update callback */
     onProgress?: (text: string) => void;
     /** Generation complete callback. Meta.source indicates whether text is already Telegram HTML (structured) or plain (legacy). */
-    onComplete?: (finalText: string, meta?: { source: 'structured' | 'legacy' }) => void;
+    onComplete?: (finalText: string, meta?: { source: 'structured' | 'legacy'; choices?: string[] }) => void;
     /** Timeout callback */
     onTimeout?: (lastText: string) => void;
     /** Phase change callback */
@@ -764,7 +806,7 @@ export class ResponseMonitor {
     private readonly stopGoneConfirmCount: number;
     private readonly extractionMode: ExtractionMode;
     private readonly onProgress?: (text: string) => void;
-    private readonly onComplete?: (finalText: string, meta?: { source: 'structured' | 'legacy' }) => void;
+    private readonly onComplete?: (finalText: string, meta?: { source: 'structured' | 'legacy'; choices?: string[] }) => void;
     private readonly onTimeout?: (lastText: string) => void;
     private readonly onPhaseChange?: (phase: ResponsePhase, text: string | null) => void;
     private readonly onProcessLog?: (text: string) => void;
@@ -1248,7 +1290,15 @@ export class ResponseMonitor {
                         await this.stop();
                         try {
                             const source = this.lastExtractionSource ?? 'legacy';
-                            await Promise.resolve(this.onComplete?.(finalText, { source }));
+                            
+                            // Scan for choices/quick replies
+                            const choicesResult = await this.cdpService.call('Runtime.evaluate', this.buildEvaluateParams(RESPONSE_SELECTORS.CHOICES)).catch(() => null);
+                            const choices = choicesResult?.result?.value ?? undefined;
+                            if (choices && Array.isArray(choices) && choices.length > 0) {
+                                logger.info(`[ResponseMonitor] Choices detected: ${choices.join(', ')}`);
+                            }
+
+                            await Promise.resolve(this.onComplete?.(finalText, { source, choices }));
                         } catch (error) {
                             logger.error('[ResponseMonitor] complete callback failed:', error);
                         }

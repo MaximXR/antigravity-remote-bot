@@ -27,6 +27,7 @@ import { TitleGeneratorService } from '../services/titleGeneratorService';
 import { CdpService } from '../services/cdpService';
 import { ChatSessionService } from '../services/chatSessionService';
 import { ResponseMonitor, RESPONSE_SELECTORS } from '../services/responseMonitor';
+import { buildClickScript } from '../services/approvalDetector';
 import { ensureAntigravityRunning } from '../services/antigravityLauncher';
 import { getAntigravityCdpHint, isTitleMatch } from '../utils/pathUtils';
 import { CDP_PORTS } from '../utils/cdpPorts';
@@ -151,6 +152,7 @@ const userStopRequestedChannels = new Set<string>();
 const statusWindowPathCache = new Map<string, string>();
 const restoreWindowPathCache = new Map<string, string>();
 const promptSelectionSentChannels = new Set<string>();
+const lastChoicesCache = new Map<string, string[]>();
 
 // Interrupt state is managed by ../services/interruptState.ts
 // (addPendingInterrupt, drainPendingInterrupts, etc.)
@@ -788,14 +790,23 @@ async function sendPromptToAntigravity(
                     const completedBody = buildProgressBody();
                     await setProgressMessage(`<b>${PHASE_ICONS.complete} ${escapeHtml(modelLabel)} · ${elapsed}s</b>\n\n${completedBody}`, { expectedVersion: liveActivityUpdateVersion });
 
-                    const undoKeyboard = new InlineKeyboard().text('↩️ ' + t('Undo'), 'undo_last');
+                    const replyKeyboard = new InlineKeyboard();
+                    if (meta?.choices && meta.choices.length > 0) {
+                        const projectName = cdp.getCurrentWorkspaceName() || bridge.lastActiveWorkspace || 'default';
+                        lastChoicesCache.set(channelKey(channel), meta.choices);
+                        meta.choices.forEach((choice, idx) => {
+                            replyKeyboard.text(choice, `ai_choice:${projectName}:${idx}`);
+                            replyKeyboard.row();
+                        });
+                    }
+                    replyKeyboard.text('↩️ ' + t('Undo'), 'undo_last');
 
                     liveResponseUpdateVersion += 1;
                     if (finalOutputText && finalOutputText.trim().length > 0) {
                         const footer = `⏱️ ${elapsed}s`;
-                        await sendChunkedResponse('', footer, finalOutputText, isAlreadyHtml, undoKeyboard);
+                        await sendChunkedResponse('', footer, finalOutputText, isAlreadyHtml, replyKeyboard);
                     } else {
-                        await upsertLiveResponse(`${PHASE_ICONS.complete} Complete`, t('Failed to extract response. Use /screenshot to verify.'), `⏱️ ${elapsed}s`, { expectedVersion: liveResponseUpdateVersion, replyMarkup: undoKeyboard });
+                        await upsertLiveResponse(`${PHASE_ICONS.complete} Complete`, t('Failed to extract response. Use /screenshot to verify.'), `⏱️ ${elapsed}s`, { expectedVersion: liveResponseUpdateVersion, replyMarkup: replyKeyboard });
                     }
 
                     if (options) {
@@ -1441,14 +1452,23 @@ async function mirrorResponseToTelegram(
                     const completedBody = buildProgressBody();
                     await setProgressMessage(`<b>🧠 [${ideLabel}] · ${escapeHtml(modelLabel)} · ${elapsed}s</b>\n\n${completedBody}`, { expectedVersion: liveActivityUpdateVersion });
 
-                    const undoKeyboard = new InlineKeyboard().text('↩️ ' + t('Undo'), 'undo_last');
+                    const replyKeyboard = new InlineKeyboard();
+                    if (meta?.choices && meta.choices.length > 0) {
+                        const projectName = cdp.getCurrentWorkspaceName() || bridge.lastActiveWorkspace || 'default';
+                        lastChoicesCache.set(channelKey(channel), meta.choices);
+                        meta.choices.forEach((choice, idx) => {
+                            replyKeyboard.text(choice, `ai_choice:${projectName}:${idx}`);
+                            replyKeyboard.row();
+                        });
+                    }
+                    replyKeyboard.text('↩️ ' + t('Undo'), 'undo_last');
 
                     liveResponseUpdateVersion += 1;
                     if (finalOutputText && finalOutputText.trim().length > 0) {
                         const footer = `⏱️ ${elapsed}s`;
-                        await sendChunkedResponse('', footer, finalOutputText, isAlreadyHtml, undoKeyboard);
+                        await sendChunkedResponse('', footer, finalOutputText, isAlreadyHtml, replyKeyboard);
                     } else {
-                        await upsertLiveResponse(`${PHASE_ICONS.complete} Complete`, t('Failed to extract response. Use /screenshot to verify.'), `⏱️ ${elapsed}s`, { expectedVersion: liveResponseUpdateVersion, replyMarkup: undoKeyboard });
+                        await upsertLiveResponse(`${PHASE_ICONS.complete} Complete`, t('Failed to extract response. Use /screenshot to verify.'), `⏱️ ${elapsed}s`, { expectedVersion: liveResponseUpdateVersion, replyMarkup: replyKeyboard });
                     }
                     logger.info(`[mirror] Response successfully mirrored to Telegram`);
 
@@ -3682,7 +3702,59 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             try { await ctx.editMessageText(`✅ Cleanup complete — ${processed} session(s) ${action}.`); } catch (e) { logger.debug('[editMsg] Telegram edit failed (expected for unmodified):', e); }
             await ctx.answerCallbackQuery({ text: `${processed} session(s) ${action}` });
             return;
-        }        // Mirror all windows settings callback
+        }
+
+        // AI interactive choices callback
+        if (data.startsWith('ai_choice:')) {
+            const parts = data.split(':');
+            const projectName = parts[1];
+            const idx = parseInt(parts[2], 10);
+            const chKey = channelKey(ch);
+            const choices = lastChoicesCache.get(chKey);
+
+            if (choices && idx >= 0 && idx < choices.length) {
+                const choiceText = choices[idx];
+                const cdp = bridge.pool.getConnected(projectName) ?? getCurrentCdp(bridge);
+                if (cdp) {
+                    const clicked = await cdp.call('Runtime.evaluate', {
+                        expression: buildClickScript(choiceText),
+                        returnByValue: true,
+                    }).catch(() => null);
+
+                    const ok = clicked?.result?.value?.ok === true;
+                    if (ok) {
+                        await ctx.answerCallbackQuery({ text: `Selected: ${choiceText}` });
+                        try {
+                            await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+                        } catch (e) {
+                            logger.debug('[Choices] Reply markup edit failed:', e);
+                        }
+                        
+                        if (!promptDispatcher.isBusy(ch, cdp)) {
+                            logger.info(`[ChoicesCallback] Starting passive monitoring for workspace ${projectName}`);
+                            const mirrorPromise = mirrorResponseToTelegram(bridge, ch, cdp, `Choice "${choiceText}"`, {
+                                chatSessionService,
+                                chatSessionRepo,
+                                topicManager,
+                                titleGenerator,
+                                modelService,
+                                workspaceBindingRepo
+                            });
+                            promptDispatcher.acquireLock(ch, cdp, mirrorPromise);
+                        }
+                    } else {
+                        await ctx.answerCallbackQuery({ text: 'Option not found in IDE. Please try again.' });
+                    }
+                } else {
+                    await ctx.answerCallbackQuery({ text: 'Workspace connection not active.' });
+                }
+            } else {
+                await ctx.answerCallbackQuery({ text: 'Choices cache expired.' });
+            }
+            return;
+        }
+
+        // Mirror all windows settings callback
         if (data.startsWith('mirror_all:')) {
             const action = data.replace('mirror_all:', '');
             const enable = action === 'on';

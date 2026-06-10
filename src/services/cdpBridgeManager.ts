@@ -249,6 +249,75 @@ async function sendTelegramMessage(
     }
 }
 
+interface DeferredApproval {
+    info: ApprovalInfo;
+    isAutoApproved: boolean;
+}
+const deferredFileApprovals = new Map<string, DeferredApproval>();
+
+export async function flushDeferredApproval(
+    bridge: CdpBridge,
+    projectName: string,
+    cdp: CdpService,
+): Promise<void> {
+    const deferred = deferredFileApprovals.get(projectName);
+    if (!deferred) return;
+
+    deferredFileApprovals.delete(projectName);
+    const { info, isAutoApproved } = deferred;
+
+    const currentChatTitle = await getCurrentChatTitle(cdp);
+    const targetChannel = resolveApprovalChannelForCurrentChat(bridge, projectName, currentChatTitle);
+
+    if (!targetChannel || !bridge.botApi) {
+        logger.warn(`[ApprovalDetector:${projectName}] flushDeferredApproval skipped — no channel`);
+        return;
+    }
+
+    if (isAutoApproved) {
+        const text = `✅ <b>Auto-approved (File Edits)</b>\nFile changes were automatically approved during generation.\n<b>Workspace:</b> ${escapeHtml(projectName)}`;
+        await sendTelegramMessage(bridge.botApi, targetChannel, text);
+    } else {
+        const targetChannelStr = targetChannel.threadId ? String(targetChannel.threadId) : String(targetChannel.chatId);
+        
+        let text = `🔔 <b>Approval Required</b>\n\n`;
+        if (info.description) text += `${escapeHtml(info.description)}\n\n`;
+        text += `<b>Approve:</b> ${escapeHtml(info.approveText)}\n`;
+        if (info.alwaysAllowText) text += `<b>Always:</b> ${escapeHtml(info.alwaysAllowText)}\n`;
+        text += `<b>Deny:</b> ${escapeHtml(info.denyText || '(None)')}\n`;
+        text += `<b>Workspace:</b> ${escapeHtml(projectName)}`;
+
+        const approveLabel = info.approveText.replace(/[⌃⌥⇧⏎⌘\u2318\u2325\u21B5]+/g, '').trim() || 'Allow';
+        const denyLabel = info.denyText || 'Deny';
+        const keyboard = new InlineKeyboard()
+            .text(`✅ ${approveLabel}`, buildApprovalCustomId('approve', projectName, targetChannelStr));
+        if (info.alwaysAllowText) {
+            keyboard.text('✅ Allow Chat', buildApprovalCustomId('always_allow', projectName, targetChannelStr));
+        }
+        keyboard.text(`❌ ${denyLabel}`, buildApprovalCustomId('deny', projectName, targetChannelStr));
+
+        const msgId = await sendTelegramMessage(bridge.botApi, targetChannel, text, keyboard);
+        if (msgId) {
+            const key = `${info.approveText}::${info.description}`;
+            const db = (bridge as any).db;
+            if (db) {
+                try {
+                    db.prepare(`
+                        INSERT INTO active_approvals (project_name, approval_key, message_id, chat_id)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(project_name) DO UPDATE SET
+                            approval_key = excluded.approval_key,
+                            message_id = excluded.message_id,
+                            chat_id = excluded.chat_id
+                    `).run(projectName, key, msgId, String(targetChannel.chatId));
+                } catch (err) {
+                    logger.error('[ApprovalDetector] Failed to save active approval to DB:', err);
+                }
+            }
+        }
+    }
+}
+
 export function ensureApprovalDetector(
     bridge: CdpBridge,
     cdp: CdpService,
@@ -316,6 +385,33 @@ export function ensureApprovalDetector(
                 return;
             }
 
+            const approvalType = classifyApproval(info);
+            const isGenerating = cdp.isCurrentlyGenerating() || !!info.isGenerating;
+
+            if (approvalType === 'file_edits') {
+                if (isGenerating) {
+                    if (bridge.autoAccept.isCategoryEnabled(approvalType)) {
+                        const accepted = await detector.alwaysAllowButton() || await detector.approveButton();
+                        logger.debug(`[ApprovalDetector:${projectName}] Auto-approved file edit during active generation: ${accepted}`);
+                        
+                        deferredFileApprovals.set(projectName, {
+                            info: {
+                                ...info,
+                                description: `Auto-approved changes in files (generating...)`
+                            },
+                            isAutoApproved: true
+                        });
+                        return;
+                    }
+
+                    logger.debug(`[ApprovalDetector:${projectName}] Deferring file approval card (generating): ${info.description}`);
+                    deferredFileApprovals.set(projectName, { info, isAutoApproved: false });
+                    return;
+                } else {
+                    deferredFileApprovals.delete(projectName);
+                }
+            }
+
             const targetChannelStr = targetChannel.threadId ? String(targetChannel.threadId) : String(targetChannel.chatId);
             const key = `${info.approveText}::${info.description}`;
 
@@ -348,7 +444,6 @@ export function ensureApprovalDetector(
                 }
             }
 
-            const approvalType = classifyApproval(info);
             if (bridge.autoAccept.isCategoryEnabled(approvalType)) {
                 const accepted = await detector.alwaysAllowButton() || await detector.approveButton();
                 const categoryLabel = t(approvalType);
@@ -398,6 +493,15 @@ export function ensureApprovalDetector(
             }
         },
     });
+
+    if ((cdp as any)._deferredFlushListener) {
+        cdp.removeListener('response-monitor:stop', (cdp as any)._deferredFlushListener);
+    }
+    const stopHandler = async () => {
+        await flushDeferredApproval(bridge, projectName, cdp);
+    };
+    (cdp as any)._deferredFlushListener = stopHandler;
+    cdp.on('response-monitor:stop', stopHandler);
 
     detector.start();
     bridge.pool.registerApprovalDetector(projectName, detector);

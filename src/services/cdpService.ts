@@ -85,6 +85,7 @@ export class CdpService extends EventEmitter {
     private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
     /** Timestamp of last pong received */
     private lastPongTime: number = 0;
+    private isGeneratingResponse: boolean = false;
 
     constructor(options: CdpServiceOptions = {}) {
         super();
@@ -92,6 +93,19 @@ export class CdpService extends EventEmitter {
         if (options.cdpCallTimeout) this.cdpCallTimeout = options.cdpCallTimeout;
         this.maxReconnectAttempts = options.maxReconnectAttempts ?? 3;
         this.reconnectDelayMs = options.reconnectDelayMs ?? 2000;
+
+        // Auto-track LLM response generation states
+        this.on('response-monitor:start', () => {
+            this.isGeneratingResponse = true;
+        });
+        this.on('response-monitor:stop', () => {
+            this.isGeneratingResponse = false;
+        });
+    }
+
+    /** Check if LLM response generation is currently active */
+    isCurrentlyGenerating(): boolean {
+        return this.isGeneratingResponse;
     }
 
     private async getJson(url: string): Promise<any[]> {

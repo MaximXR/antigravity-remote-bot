@@ -11,6 +11,8 @@ export interface ApprovalInfo {
     denyText: string;
     /** Action description (e.g. "write to file.ts") */
     description: string;
+    /** Whether LLM response generation is currently active */
+    isGenerating?: boolean;
 }
 
 export type ApprovalType = 'file_edits' | 'console_commands' | 'read_access' | 'url_access' | 'other_requests';
@@ -241,7 +243,23 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
         if (ariaLabel) description = ariaLabel;
     }
 
-    return { approveText, alwaysAllowText, denyText, description };
+    let isGenerating = false;
+    const stopEl = scope.querySelector('[data-tooltip-id="input-send-button-cancel-tooltip"]');
+    if (stopEl) {
+        isGenerating = true;
+    } else {
+        const stopPatterns = ['stop', 'stop generating', '停止', '生成を停止'];
+        const buttons = Array.from(scope.querySelectorAll('button, [role="button"]'));
+        for (const btn of buttons) {
+            const t = (btn.textContent || '').trim().toLowerCase();
+            if (stopPatterns.some(p => t === p || t.includes(p))) {
+                isGenerating = true;
+                break;
+            }
+        }
+    }
+
+    return { approveText, alwaysAllowText, denyText, description, isGenerating };
 })()`;
 
 /**
