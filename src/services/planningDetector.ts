@@ -1,6 +1,9 @@
 import { logger } from '../utils/logger';
 import { buildClickScript } from './approvalDetector';
 import { CdpService } from './cdpService';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 /** Planning mode button information */
 export interface PlanningInfo {
@@ -625,6 +628,77 @@ export class PlanningDetector {
     }
 
     /**
+     * Helper to find and read the latest artifact file matching filename from local disk.
+     */
+    private async findLatestArtifactFile(filename: string): Promise<string | null> {
+        const geminiDir = path.join(os.homedir(), '.gemini');
+        if (!fs.existsSync(geminiDir)) return null;
+
+        let latestFile: string | null = null;
+        let latestMtime = 0;
+        const maxAgeMs = 15 * 60 * 1000; // 15 minutes
+        const now = Date.now();
+
+        // Standard candidates for files Cascade can create
+        const baseName = filename.toLowerCase().trim();
+        const candidates = new Set([
+            baseName,
+            baseName + '.md',
+            baseName.replace(/[\s_]+/g, '_') + '.md',
+            baseName.replace(/[\s_-]+/g, '-') + '.md'
+        ]);
+
+        const searchDirs = [
+            path.join(geminiDir, 'antigravity-ide', 'brain'),
+            path.join(geminiDir, 'antigravity', 'brain'),
+            path.join(geminiDir, 'brain')
+        ];
+
+        const scanDir = (dir: string) => {
+            if (!fs.existsSync(dir)) return;
+            try {
+                const files = fs.readdirSync(dir);
+                for (const file of files) {
+                    const fullPath = path.join(dir, file);
+                    const stat = fs.statSync(fullPath);
+                    if (stat.isDirectory()) {
+                        // Recursively scan session folders (e.g. d896345e-...)
+                        const subFiles = fs.readdirSync(fullPath);
+                        for (const subFile of subFiles) {
+                            const subNorm = subFile.toLowerCase().trim();
+                            if (candidates.has(subNorm)) {
+                                const subFullPath = path.join(fullPath, subFile);
+                                const subStat = fs.statSync(subFullPath);
+                                const age = now - subStat.mtimeMs;
+                                if (age < maxAgeMs && subStat.mtimeMs > latestMtime) {
+                                    latestMtime = subStat.mtimeMs;
+                                    latestFile = subFullPath;
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                logger.error(`[PlanningDetector] Error scanning dir ${dir}:`, e);
+            }
+        };
+
+        for (const dir of searchDirs) {
+            scanDir(dir);
+        }
+
+        if (latestFile) {
+            try {
+                logger.info(`[PlanningDetector] Found matching artifact file on disk: ${latestFile}`);
+                return fs.readFileSync(latestFile, 'utf8');
+            } catch (e) {
+                logger.error(`[PlanningDetector] Error reading file ${latestFile}:`, e);
+            }
+        }
+        return null;
+    }
+
+    /**
      * Extract plan content from the DOM after Open has been clicked.
      * @returns Plan content text or null if not found
      */
@@ -632,6 +706,21 @@ export class PlanningDetector {
         try {
             const script = buildExtractPlanContentScript(this.baselineNotifyCount, this.baselineCardCount);
             const result = await this.runEvaluateScript(script);
+            
+            if (typeof result === 'string' && result.trim().length > 50) {
+                return result;
+            }
+
+            // Fallback: if DOM extraction didn't yield enough content, try to read from disk
+            const planTitle = this.lastDetectedInfo?.planTitle;
+            if (planTitle) {
+                logger.debug(`[PlanningDetector] DOM extraction returned empty/short result. Trying filesystem fallback for "${planTitle}"...`);
+                const fsContent = await this.findLatestArtifactFile(planTitle);
+                if (fsContent) {
+                    return fsContent;
+                }
+            }
+
             return typeof result === 'string' ? result : null;
         } catch (error) {
             logger.error('[PlanningDetector] Error extracting plan content:', error);
