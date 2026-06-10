@@ -4291,7 +4291,10 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     { command: 'history', description: t('Load history of the active session') },
                     { command: 'screenshot', description: t('Capture Antigravity screen') },
                     { command: 'stop', description: t('Interrupt active generation') },
-                    { command: 'mirror_all', description: t('Toggle mirroring from all windows') },
+                    { command: 'mirror', description: t('Set Mirror Mode') },
+                    { command: 'autoaccept', description: t('Toggle auto-approve mode') },
+                    { command: 'mode', description: t('Change execution mode') },
+                    { command: 'model', description: t('Change LLM model') },
                     { command: 'help', description: t('Show all commands') },
                 ]);
                 logger.info('Telegram command menu registered successfully');
