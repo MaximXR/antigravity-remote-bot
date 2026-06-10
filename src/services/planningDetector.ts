@@ -49,7 +49,7 @@ export interface PlanningDetectorOptions {
  * elements. Prior selector was broken because of this false requirement.
  */
 const ARTIFACT_CHIP_SELECTOR =
-    'div[class*="border-gray-500"][class*="select-none"]';
+    'div.artifact-card, div[class*="artifact-card"], div[class*="border-gray-500"][class*="select-none"]';
 
 /**
  * Baseline capture script — returns counts of existing artifacts in the DOM.
