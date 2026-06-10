@@ -1859,7 +1859,6 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             `/template_delete — ` + t('Delete a template') + `\n\n` +
             `<b>🔧 ` + t('System') + `</b>\n` +
             `/status — ` + t('Bot status overview') + `\n` +
-            `/autoaccept — ` + t('Toggle auto-approve mode') + `\n` +
             `/cleanup — ` + t('Clean up inactive sessions') + `\n` +
             `/ping — ` + t('Check latency') + `\n\n` +
             `<i>` + t('Text messages are sent directly to Antigravity') + `</i>`
