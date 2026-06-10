@@ -12,4 +12,4 @@ rem что позволяет фоновому процессу завершит
 rem ============================================================================
 
 call start_ide.bat
-node dist/bin/cli.js start
+node dist/bin/cli.js start >> bot_run.log 2>&1

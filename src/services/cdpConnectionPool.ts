@@ -51,7 +51,7 @@ export class CdpConnectionPool extends EventEmitter {
             if (existing.isConnected()) {
                 try {
                     // Re-validate that the still-open window is actually bound to this workspace.
-                    await existing.discoverAndConnectForWorkspace(workspacePath, true, openInNewWindow, targetPort, allowLaunch);
+                    await existing.discoverAndConnectForWorkspace(workspacePath, false, openInNewWindow, targetPort, allowLaunch);
                     return existing;
                 } catch {
                     // Connection dropped during re-validation; close WebSocket and clean up
@@ -93,6 +93,19 @@ export class CdpConnectionPool extends EventEmitter {
         }
         return null;
     }
+
+    /**
+     * Get the workspace path for a connected service by its WebSocket URL.
+     */
+    getWorkspacePathByWebSocketUrl(wsUrl: string): string | null {
+        for (const cdp of this.connections.values()) {
+            if (cdp.isConnected() && cdp.getTargetUrl() === wsUrl) {
+                return cdp.getCurrentWorkspacePath();
+            }
+        }
+        return null;
+    }
+
 
     /**
      * Disconnect the specified workspace.

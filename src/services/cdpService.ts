@@ -329,6 +329,14 @@ export class CdpService extends EventEmitter {
     }
 
     /**
+     * Return the WebSocket debugger URL.
+     */
+    getTargetUrl(): string | null {
+        return this.targetUrl;
+    }
+
+
+    /**
      * Discover and connect to the workbench page for the specified workspace.
      * Does nothing if already connected to the correct page.
      *

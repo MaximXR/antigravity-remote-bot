@@ -20,6 +20,10 @@ export interface PlanningInfo {
      * buttons and must NOT call clickOpenButton() since there is nothing to click.
      */
     fileRefMode?: boolean;
+    /**
+     * True when the card itself is the click target for Open, rather than an internal button.
+     */
+    openOnCard?: boolean;
 }
 
 export interface PlanningDetectorOptions {
@@ -75,6 +79,7 @@ const CAPTURE_BASELINE_SCRIPT = `(() => {
  */
 const buildDetectPlanningScript = (
     lastClickedText: string | null,
+    autoOpenedChips: string[],
     baselineNotifyCount: number,
     baselineCardCount: number,
     baselineIconCount: number,
@@ -87,6 +92,7 @@ const buildDetectPlanningScript = (
      */
     const PLAN_TYPE_KEYWORDS = ['implementation plan', 'implementation_plan', 'plan', 'walkthrough', 'task'];
     const lastClickedText = ${lastClickedText ? JSON.stringify(lastClickedText) : 'null'};
+    const AUTO_OPENED_CHIPS = ${JSON.stringify(autoOpenedChips)};
     const BASELINE_NOTIFY = ${baselineNotifyCount};
     const BASELINE_CARD = ${baselineCardCount};
     const BASELINE_ICON = ${baselineIconCount};
@@ -99,6 +105,7 @@ const buildDetectPlanningScript = (
     let container = newContainers.length > 0 ? newContainers[newContainers.length - 1] : null;
     let openBtn = null;
     let proceedBtn = null;
+    let openOnCard = false;
 
     if (container) {
         const allButtons = Array.from(container.querySelectorAll('button')).filter(btn => btn.offsetParent !== null);
@@ -137,10 +144,11 @@ const buildDetectPlanningScript = (
             const cardText = (card.textContent || '').trim();
             if (!cardText || cardText.length > 500) continue;
 
-            // Check if card is EXPANDED (has Open/Proceed buttons inside)
-            const buttons = Array.from(card.querySelectorAll('button'))
+            // Check if card is EXPANDED (has Open/Proceed buttons inside or nearby parent)
+            const parent = card.parentElement || card;
+            const buttons = Array.from(parent.querySelectorAll('button'))
                 .filter(btn => btn.offsetParent !== null);
-            const ob = buttons.find(btn => {
+            let ob = buttons.find(btn => {
                 const t = normalize(btn.textContent);
                 return OPEN_PATTERNS.some(p => t === p || t.includes(p));
             });
@@ -148,6 +156,12 @@ const buildDetectPlanningScript = (
                 const t = normalize(btn.textContent);
                 return PROCEED_PATTERNS.some(p => t === p || t.includes(p));
             });
+
+            // Check if this card itself has the artifact-card class and acts as its own open button
+            if (!ob && (card.classList.contains('artifact-card') || card.querySelector('.artifact-card') || card.getAttribute('class')?.includes('artifact-card'))) {
+                ob = card;
+                openOnCard = true;
+            }
 
             if (ob) {
                 if (!pb) {
@@ -173,8 +187,18 @@ const buildDetectPlanningScript = (
                         .map(s => (s.textContent || '').trim())
                         .filter(t => t.length > 0 && t.length < 60
                             && !OPEN_PATTERNS.some(p => normalize(t) === p || normalize(t).includes(p)));
-                    ob.click();
-                    return { autoOpened: true, chipText: nameSpans[0] || 'Artifact' };
+                    
+                    const chipText = nameSpans[0] || 'Artifact';
+                    if (AUTO_OPENED_CHIPS.includes(chipText)) {
+                        continue;
+                    }
+                    
+                    if (openOnCard) {
+                        card.click();
+                    } else {
+                        ob.click();
+                    }
+                    return { autoOpened: true, chipText };
                 }
                 // Has both Open AND Proceed — needs user decision
                 openBtn = ob;
@@ -249,7 +273,7 @@ const buildDetectPlanningScript = (
         }
     }
 
-    const openText = (openBtn.textContent || '').trim();
+    const openText = openOnCard ? 'Open' : (openBtn.textContent || '').trim();
     const proceedText = proceedBtn ? (proceedBtn.textContent || '').trim() : null;
 
     // Extract plan title from .inline-flex.break-all or .font-mono
@@ -259,6 +283,21 @@ const buildDetectPlanningScript = (
     if (!planTitle && openText) {
         const match = openText.match(/open\\s+(.*)/i);
         if (match) planTitle = match[1].trim();
+    }
+
+    if (!planTitle) {
+        const possibleTitleEl = container.querySelector('[class*="title"], [class*="name"], span');
+        if (possibleTitleEl) {
+            planTitle = (possibleTitleEl.textContent || '').trim();
+        }
+    }
+
+    if (!planTitle) {
+        planTitle = (container.textContent || '').split('\\n')[0].trim().slice(0, 60);
+    }
+
+    if (planTitle.length > 100) {
+        planTitle = planTitle.slice(0, 100) + '...';
     }
 
     // Extract plan summary from span.text-sm (excluding buttons text)
@@ -297,7 +336,7 @@ const buildDetectPlanningScript = (
         description = strippedParts.reduce((t, s) => t.replace(s, ''), fullText).replace(/\\s+/g, ' ').trim();
     }
 
-    return { openText, proceedText, planTitle, planSummary, description };
+    return { openText, proceedText, planTitle, planSummary, description, openOnCard };
 })()`;
 
 /**
@@ -429,6 +468,8 @@ export class PlanningDetector {
     
     /** Click-guard state to prevent infinite auto-click loops on collapsed cards */
     private lastClickedChip: { text: string; at: number } | null = null;
+    /** Set of already auto-opened artifact texts to prevent infinite loops */
+    private autoOpenedChips = new Set<string>();
 
     /**
      * Baseline artifact counts captured when monitoring starts.
@@ -460,6 +501,7 @@ export class PlanningDetector {
         this.lastDetectedInfo = null;
         this.lastNotifiedAt = 0;
         this.lastClickedChip = null;
+        this.autoOpenedChips.clear();
         // Capture baseline before the first poll — runs async but schedules
         // the first poll only after the baseline is safely captured.
         this.resetBaseline().finally(() => {
@@ -483,6 +525,7 @@ export class PlanningDetector {
             this.lastDetectedInfo = null;
             this.lastNotifiedAt = 0;
             this.lastClickedChip = null;
+            this.autoOpenedChips.clear();
             logger.debug(
                 `[PlanningDetector] Baseline captured: ${this.baselineNotifyCount} notify containers, ` +
                 `${this.baselineCardCount} chips, ${this.baselineIconCount} plan icons`,
@@ -528,6 +571,28 @@ export class PlanningDetector {
      * @returns true if click succeeded
      */
     async clickOpenButton(buttonText?: string): Promise<boolean> {
+        if (this.lastDetectedInfo?.openOnCard) {
+            const planTitle = this.lastDetectedInfo.planTitle;
+            logger.debug(`[PlanningDetector] Clicking artifact card for plan "${planTitle}" as Open target`);
+            const script = `(() => {
+                const title = ${JSON.stringify(planTitle)};
+                const normalizedTitle = title.toLowerCase().trim();
+                const cards = Array.from(document.querySelectorAll('div.artifact-card, div[class*="artifact-card"]'));
+                const targetCard = cards.find(card => (card.textContent || '').toLowerCase().includes(normalizedTitle));
+                if (targetCard) {
+                    targetCard.click();
+                    return { ok: true };
+                }
+                return { ok: false, error: 'Artifact card not found for title: ' + title };
+            })()`;
+            try {
+                const result = await this.runEvaluateScript(script);
+                return result?.ok === true;
+            } catch (error) {
+                logger.error('[PlanningDetector] Error while clicking card:', error);
+                return false;
+            }
+        }
         const text = buttonText ?? this.lastDetectedInfo?.openText ?? 'Open';
         return this.clickButton(text);
     }
@@ -585,6 +650,7 @@ export class PlanningDetector {
             const callParams: Record<string, unknown> = {
                 expression: buildDetectPlanningScript(
                     this.lastClickedChip?.text || null,
+                    Array.from(this.autoOpenedChips),
                     this.baselineNotifyCount,
                     this.baselineCardCount,
                     this.baselineIconCount,
@@ -611,9 +677,11 @@ export class PlanningDetector {
             if (payload && payload.autoOpened) {
                 // Read-only artifact (Walkthrough, Task) was auto-opened — send lightweight notification
                 this.lastClickedChip = null;
-                logger.info(`[PlanningDetector] Auto-opened read-only artifact: "${payload.chipText}"`);
+                const chipText = payload.chipText;
+                this.autoOpenedChips.add(chipText);
+                logger.info(`[PlanningDetector] Auto-opened read-only artifact: "${chipText}"`);
                 if (this.onAutoOpened) {
-                    Promise.resolve(this.onAutoOpened(payload.chipText)).catch((err) => {
+                    Promise.resolve(this.onAutoOpened(chipText)).catch((err) => {
                         logger.error('[PlanningDetector] onAutoOpened callback failed:', err);
                     });
                 }

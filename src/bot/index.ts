@@ -1957,7 +1957,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 try { ws.close(); } catch {}
             };
 
-            const timeout = setTimeout(cleanup, 800);
+            const timeout = setTimeout(cleanup, 2000);
 
             ws.on('open', () => {
                 if (resolved) return;
@@ -2029,7 +2029,14 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         let workspacePath: string | null = null;
                         let matchedWorkspace: RecentWorkspace | null = null;
 
-                        const cdpInfo = await queryWorkspacePath(page.webSocketDebuggerUrl);
+                        // Reuse already connected cdp service path to avoid CDP evaluation lag/hangs
+                        const existingPath = bridge.pool.getWorkspacePathByWebSocketUrl(page.webSocketDebuggerUrl);
+                        let cdpInfo = null;
+                        if (existingPath) {
+                            cdpInfo = { workspacePath: existingPath, workspaceId: null };
+                        } else {
+                            cdpInfo = await queryWorkspacePath(page.webSocketDebuggerUrl);
+                        }
                         if (cdpInfo && cdpInfo.workspacePath) {
                             workspacePath = cdpInfo.workspacePath;
                             const normPath = workspacePath.toLowerCase().replace(/\//g, '\\').trim();
