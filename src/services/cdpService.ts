@@ -1681,20 +1681,19 @@ export class CdpService extends EventEmitter {
             return null;
         }
         const expression = '(() => {'
-            + ' const uiNameMap = { fast: "Fast", plan: "Planning" };'
-            + ' const knownModes = Object.values(uiNameMap).map(n => n.toLowerCase());'
-            + ' const reverseMap = {};'
-            + ' Object.entries(uiNameMap).forEach(([k, v]) => { reverseMap[v.toLowerCase()] = k; });'
+            + ' const knownModes = ["fast", "planning", "agent", "plan"];'
             + ' const allBtns = Array.from(document.querySelectorAll("button"));'
             + ' const visibleBtns = allBtns.filter(b => b.offsetParent !== null);'
             + ' const modeToggleBtn = visibleBtns.find(b => {'
             + '   const text = (b.textContent || "").trim().toLowerCase();'
             + '   const hasChevron = b.querySelector("svg[class*=\\"chevron\\"]");'
-            + '   return knownModes.some(m => text === m) && hasChevron;'
+            + '   return knownModes.includes(text) && hasChevron;'
             + ' });'
             + ' if (!modeToggleBtn) return null;'
             + ' const currentModeText = (modeToggleBtn.textContent || "").trim().toLowerCase();'
-            + ' return reverseMap[currentModeText] || null;'
+            + ' if (currentModeText === "fast") return "fast";'
+            + ' if (["planning", "agent", "plan"].includes(currentModeText)) return "plan";'
+            + ' return null;'
             + '})()';
         try {
             const contextId = this.getPrimaryContextId();
@@ -1726,32 +1725,28 @@ export class CdpService extends EventEmitter {
 
         const safeMode = JSON.stringify(modeName);
 
-        // Internal mode name -> Antigravity UI display name mapping
-        const uiNameMap = JSON.stringify({ fast: 'Fast', plan: 'Planning' });
-
         // Build DOM manipulation script avoiding backticks in template literals
         const expression = '(async () => {'
             + ' const targetMode = ' + safeMode + ';'
             + ' const targetModeLower = targetMode.toLowerCase();'
-            + ' const uiNameMap = ' + uiNameMap + ';'
-            + ' const targetUiName = uiNameMap[targetModeLower] || targetMode;'
-            + ' const targetUiNameLower = targetUiName.toLowerCase();'
             + ' const allBtns = Array.from(document.querySelectorAll("button"));'
             + ' const visibleBtns = allBtns.filter(b => b.offsetParent !== null);'
-            // Step 1: Search for mode toggle button ("Fast"/"Planning" + chevron icon)
-            + ' const knownModes = Object.values(uiNameMap).map(n => n.toLowerCase());'
+            // Step 1: Search for mode toggle button ("Fast"/"Planning"/"Agent" + chevron icon)
+            + ' const knownModes = ["fast", "planning", "agent", "plan"];'
             + ' const modeToggleBtn = visibleBtns.find(b => {'
             + '   const text = (b.textContent || "").trim().toLowerCase();'
             + '   const hasChevron = b.querySelector("svg[class*=\\"chevron\\"]");'
-            + '   return knownModes.some(m => text === m) && hasChevron;'
+            + '   return knownModes.includes(text) && hasChevron;'
             + ' });'
             + ' if (!modeToggleBtn) {'
             + '   return { ok: false, error: "Mode toggle button not found" };'
             + ' }'
             + ' const currentModeText = (modeToggleBtn.textContent || "").trim().toLowerCase();'
             // Do nothing if already on the target mode
-            + ' if (currentModeText === targetUiNameLower) {'
-            + '   return { ok: true, mode: targetUiName, alreadySelected: true };'
+            + ' const isTargetAlreadySelected = (targetModeLower === "fast" && currentModeText === "fast") || '
+            + '                                 (targetModeLower === "plan" && ["planning", "agent", "plan"].includes(currentModeText));'
+            + ' if (isTargetAlreadySelected) {'
+            + '   return { ok: true, mode: currentModeText, alreadySelected: true };'
             + ' }'
             // Open dropdown
             + ' modeToggleBtn.click();'
@@ -1767,10 +1762,10 @@ export class CdpService extends EventEmitter {
             + '   const fontMediumEls = Array.from(visibleDialog.querySelectorAll(".font-medium"));'
             + '   const matchEl = fontMediumEls.find(el => {'
             + '     const text = (el.textContent || "").trim().toLowerCase();'
-            + '     return text === targetUiNameLower;'
+            + '     if (targetModeLower === "fast") return text === "fast";'
+            + '     return ["planning", "agent", "plan"].includes(text);'
             + '   });'
             + '   if (matchEl) {'
-            // Target the clickable parent (div.cursor-pointer in legacy; may be <button> in v1.21.6+)
             + '     modeOption = matchEl.closest("div.cursor-pointer") || matchEl.parentElement;'
             + '   }'
             + ' }'
@@ -1784,7 +1779,8 @@ export class CdpService extends EventEmitter {
             + '     const fm = el.querySelector(".font-medium");'
             + '     if (fm) {'
             + '       const text = (fm.textContent || "").trim().toLowerCase();'
-            + '       return text === targetUiNameLower;'
+            + '       if (targetModeLower === "fast") return text === "fast";'
+            + '       return ["planning", "agent", "plan"].includes(text);'
             + '     }'
             + '     return false;'
             + '   });'
@@ -1795,14 +1791,14 @@ export class CdpService extends EventEmitter {
             // Verify: check if mode button text has changed
             + '   const updBtn = Array.from(document.querySelectorAll("button"))'
             + '     .filter(b => b.offsetParent !== null)'
-            + '     .find(b => b.querySelector("svg[class*=\\"chevron\\"]") && knownModes.some(m => (b.textContent || "").trim().toLowerCase() === m));'
+            + '     .find(b => b.querySelector("svg[class*=\\"chevron\\"]") && knownModes.includes((b.textContent || "").trim().toLowerCase()));'
             + '   const newMode = updBtn ? (updBtn.textContent || "").trim() : "unknown";'
             + '   return { ok: true, mode: newMode };'
             + ' }'
             // Failed -> close dropdown
             + ' document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));'
             + ' await new Promise(r => setTimeout(r, 200));'
-            + ' return { ok: false, error: "Mode option " + targetUiName + " not found in dropdown" };'
+            + ' return { ok: false, error: "Mode option for " + targetMode + " not found in dropdown" };'
             + '})()';
 
         try {
