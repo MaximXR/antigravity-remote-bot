@@ -1667,7 +1667,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 workspacePath = found.workspacePath;
             } else {
                 const recent = workspaceService.getRecentWorkspaces();
-                const matched = recent.find(w => w.name === projectName);
+                const matched = recent.find(w => bridge.pool.extractProjectName(w.path) === projectName);
                 if (matched) workspacePath = matched.path;
             }
         }
