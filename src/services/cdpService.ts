@@ -1902,6 +1902,16 @@ export class CdpService extends EventEmitter {
         }
 
         const expression = `(async () => {
+            const findModelBtn = (scope) => {
+                const btns = Array.from(scope.querySelectorAll('button'));
+                let b = btns.find(x => (x.getAttribute('aria-label') || '').toLowerCase().includes('select model'));
+                if (!b) b = btns.find(x => {
+                    const text = (x.textContent || '').trim();
+                    return !/\\.[a-zA-Z0-9]+$/.test(text) && /^(?:Gemini|Claude|GPT-OSS)/i.test(text);
+                });
+                return b;
+            };
+
             const getItems = () => Array.from(document.querySelectorAll('button, div'))
                 .filter(e => e.className.includes('px-2 py-1') && e.className.includes('w-full') && e.className.includes('items-center') && e.className.includes('justify-between'));
 
@@ -1909,10 +1919,7 @@ export class CdpService extends EventEmitter {
             let items = getItems();
             if (items.length === 0) {
                 const panel = document.querySelector('.antigravity-agent-side-panel') || document;
-                const btn = Array.from(panel.querySelectorAll('button')).find(b => {
-                    const text = (b.textContent || '').trim();
-                    return /^(?:Gemini|Claude|GPT-OSS)/i.test(text);
-                });
+                const btn = findModelBtn(panel);
                 if (btn) {
                     btn.click();
                     await new Promise(r => setTimeout(r, 200));
@@ -1925,10 +1932,7 @@ export class CdpService extends EventEmitter {
 
             if (opened) {
                 const panel = document.querySelector('.antigravity-agent-side-panel') || document;
-                const btn = Array.from(panel.querySelectorAll('button')).find(b => {
-                    const text = (b.textContent || '').trim();
-                    return /^(?:Gemini|Claude|GPT-OSS)/i.test(text);
-                });
+                const btn = findModelBtn(panel);
                 if (btn) btn.click();
             }
             return result;
@@ -1964,9 +1968,11 @@ export class CdpService extends EventEmitter {
         }
         const expression = `(() => {
             const panel = document.querySelector('.antigravity-agent-side-panel') || document;
-            const btn = Array.from(panel.querySelectorAll('button')).find(b => {
-                const text = (b.textContent || '').trim();
-                return /^(?:Gemini|Claude|GPT-OSS)/i.test(text);
+            const btns = Array.from(panel.querySelectorAll('button'));
+            let btn = btns.find(x => (x.getAttribute('aria-label') || '').toLowerCase().includes('select model'));
+            if (!btn) btn = btns.find(x => {
+                const text = (x.textContent || '').trim();
+                return !/\\.[a-zA-Z0-9]+$/.test(text) && /^(?:Gemini|Claude|GPT-OSS)/i.test(text);
             });
             return btn ? (btn.textContent || '').trim().replace(/New$/, '').trim() : null;
         })()`;
@@ -1997,6 +2003,16 @@ export class CdpService extends EventEmitter {
         const expression = `(async () => {
             const targetModel = ${safeModel};
 
+            const findModelBtn = (scope) => {
+                const btns = Array.from(scope.querySelectorAll('button'));
+                let b = btns.find(x => (x.getAttribute('aria-label') || '').toLowerCase().includes('select model'));
+                if (!b) b = btns.find(x => {
+                    const text = (x.textContent || '').trim();
+                    return !/\\.[a-zA-Z0-9]+$/.test(text) && /^(?:Gemini|Claude|GPT-OSS)/i.test(text);
+                });
+                return b;
+            };
+
             const getItems = () => Array.from(document.querySelectorAll('button, div'))
                 .filter(e => e.className.includes('px-2 py-1') && e.className.includes('w-full') && e.className.includes('items-center') && e.className.includes('justify-between'));
 
@@ -2004,10 +2020,7 @@ export class CdpService extends EventEmitter {
             let opened = false;
             if (modelItems.length === 0) {
                 const panel = document.querySelector('.antigravity-agent-side-panel') || document;
-                const btn = Array.from(panel.querySelectorAll('button')).find(b => {
-                    const text = (b.textContent || '').trim();
-                    return /^(?:Gemini|Claude|GPT-OSS)/i.test(text);
-                });
+                const btn = findModelBtn(panel);
                 if (btn) {
                     btn.click();
                     await new Promise(r => setTimeout(r, 250));
@@ -2029,10 +2042,7 @@ export class CdpService extends EventEmitter {
                 // Close the dropdown if we opened it and didn't find the model
                 if (opened) {
                     const panel = document.querySelector('.antigravity-agent-side-panel') || document;
-                    const btn = Array.from(panel.querySelectorAll('button')).find(b => {
-                        const text = (b.textContent || '').trim();
-                        return /^(?:Gemini|Claude|GPT-OSS)/i.test(text);
-                    });
+                    const btn = findModelBtn(panel);
                     if (btn) btn.click();
                 }
                 const available = modelItems.map(el => (el.textContent || '').trim().replace(/New$/, '').trim()).join(', ');

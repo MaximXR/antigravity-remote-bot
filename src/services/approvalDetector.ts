@@ -50,7 +50,13 @@ export function classifyApproval(info: ApprovalInfo): ApprovalType {
         desc.includes('save file') ||
         desc.includes('change file') ||
         desc.includes('write') ||
-        desc.includes('edit')
+        desc.includes('edit') ||
+        desc.includes('changes') ||
+        desc.includes('file changes') ||
+        desc.includes('files changes') ||
+        desc.includes('file with changes') ||
+        desc.includes('files with changes') ||
+        /files? (?:with )?changes/i.test(desc)
     ) {
         return 'file_edits';
     }
