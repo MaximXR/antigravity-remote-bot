@@ -111,6 +111,7 @@ Test-NetConnection -Port 9333 -ComputerName localhost
 *   [CODE_OF_CONDUCT.md](../../CODE_OF_CONDUCT.md) — Кодекс поведения участников. Открывать при вопросах взаимодействия в сообществе.
 *   [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) — Подробное описание трехзвенной архитектуры проекта (CLI -> Bot -> Services/DB). Читать перед рефакторингом крупных модулей.
 *   [docs/ANTIGRAVITY_DOM_SELECTORS.md](../../docs/ANTIGRAVITY_DOM_SELECTORS.md) — Справочник селекторов DOM для взаимодействия с Antigravity. Читать при отладке или модификации CDP-кликов, кнопок Undo/Stop и текстовых полей.
+*   [docs/CHAT_SESSIONS_GUIDE.md](../../docs/CHAT_SESSIONS_GUIDE.md) — Руководство по управлению сессиями чата, истории, поиска и разрешению всплывающих окон Monaco/VS Code. Читать при разработке расширений или интеграций управления сессиями.
 *   [docs/RESPONSE_MONITOR.md](../../docs/RESPONSE_MONITOR.md) — Логика работы фонового мониторинга ответа (дублирующие потоки, детекторы, тайминги). Читать при изменении `responseMonitor.ts` или фильтрации вывода.
 *   [docs/dom-inspection-guide.md](../../docs/dom-inspection-guide.md) — Руководство по ручной и автоматической инспекции DOM. Читать при необходимости обновить или найти новые селекторы IDE.
 ```

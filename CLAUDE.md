@@ -62,6 +62,7 @@ Three-layer design: **CLI → Bot → Services/DB**
 - `docs/ARCHITECTURE.md` — System overview and design rationale
 - `docs/RESPONSE_MONITOR.md` — DOM polling strategy, dual output streams, scored selectors
 - `docs/ANTIGRAVITY_DOM_SELECTORS.md` — DOM selector reference (critical for CDP interaction code)
+- `docs/CHAT_SESSIONS_GUIDE.md` — Managing chat sessions, history panels, search inputs, and QuickPicks via CDP
 - `docs/dom-inspection-guide.md` — How to find new selectors
 
 ## Diagnostics & Scripts
