@@ -5,6 +5,7 @@ import path from 'path';
 import WebSocket from 'ws';
 // @ts-ignore
 import fetch from 'node-fetch';
+import * as fs from 'fs';
 
 import { t, initI18n, Language } from '../utils/i18n';
 import { logger } from '../utils/logger';
@@ -1965,7 +1966,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     });
 
     // Helper to query workspace path directly from a running IDE window via CDP
-    const queryWorkspacePath = async (wsUrl: string): Promise<{ workspacePath: string | null; workspaceId: string | null } | null> => {
+    const queryWorkspacePath = async (wsUrl: string): Promise<{ workspacePath: string | null; workspaceId: string | null; sessionInfo?: { title: string; hasActiveChat: boolean } | null } | null> => {
         return new Promise((resolve) => {
             const ws = new WebSocket(wsUrl);
             let resolved = false;
@@ -1987,14 +1988,34 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     method: 'Runtime.evaluate',
                     params: {
                         expression: `(async () => {
+                            let workspacePath = null;
+                            let workspaceId = null;
                             if (window.vscode && window.vscode.context) {
                                 const config = await window.vscode.context.resolveConfiguration();
-                                return {
-                                    workspacePath: config.workspace?.configPath?._fsPath || config.workspace?.uri?._fsPath || null,
-                                    workspaceId: config.workspace?.id || null
-                                };
+                                workspacePath = config.workspace?.configPath?._fsPath || config.workspace?.uri?._fsPath || null;
+                                workspaceId = config.workspace?.id || null;
                             }
-                            return null;
+                            
+                            let title = '';
+                            let hasActiveChat = false;
+                            const panel = document.querySelector('.antigravity-agent-side-panel');
+                            if (panel) {
+                                const header = panel.querySelector('div[class*="border-b"]');
+                                if (header) {
+                                    const titleEl = header.querySelector('div[class*="text-ellipsis"]');
+                                    title = titleEl ? (titleEl.textContent || '').trim() : '';
+                                    hasActiveChat = title.length > 0 && title !== 'Agent';
+                                    if (!title) {
+                                        title = '(Untitled)';
+                                    }
+                                }
+                            }
+                            
+                            return {
+                                workspacePath,
+                                workspaceId,
+                                sessionInfo: title ? { title, hasActiveChat } : null
+                            };
                         })()`,
                         returnByValue: true,
                         awaitPromise: true
@@ -2023,7 +2044,13 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     // Scan active IDE windows
     const scanActiveWindows = async () => {
         const recentWorkspaces = workspaceService.getRecentWorkspaces();
-        const activeWindows: { port: number; title: string; workspacePath: string | null; projectName: string }[] = [];
+        const activeWindows: {
+            port: number;
+            title: string;
+            workspacePath: string | null;
+            projectName: string;
+            sessionInfo?: { title: string; hasActiveChat: boolean } | null;
+        }[] = [];
 
         await Promise.all(CDP_PORTS.map(async (port) => {
             try {
@@ -2049,21 +2076,50 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         const title = page.title || '';
                         let workspacePath: string | null = null;
                         let matchedWorkspace: RecentWorkspace | null = null;
+                        let sessionInfo: { title: string; hasActiveChat: boolean } | null = null;
 
                         // Reuse already connected cdp service path to avoid CDP evaluation lag/hangs
                         const existingPath = bridge.pool.getWorkspacePathByWebSocketUrl(page.webSocketDebuggerUrl);
                         let cdpInfo = null;
                         if (existingPath) {
-                            cdpInfo = { workspacePath: existingPath, workspaceId: null };
+                            cdpInfo = { workspacePath: existingPath, workspaceId: null, sessionInfo: null };
                         } else {
                             cdpInfo = await queryWorkspacePath(page.webSocketDebuggerUrl);
+                            sessionInfo = cdpInfo?.sessionInfo || null;
                         }
                         if (cdpInfo && cdpInfo.workspacePath) {
                             if (cdpInfo.workspacePath.endsWith('workspace.json')) {
                                 workspacePath = null;
+                                try {
+                                    if (fs.existsSync(cdpInfo.workspacePath)) {
+                                        const content = fs.readFileSync(cdpInfo.workspacePath, 'utf8');
+                                        const parsed = JSON.parse(content);
+                                        if (parsed.folders && Array.isArray(parsed.folders) && parsed.folders.length > 0) {
+                                            const firstFolder = parsed.folders[0].path || parsed.folders[0].uri;
+                                            if (firstFolder) {
+                                                let cleanFolder = firstFolder.trim();
+                                                if (cleanFolder.startsWith('file:')) {
+                                                    cleanFolder = cleanFolder.replace(/^file:\/\/\/?/, '');
+                                                }
+                                                cleanFolder = decodeURIComponent(cleanFolder);
+                                                cleanFolder = cleanFolder.replace(/^\/([a-zA-Z]):/, '$1:');
+                                                cleanFolder = cleanFolder.replace(/\//g, '\\');
+                                                workspacePath = cleanFolder;
+
+                                                const normPath = cleanFolder.toLowerCase().trim();
+                                                matchedWorkspace = recentWorkspaces.find(w => {
+                                                    const normWPath = w.path.toLowerCase().replace(/\//g, '\\').trim();
+                                                    return normWPath === normPath;
+                                                }) || null;
+                                            }
+                                        }
+                                    }
+                                } catch (err) {
+                                    logger.error(`[scanActiveWindows] Failed to parse workspace.json at ${cdpInfo.workspacePath}:`, err);
+                                }
                             } else {
                                 workspacePath = cdpInfo.workspacePath;
-                                const normPath = workspacePath.toLowerCase().replace(/\//g, '\\').trim();
+                                const normPath = workspacePath!.toLowerCase().replace(/\//g, '\\').trim();
                                 matchedWorkspace = recentWorkspaces.find(w => {
                                     const normWPath = w.path.toLowerCase().replace(/\//g, '\\').trim();
                                     return normWPath === normPath;
@@ -2114,7 +2170,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             port,
                             title,
                             workspacePath,
-                            projectName: projectName.replace(/\.code-workspace$/i, '')
+                            projectName: projectName.replace(/\.code-workspace$/i, ''),
+                            sessionInfo
                         });
                     }));
                 }
