@@ -1681,6 +1681,7 @@ export class CdpService extends EventEmitter {
                 const cls = normalize(img.getAttribute('class') || '');
                 const blob = [src, alt, title, cls].join(' ');
 
+                if (alt.includes('user uploaded media') || alt.includes('uploaded media')) return true;
                 if (blob.includes('icon') || blob.includes('avatar') || blob.includes('emoji')) return true;
                 if (blob.includes('thumb') || blob.includes('good') || blob.includes('bad')) return true;
                 if (src.startsWith('data:image/svg+xml')) return true;
