@@ -2058,12 +2058,16 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             cdpInfo = await queryWorkspacePath(page.webSocketDebuggerUrl);
                         }
                         if (cdpInfo && cdpInfo.workspacePath) {
-                            workspacePath = cdpInfo.workspacePath;
-                            const normPath = workspacePath.toLowerCase().replace(/\//g, '\\').trim();
-                            matchedWorkspace = recentWorkspaces.find(w => {
-                                const normWPath = w.path.toLowerCase().replace(/\//g, '\\').trim();
-                                return normWPath === normPath;
-                            }) || null;
+                            if (cdpInfo.workspacePath.endsWith('workspace.json')) {
+                                workspacePath = null;
+                            } else {
+                                workspacePath = cdpInfo.workspacePath;
+                                const normPath = workspacePath.toLowerCase().replace(/\//g, '\\').trim();
+                                matchedWorkspace = recentWorkspaces.find(w => {
+                                    const normWPath = w.path.toLowerCase().replace(/\//g, '\\').trim();
+                                    return normWPath === normPath;
+                                }) || null;
+                            }
                         }
 
                         let projectName = '';
@@ -2071,11 +2075,6 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             projectName = matchedWorkspace.name;
                         } else if (workspacePath) {
                             projectName = path.basename(workspacePath);
-                        }
-
-                        // Ignore VS Code / Antigravity internal workspace.json files completely
-                        if (workspacePath && (workspacePath.endsWith('workspace.json') || projectName === 'workspace.json')) {
-                            return;
                         } else {
                             // Fallback to title matching
                             for (const w of recentWorkspaces) {
