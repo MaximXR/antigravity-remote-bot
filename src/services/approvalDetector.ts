@@ -180,6 +180,29 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
             if (headerEl) {
                 description = (headerEl.textContent || '').trim();
             }
+
+            const additionalTexts = [];
+            const infoElements = Array.from(container.querySelectorAll('div, span, p, code'));
+            for (const el of infoElements) {
+                if (el.children.length === 0) {
+                    const text = (el.textContent || '').trim();
+                    if (text && text.length > 2 && text.length < 200) {
+                        const isOptionOrSubmit = options.some(opt => opt.contains(el)) || submitBtn.contains(el);
+                        if (!isOptionOrSubmit && text !== description && !additionalTexts.includes(text)) {
+                            if (!/^(yes|no|submit|cancel|ok|allow|deny|\\\\d+)$/i.test(text)) {
+                                additionalTexts.push(text);
+                            }
+                        }
+                    }
+                }
+            }
+            if (additionalTexts.length > 0) {
+                if (description) {
+                    description += ' - ' + additionalTexts.join(' - ');
+                } else {
+                    description = additionalTexts.join(' - ');
+                }
+            }
             if (!description) description = 'Allow request';
 
             const approveText = (allowOnceOpt.textContent || '').trim();
