@@ -180,6 +180,7 @@ export class CdpService extends EventEmitter {
     }
 
     async connect(): Promise<void> {
+        this.contexts = []; // Clear contexts before connecting
         if (!this.targetUrl) {
             await this.discoverTarget();
         }
@@ -228,6 +229,7 @@ export class CdpService extends EventEmitter {
         });
 
         this.ws.on('close', () => {
+            this.contexts = []; // Clear contexts on disconnect
             this.stopHeartbeat();
             this.isConnectedFlag = false;
             // Reject all unresolved pending calls to prevent memory leaks

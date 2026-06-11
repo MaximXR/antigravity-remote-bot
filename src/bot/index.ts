@@ -2071,6 +2071,11 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             projectName = matchedWorkspace.name;
                         } else if (workspacePath) {
                             projectName = path.basename(workspacePath);
+                        }
+
+                        // Ignore VS Code / Antigravity internal workspace.json files completely
+                        if (workspacePath && (workspacePath.endsWith('workspace.json') || projectName === 'workspace.json')) {
+                            return;
                         } else {
                             // Fallback to title matching
                             for (const w of recentWorkspaces) {
