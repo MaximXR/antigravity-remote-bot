@@ -1674,6 +1674,7 @@ export class CdpService extends EventEmitter {
             const normalize = (value) => (value || '').toLowerCase();
             const isLikelyUiImage = (img) => {
                 if (!img) return true;
+                if (img.closest('[data-message-author-role="user"], [data-message-role="user"], [class*="user-message"]')) return true;
                 const src = normalize(img.currentSrc || img.src || img.getAttribute('src') || '');
                 const alt = normalize(img.getAttribute('alt') || '');
                 const title = normalize(img.getAttribute('title') || '');
