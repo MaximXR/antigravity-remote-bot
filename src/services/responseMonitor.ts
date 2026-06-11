@@ -199,6 +199,23 @@ export const RESPONSE_SELECTORS = {
             'accept all', 'reject all', 'allow once', 'always allow', 'allow this conversation', 'allow this chat'
         ];
 
+        const isSystemOrActivityButton = (el, text) => {
+            if (el.getAttribute('data-tooltip-id') === 'input-send-button-cancel-tooltip') return true;
+            if (el.closest('.notify-user-container') || el.closest('[class*="notify-user"]')) return true;
+            if (el.closest('[class*="tool-call"]') || el.closest('[class*="activity"]')) return true;
+            if (el.closest('[class*="feedback"]') || el.closest('footer')) return true;
+            if (el.closest('[class*="metadata"]') || el.closest('[class*="metrics"]')) return true;
+            
+            const normalized = text.toLowerCase().trim();
+            if (/^(?:explored|thought|run|ran|npm|npx|git|python|tsc|test|search|artifact|task|status)\\b/i.test(normalized)) return true;
+            if (/\\b(?:seconds|credits|worked for|gemini|claude)\\b/i.test(normalized)) return true;
+            if (normalized === 'отменить' || normalized === 'остановить' || normalized === 'cancel') return true;
+            if (/^[+-]\\d+\\s+[+-]\\d+$/.test(normalized)) return true;
+            if (/\\.[a-z0-9]{1,4}$/i.test(normalized)) return true;
+            
+            return false;
+        };
+
         const buttons = Array.from(lastTurn.querySelectorAll('button, [role="button"], .cursor-pointer'))
             .filter(el => {
                 const rect = el.getBoundingClientRect();
@@ -210,6 +227,7 @@ export const RESPONSE_SELECTORS = {
                 if (SYSTEM_BUTTON_TEXTS.some(p => text === p || text.startsWith(p) || text.endsWith(p))) return false;
                 if (text.includes('worked for') || text.includes('seconds') || text.includes('credits') || text.includes('gemini') || text.includes('claude')) return false;
                 if (el.closest('pre') || el.closest('code') || el.closest('details')) return false;
+                if (isSystemOrActivityButton(el, text)) return false;
 
                 return true;
             });

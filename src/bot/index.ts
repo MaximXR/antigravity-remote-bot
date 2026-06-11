@@ -1970,6 +1970,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         return new Promise((resolve) => {
             const ws = new WebSocket(wsUrl);
             let resolved = false;
+            const contexts: number[] = [];
             
             const cleanup = () => {
                 if (!resolved) {
@@ -1979,62 +1980,118 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 try { ws.close(); } catch {}
             };
 
-            const timeout = setTimeout(cleanup, 2000);
+            const timeout = setTimeout(cleanup, 4000);
+
+            ws.on('message', (dataStr) => {
+                try {
+                    const data = JSON.parse(dataStr.toString());
+                    if (data.method === 'Runtime.executionContextCreated') {
+                        const cid = data.params?.context?.id;
+                        if (cid && !contexts.includes(cid)) {
+                            contexts.push(cid);
+                        }
+                    }
+                } catch {}
+            });
 
             ws.on('open', () => {
                 if (resolved) return;
                 ws.send(JSON.stringify({
                     id: 1,
-                    method: 'Runtime.evaluate',
-                    params: {
-                        expression: `(async () => {
-                            let workspacePath = null;
-                            let workspaceId = null;
-                            if (window.vscode && window.vscode.context) {
-                                const config = await window.vscode.context.resolveConfiguration();
-                                workspacePath = config.workspace?.configPath?._fsPath || config.workspace?.uri?._fsPath || null;
-                                workspaceId = config.workspace?.id || null;
-                            }
-                            
-                            let title = '';
-                            let hasActiveChat = false;
-                            const panel = document.querySelector('.antigravity-agent-side-panel');
-                            if (panel) {
-                                const header = panel.querySelector('div[class*="border-b"]');
-                                if (header) {
-                                    const titleEl = header.querySelector('div[class*="text-ellipsis"]');
-                                    title = titleEl ? (titleEl.textContent || '').trim() : '';
-                                    hasActiveChat = title.length > 0 && title !== 'Agent';
-                                    if (!title) {
-                                        title = '(Untitled)';
+                    method: 'Runtime.enable',
+                    params: {}
+                }));
+
+                setTimeout(async () => {
+                    if (resolved) return;
+                    
+                    let workspacePath: string | null = null;
+                    let workspaceId: string | null = null;
+                    let sessionInfo: { title: string; hasActiveChat: boolean } | null = null;
+
+                    const contextsToTry = [undefined, ...contexts];
+                    
+                    for (const cid of contextsToTry) {
+                        try {
+                            const res = await new Promise<any>((resEval, rejEval) => {
+                                const evalId = Math.floor(Math.random() * 1000000);
+                                const onEvalMsg = (msg: any) => {
+                                    try {
+                                        const d = JSON.parse(msg.toString());
+                                        if (d.id === evalId) {
+                                            ws.removeListener('message', onEvalMsg);
+                                            if (d.error) rejEval(d.error);
+                                            else resEval(d.result?.result?.value);
+                                        }
+                                    } catch {}
+                                };
+                                ws.on('message', onEvalMsg);
+                                ws.send(JSON.stringify({
+                                    id: evalId,
+                                    method: 'Runtime.evaluate',
+                                    params: {
+                                        expression: `(async () => {
+                                            let workspacePath = null;
+                                            let workspaceId = null;
+                                            if (window.vscode && window.vscode.context) {
+                                                const config = await window.vscode.context.resolveConfiguration();
+                                                workspacePath = config.workspace?.configPath?._fsPath || config.workspace?.uri?._fsPath || null;
+                                                workspaceId = config.workspace?.id || null;
+                                            }
+                                            
+                                            let title = '';
+                                            let hasActiveChat = false;
+                                            const panel = document.querySelector('.antigravity-agent-side-panel');
+                                            if (panel) {
+                                                const header = panel.querySelector('div[class*="border-b"]');
+                                                if (header) {
+                                                    const titleEl = header.querySelector('div[class*="text-ellipsis"]');
+                                                    title = titleEl ? (titleEl.textContent || '').trim() : '';
+                                                    hasActiveChat = title.length > 0 && title !== 'Agent';
+                                                    if (!title) {
+                                                        title = '(Untitled)';
+                                                    }
+                                                }
+                                            }
+                                            
+                                            return {
+                                                workspacePath,
+                                                workspaceId,
+                                                sessionInfo: title ? { title, hasActiveChat } : null
+                                            };
+                                        })()`,
+                                        returnByValue: true,
+                                        awaitPromise: true,
+                                        contextId: cid
                                     }
+                                }));
+                                setTimeout(() => {
+                                    ws.removeListener('message', onEvalMsg);
+                                    rejEval(new Error('timeout'));
+                                }, 1000);
+                            });
+
+                            if (res) {
+                                if (res.workspacePath && !workspacePath) {
+                                    workspacePath = res.workspacePath;
+                                }
+                                if (res.workspaceId && !workspaceId) {
+                                    workspaceId = res.workspaceId;
+                                }
+                                if (res.sessionInfo && !sessionInfo) {
+                                    sessionInfo = res.sessionInfo;
                                 }
                             }
-                            
-                            return {
-                                workspacePath,
-                                workspaceId,
-                                sessionInfo: title ? { title, hasActiveChat } : null
-                            };
-                        })()`,
-                        returnByValue: true,
-                        awaitPromise: true
+                        } catch (e) {
+                            // ignore
+                        }
                     }
-                }));
-            });
 
-            ws.on('message', (data) => {
-                if (resolved) return;
-                clearTimeout(timeout);
-                resolved = true;
-                try {
-                    const parsed = JSON.parse(data.toString());
-                    const val = parsed.result?.result?.value;
-                    resolve(val || null);
-                } catch {
-                    resolve(null);
-                }
-                try { ws.close(); } catch {}
+                    clearTimeout(timeout);
+                    resolved = true;
+                    resolve({ workspacePath, workspaceId, sessionInfo });
+                    try { ws.close(); } catch {}
+                }, 400);
             });
 
             ws.on('error', cleanup);
