@@ -1559,6 +1559,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
     const bridge = initCdpBridge();
     (bridge as any).db = db;
+    logger.info(`[startup] Loaded Auto-Accept status: enabled=${bridge.autoAccept.isEnabled()}, settings=${JSON.stringify(bridge.autoAccept.getSettings())}`);
     bridge.botToken = config.telegramBotToken;
 
     const chatSessionService = new ChatSessionService();
