@@ -137,6 +137,17 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
         return style.display !== 'none' && style.visibility !== 'hidden';
     };
 
+    const matchPattern = (text, pattern) => {
+        if (!text || !pattern) return false;
+        if (/^[a-z]+$/i.test(pattern)) {
+            if (pattern.length <= 4) {
+                const regex = new RegExp('\\\\b' + pattern + '\\\\b', 'i');
+                return regex.test(text);
+            }
+        }
+        return text.includes(pattern);
+    };
+
     const panel = document.querySelector('.antigravity-agent-side-panel');
     const scope = panel || document;
 
@@ -170,7 +181,7 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
             const t = normalize(el.textContent || '');
             return DENY_PATTERNS.some(p => {
                 if (p === 'no' && t.includes('no (tell')) return true;
-                return t === p || t.includes(p);
+                return t === p || matchPattern(t, p);
             });
         });
 
@@ -255,7 +266,7 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
             const isAlways = ALWAYS_ALLOW_PATTERNS.some(p => t.includes(p));
             return !isAlways && ALLOW_PATTERNS.some(p => {
                 if (p === 'accept' && t.includes('accept all')) return true;
-                return t === p || t.includes(p);
+                return t === p || matchPattern(t, p);
             });
         }) || null;
     }
@@ -293,7 +304,7 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
 
     const denyBtn = containerClickables.find(btn => {
         const t = normalize(btn.textContent || '');
-        return DENY_PATTERNS.some(p => t.includes(p));
+        return DENY_PATTERNS.some(p => matchPattern(t, p));
     }) || null;
 
     if (!denyBtn) return null;
