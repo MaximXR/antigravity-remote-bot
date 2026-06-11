@@ -106,6 +106,18 @@ export class CdpConnectionPool extends EventEmitter {
         return null;
     }
 
+    /**
+     * Get a connected CdpService by its WebSocket URL.
+     */
+    getConnectedByWebSocketUrl(wsUrl: string): CdpService | null {
+        for (const cdp of this.connections.values()) {
+            if (cdp.isConnected() && cdp.getTargetUrl() === wsUrl) {
+                return cdp;
+            }
+        }
+        return null;
+    }
+
 
     /**
      * Pause Planning and ErrorPopup detectors during AI generation to reduce CPU load.

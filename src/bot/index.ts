@@ -2130,6 +2130,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             title: string;
             workspacePath: string | null;
             projectName: string;
+            webSocketDebuggerUrl: string;
             sessionInfo?: { title: string; hasActiveChat: boolean } | null;
         }[] = [];
 
@@ -2163,7 +2164,17 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         const existingPath = bridge.pool.getWorkspacePathByWebSocketUrl(page.webSocketDebuggerUrl);
                         let cdpInfo = null;
                         if (existingPath) {
-                            cdpInfo = { workspacePath: existingPath, workspaceId: null, sessionInfo: null };
+                            let cachedSession: { title: string; hasActiveChat: boolean } | null = null;
+                            const cdp = bridge.pool.getConnectedByWebSocketUrl(page.webSocketDebuggerUrl);
+                            if (cdp) {
+                                try {
+                                    cachedSession = await chatSessionService.getCurrentSessionInfo(cdp);
+                                } catch (e) {
+                                    // ignore
+                                }
+                            }
+                            cdpInfo = { workspacePath: existingPath, workspaceId: null, sessionInfo: cachedSession };
+                            sessionInfo = cachedSession;
                         } else {
                             cdpInfo = await queryWorkspacePath(page.webSocketDebuggerUrl);
                             sessionInfo = cdpInfo?.sessionInfo || null;
@@ -2258,6 +2269,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             title,
                             workspacePath,
                             projectName: projectName.replace(/\.code-workspace$/i, ''),
+                            webSocketDebuggerUrl: page.webSocketDebuggerUrl,
                             sessionInfo
                         });
                     }));
@@ -2472,10 +2484,10 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         // Fetch session info ONLY for already connected windows to avoid CDP connection lag/hangs
         const activeWindowsWithSessions = await Promise.all(
             activeWindows.map(async (win) => {
-                let sessionInfo: { title: string; hasActiveChat: boolean } | null = null;
-                if (win.workspacePath) {
+                let sessionInfo = win.sessionInfo || null;
+                if (!sessionInfo) {
                     try {
-                        const cdp = bridge.pool.getConnected(win.projectName);
+                        const cdp = bridge.pool.getConnectedByWebSocketUrl(win.webSocketDebuggerUrl);
                         if (cdp) {
                             sessionInfo = await chatSessionService.getCurrentSessionInfo(cdp);
                         }
