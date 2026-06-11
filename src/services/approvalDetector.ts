@@ -241,15 +241,10 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
     }
 
     // --- Strategy 2: Standard button-based confirmation dialog (original logic) ---
-    const allClickables = Array.from(scope.querySelectorAll('button, [role="button"], .cursor-pointer, label'))
+    const allClickables = Array.from(scope.querySelectorAll('button, [role="button"], a.monaco-button'))
         .filter(el => {
-            const isButton = el.tagName === 'BUTTON' || el.tagName === 'LABEL' || el.getAttribute('role') === 'button';
-            const hasCursorPointer = el.classList.contains('cursor-pointer');
-            if (!isButton && !hasCursorPointer) return false;
-
             const text = (el.textContent || '').trim();
             if (text.length === 0 || text.length > 50) return false;
-
             return isVisible(el);
         });
 
@@ -277,10 +272,7 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
     if (!container) {
         let el = approveBtn.parentElement;
         for (let i = 0; i < 6 && el && el !== document.body; i++) {
-            const clickables = Array.from(el.querySelectorAll('button, span, div, [role="button"], label')).filter(b => {
-                const isButton = b.tagName === 'BUTTON' || b.tagName === 'LABEL' || b.getAttribute('role') === 'button';
-                const hasCursorPointer = b.classList.contains('cursor-pointer');
-                if (!isButton && !hasCursorPointer) return false;
+            const clickables = Array.from(el.querySelectorAll('button, [role="button"], a.monaco-button')).filter(b => {
                 const rect = b.getBoundingClientRect();
                 return rect.width > 0 && rect.height > 0;
             });
@@ -293,11 +285,8 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
     }
     if (!container) container = scope;
 
-    const containerClickables = Array.from(container.querySelectorAll('button, [role="button"], .cursor-pointer, label'))
+    const containerClickables = Array.from(container.querySelectorAll('button, [role="button"], a.monaco-button'))
         .filter(btn => {
-            const isButton = btn.tagName === 'BUTTON' || btn.tagName === 'LABEL' || btn.getAttribute('role') === 'button';
-            const hasCursorPointer = btn.classList.contains('cursor-pointer');
-            if (!isButton && !hasCursorPointer) return false;
             const rect = btn.getBoundingClientRect();
             return rect.width > 0 && rect.height > 0;
         });
