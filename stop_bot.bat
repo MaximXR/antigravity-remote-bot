@@ -20,6 +20,10 @@ wmic process where "name='node.exe' and (commandline like '%%dist/bin/cli.js%%' 
 if %errorlevel% equ 0 (
     set BOT_STOPPED=1
 )
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"name = 'node.exe' and (commandline like '%%dist/bin/cli.js%%' or commandline like '%%dist\\bin\\cli.js%%' or commandline like '%%ts-node%%')\" | Invoke-CimMethod -MethodName Terminate" >nul 2>nul
+if %errorlevel% equ 0 (
+    set BOT_STOPPED=1
+)
 
 if %BOT_STOPPED% equ 1 (
     echo [OK] Remoat Bot has been successfully stopped.
