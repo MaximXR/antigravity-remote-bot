@@ -16,6 +16,16 @@ import { CdpService } from '../../src/services/cdpService';
 
 jest.mock('../../src/services/approvalDetector');
 jest.mock('../../src/services/cdpService');
+jest.mock('../../src/utils/config', () => ({
+    loadConfig: jest.fn().mockReturnValue({
+        autoApprove: false,
+        autoApproveFileEdits: false,
+        autoApproveConsoleCommands: false,
+        autoApproveReadAccess: false,
+        autoApproveUrlAccess: false,
+        autoApproveOtherRequests: false,
+    }),
+}));
 
 describe('cdpBridgeManager', () => {
     it('initCdpBridge builds the initial state', () => {
