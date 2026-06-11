@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/MaximXR/antigravity-remote-bot/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MaximXR/antigravity-remote-bot?style=flat-square" alt="License" /></a>
+  <a href="https://github.com/MaximXR/Antigravity-Remote-Bot/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MaximXR/Antigravity-Remote-Bot?style=flat-square" alt="License" /></a>
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square&logo=node.js" alt="Node.js" />
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square" alt="Platform" />
 </p>
@@ -55,8 +55,8 @@ You can verify they're installed with `xcode-select -p`.
 ### 1. Clone and Install from source
 
 ```bash
-git clone https://github.com/MaximXR/antigravity-remote-bot.git
-cd antigravity-remote-bot
+git clone https://github.com/MaximXR/Antigravity-Remote-Bot.git
+cd Antigravity-Remote-Bot
 npm install
 ```
 
@@ -121,8 +121,8 @@ This pulls `base.en` (~140 MB). Requires `cmake` (`brew install cmake` on macOS,
 ### From source
 
 ```bash
-git clone https://github.com/MaximXR/antigravity-remote-bot.git
-cd antigravity-remote-bot
+git clone https://github.com/MaximXR/Antigravity-Remote-Bot.git
+cd Antigravity-Remote-Bot
 npm install
 cp .env.example .env
 ```
@@ -287,8 +287,8 @@ locales/        i18n translations (en, ja)
 Contributions are welcome — whether it's a bug fix, a new feature, documentation improvements, or test coverage.
 
 ```bash
-git clone https://github.com/MaximXR/antigravity-remote-bot.git
-cd antigravity-remote-bot
+git clone https://github.com/MaximXR/Antigravity-Remote-Bot.git
+cd Antigravity-Remote-Bot
 npm install
 cp .env.example .env  # fill in your values
 npm run dev           # start with auto-reload
