@@ -111,10 +111,12 @@ export const RESPONSE_SELECTORS = {
         const panel = document.querySelector('.antigravity-agent-side-panel');
         const scopes = [panel, document].filter(Boolean);
 
+        const isVisible = (el) => el && el.offsetParent !== null;
+
         let hasStop = false;
         for (const scope of scopes) {
             const el = scope.querySelector('[data-tooltip-id="input-send-button-cancel-tooltip"]');
-            if (el) { hasStop = true; break; }
+            if (isVisible(el)) { hasStop = true; break; }
         }
 
         if (!hasStop) {
@@ -141,7 +143,7 @@ export const RESPONSE_SELECTORS = {
                         btn.getAttribute('aria-label') || '',
                         btn.getAttribute('title') || '',
                     ];
-                    if (labels.some(isStopLabel)) {
+                    if (isVisible(btn) && labels.some(isStopLabel)) {
                         hasStop = true;
                         break outer;
                     }
@@ -221,9 +223,11 @@ export const RESPONSE_SELECTORS = {
         const panel = document.querySelector('.antigravity-agent-side-panel');
         const scopes = [panel, document].filter(Boolean);
 
+        const isVisible = (el) => el && el.offsetParent !== null;
+
         for (const scope of scopes) {
             const el = scope.querySelector('[data-tooltip-id="input-send-button-cancel-tooltip"]');
-            if (el && typeof el.click === 'function') {
+            if (isVisible(el) && typeof el.click === 'function') {
                 el.click();
                 return { ok: true, method: 'tooltip-id' };
             }
@@ -252,9 +256,9 @@ export const RESPONSE_SELECTORS = {
                     btn.getAttribute('aria-label') || '',
                     btn.getAttribute('title') || '',
                 ];
-                if (labels.some(isStopLabel) && typeof btn.click === 'function') {
+                if (isVisible(btn) && labels.some(isStopLabel) && typeof btn.click === 'function') {
                     btn.click();
-                    return { ok: true, method: 'text-fallback' };
+                    return { ok: true, method: 'text-match', label: btn.textContent };
                 }
             }
         }
@@ -440,11 +444,13 @@ export const RESPONSE_SELECTORS = {
         }
         const turnScopes = currentTurnScope ? [currentTurnScope] : [];
 
+        const isVisible = (el) => el && el.offsetParent !== null;
+
         // --- Stop button ---
         let isGenerating = false;
         for (const scope of scopes) {
             const el = scope.querySelector('[data-tooltip-id="input-send-button-cancel-tooltip"]');
-            if (el) { isGenerating = true; break; }
+            if (isVisible(el)) { isGenerating = true; break; }
         }
         if (!isGenerating) {
             const normalize = (value) => (value || '').toLowerCase().replace(/\\s+/g, ' ').trim();
@@ -454,7 +460,7 @@ export const RESPONSE_SELECTORS = {
                 const buttons = scope.querySelectorAll('button, [role="button"]');
                 for (let i = 0; i < buttons.length; i++) {
                     const btn = buttons[i];
-                    if ([btn.textContent || '', btn.getAttribute('aria-label') || '', btn.getAttribute('title') || ''].some(isStopLabel)) {
+                    if (isVisible(btn) && [btn.textContent || '', btn.getAttribute('aria-label') || '', btn.getAttribute('title') || ''].some(isStopLabel)) {
                         isGenerating = true; break outer;
                     }
                 }

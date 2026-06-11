@@ -13,7 +13,7 @@ import { loadConfig, resolveResponseDeliveryMode } from '../utils/config';
 import { ConfigLoader } from '../utils/configLoader';
 import { parseMessageContent } from '../commands/messageParser';
 import { SlashCommandHandler } from '../commands/slashCommandHandler';
-import { CleanupCommandHandler, CLEANUP_ARCHIVE_BTN, CLEANUP_DELETE_BTN, CLEANUP_CANCEL_BTN } from '../commands/cleanupCommandHandler';
+import { CleanupCommandHandler, CLEANUP_ARCHIVE_BTN, CLEANUP_DELETE_BTN, CLEANUP_CANCEL_BTN, CLEANUP_DISK_ORPHANED_BTN, CLEANUP_DISK_ALL_INACTIVE_BTN } from '../commands/cleanupCommandHandler';
 
 import { ModeService, AVAILABLE_MODES, MODE_DISPLAY_NAMES, MODE_DESCRIPTIONS, MODE_UI_NAMES } from '../services/modeService';
 import { ModelService } from '../services/modelService';
@@ -2444,14 +2444,35 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     bot.command('mirror', handleMirrorCommand);
     bot.command('mirror_all', handleMirrorCommand);
 
+    // Helper to format bytes
+    const formatBytes = (bytes: number): string => {
+        if (bytes === 0) return '0 B';
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    };
+
     // /cleanup command
     bot.command('cleanup', async (ctx) => {
         const days = Math.max(1, parseInt((ctx.match || '').trim(), 10) || 7);
         const guildId = String(ctx.chat!.id);
         const inactive = cleanupHandler.findInactiveSessions(guildId, days);
+        const diskStats = cleanupHandler.getDiskStats();
+
+        const diskInfo = `\n\n<b>💾 На диске (мусор):</b>\n` +
+            `• Сиротские (вне IDE) чаты: <b>${formatBytes(diskStats.orphanedSizeBytes)}</b> (${diskStats.orphanedCount} шт)`;
 
         if (inactive.length === 0) {
-            await replyHtml(ctx, `No inactive sessions older than <b>${days}</b> day(s).`);
+            const kb = new InlineKeyboard();
+            if (diskStats.orphanedCount > 0) {
+                kb.text('🧹 Очистить сиротские файлы', CLEANUP_DISK_ORPHANED_BTN).row();
+            }
+            kb.text('❌ Закрыть', CLEANUP_CANCEL_BTN);
+
+            await replyHtml(ctx, 
+                `No inactive sessions older than <b>${days}</b> day(s).` + diskInfo,
+                kb
+            );
             return;
         }
 
@@ -2462,17 +2483,39 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         const extra = inactive.length > 20 ? `\n…and ${inactive.length - 20} more` : '';
 
         const keyboard = new InlineKeyboard()
-            .text('📦 Archive', `${CLEANUP_ARCHIVE_BTN}:${days}`)
-            .text('🗑 Delete', `${CLEANUP_DELETE_BTN}:${days}`)
+            .text('📦 Archive Topics', `${CLEANUP_ARCHIVE_BTN}:${days}`)
+            .text('🗑 Delete Topics', `${CLEANUP_DELETE_BTN}:${days}`).row()
+            .text('🧹 Clean Orphaned Files', CLEANUP_DISK_ORPHANED_BTN)
+            .text('🧹 Clean All Inactive Files', CLEANUP_DISK_ALL_INACTIVE_BTN).row()
             .text('❌ Cancel', CLEANUP_CANCEL_BTN);
 
         await replyHtml(ctx,
             `<b>🧹 Cleanup</b>\n\n` +
             `Found <b>${inactive.length}</b> session(s) older than <b>${days}</b> day(s):\n\n` +
-            `${list}${extra}\n\n` +
+            `${list}${extra}` + 
+            diskInfo + `\n\n` +
             `Choose an action:`,
             keyboard,
         );
+    });
+
+    // /disk command to manage disk files directly
+    bot.command(['disk', 'cleanup_disk'], async (ctx) => {
+        const diskStats = cleanupHandler.getDiskStats();
+        
+        let text = `<b>💾 Статистика диска Antigravity</b>\n\n` +
+            `• <b>Всего папок чатов:</b> ${formatBytes(diskStats.totalSizeBytes)} (${diskStats.totalCount} шт)\n` +
+            `• <b>Из них сиротских (вне IDE):</b> <b>${formatBytes(diskStats.orphanedSizeBytes)}</b> (${diskStats.orphanedCount} шт)\n\n` +
+            `<i>Сиротские чаты — это файлы диалогов, которые были удалены из левой панели IDE, но всё ещё физически занимают место на вашем диске в папке .gemini/antigravity-ide/.</i>`;
+            
+        const keyboard = new InlineKeyboard();
+        if (diskStats.orphanedCount > 0) {
+            keyboard.text('🧹 Очистить сиротские файлы', CLEANUP_DISK_ORPHANED_BTN).row();
+            keyboard.text('🧹 Очистить все неактивные файлы', CLEANUP_DISK_ALL_INACTIVE_BTN).row();
+        }
+        keyboard.text('❌ Закрыть', CLEANUP_CANCEL_BTN);
+
+        await replyHtml(ctx, text, keyboard);
     });
 
     // /screenshot command
@@ -3668,10 +3711,34 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }
 
         // Cleanup buttons
-        if (data.startsWith(CLEANUP_ARCHIVE_BTN) || data.startsWith(CLEANUP_DELETE_BTN) || data === CLEANUP_CANCEL_BTN) {
+        if (data.startsWith(CLEANUP_ARCHIVE_BTN) || data.startsWith(CLEANUP_DELETE_BTN) || data === CLEANUP_CANCEL_BTN || data === CLEANUP_DISK_ORPHANED_BTN || data === CLEANUP_DISK_ALL_INACTIVE_BTN) {
             if (data === CLEANUP_CANCEL_BTN) {
                 try { await ctx.editMessageText('Cleanup cancelled.'); } catch (e) { logger.debug('[editMsg] Telegram edit failed (expected for unmodified):', e); }
                 await ctx.answerCallbackQuery({ text: 'Cancelled' });
+                return;
+            }
+
+            if (data === CLEANUP_DISK_ORPHANED_BTN || data === CLEANUP_DISK_ALL_INACTIVE_BTN) {
+                const isOrphanedOnly = data === CLEANUP_DISK_ORPHANED_BTN;
+                try {
+                    await ctx.editMessageText('🧹 Очистка файлов на диске...');
+                } catch (_) {}
+
+                const result = isOrphanedOnly 
+                    ? cleanupHandler.cleanupOrphanedChats() 
+                    : cleanupHandler.cleanupAllInactiveChats();
+
+                const textResult = `🧹 <b>Очистка диска завершена</b>\n\n` +
+                    `• Удалено диалогов: <b>${result.processedCount}</b>\n` +
+                    `• Освобождено места: <b>${formatBytes(result.freedBytes)}</b>\n` +
+                    (result.errors.length > 0 ? `\n⚠️ Ошибки при удалении некоторых файлов:\n${result.errors.join('\n')}` : '');
+
+                try {
+                    await ctx.editMessageText(textResult, { parse_mode: 'HTML' });
+                } catch (e) {
+                    logger.debug('[cleanupDisk] Telegram edit failed:', e);
+                }
+                await ctx.answerCallbackQuery({ text: `Удалено: ${result.processedCount} чатов` });
                 return;
             }
 
