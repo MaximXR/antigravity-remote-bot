@@ -117,7 +117,7 @@ export interface ApprovalDetectorOptions {
  * Detects allow/deny button pairs and extracts descriptions with fallbacks.
  */
 const DETECT_APPROVAL_SCRIPT = `(() => {
-    const ALLOW_ONCE_PATTERNS = ['allow once', 'allow one time', '今回のみ許可', '1回のみ許可', '一度許可'];
+    const ALLOW_ONCE_PATTERNS = ['allow once', 'allow one time', 'allow this time', '今回のみ許可', '1回のみ許可', '一度許可'];
     const ALWAYS_ALLOW_PATTERNS = [
         'allow this conversation',
         'allow this chat',
@@ -126,27 +126,97 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
         'この会話を許可',
     ];
     const ALLOW_PATTERNS = ['allow', 'permit', 'run', 'execute', 'accept', 'approve', '許可', '承認', '確認', '実行'];
-    const DENY_PATTERNS = ['deny', 'reject', '拒否', 'decline', '却下'];
+    const DENY_PATTERNS = ['deny', 'reject', 'no', 'no (tell', '拒否', 'decline', '却下'];
 
     const normalize = (text) => (text || '').toLowerCase().replace(/\\\\s+/g, ' ').trim();
+    const isVisible = (el) => {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        const style = window.getComputedStyle(el);
+        return style.display !== 'none' && style.visibility !== 'hidden';
+    };
 
     const panel = document.querySelector('.antigravity-agent-side-panel');
     const scope = panel || document;
 
-    const allClickables = Array.from(scope.querySelectorAll('button, [role="button"], .cursor-pointer'))
+    // --- Strategy 1: Look for selection-based dialog (has list of options and a Submit button) ---
+    const submitBtn = Array.from(scope.querySelectorAll('button')).find(btn => {
+        if (!isVisible(btn)) return false;
+        const t = normalize(btn.textContent || '');
+        return t === 'submit' || t.startsWith('submit');
+    });
+
+    if (submitBtn) {
+        const container = submitBtn.closest('[role="dialog"], .modal, .dialog, .approval-container, .permission-dialog, div[class*="rounded-2xl"], div[class*="rounded-lg"], div[class*="border"]') || scope;
+        const options = Array.from(container.querySelectorAll('label, button, [role="button"], .cursor-pointer'))
+            .filter(el => {
+                if (!isVisible(el)) return false;
+                const text = (el.textContent || '').trim();
+                return text.length > 0 && text.length < 80;
+            });
+
+        const allowOnceOpt = options.find(el => {
+            const t = normalize(el.textContent || '');
+            return ALLOW_ONCE_PATTERNS.some(p => t.includes(p));
+        });
+
+        const alwaysOpt = options.find(el => {
+            const t = normalize(el.textContent || '');
+            return ALWAYS_ALLOW_PATTERNS.some(p => t.includes(p));
+        });
+
+        const denyOpt = options.find(el => {
+            const t = normalize(el.textContent || '');
+            return DENY_PATTERNS.some(p => {
+                if (p === 'no' && t.includes('no (tell')) return true;
+                return t === p || t.includes(p);
+            });
+        });
+
+        if (allowOnceOpt && denyOpt) {
+            let description = '';
+            const headerEl = container.querySelector('span.text-sm.font-medium.text-foreground, h3, h2, p, .text-sm.font-medium');
+            if (headerEl) {
+                description = (headerEl.textContent || '').trim();
+            }
+            if (!description) description = 'Allow request';
+
+            const approveText = (allowOnceOpt.textContent || '').trim();
+            const alwaysAllowText = alwaysOpt ? (alwaysOpt.textContent || '').trim() : '';
+            const denyText = (denyOpt.textContent || '').trim();
+
+            let isGenerating = false;
+            const stopEl = scope.querySelector('[data-tooltip-id="input-send-button-cancel-tooltip"]');
+            if (stopEl) {
+                isGenerating = true;
+            } else {
+                const stopPatterns = ['stop', 'stop generating', '停止', '生成を停止'];
+                const buttons = Array.from(scope.querySelectorAll('button, [role="button"]'));
+                for (const btn of buttons) {
+                    const t = (btn.textContent || '').trim().toLowerCase();
+                    if (stopPatterns.some(p => t === p || t.includes(p))) {
+                        isGenerating = true;
+                        break;
+                    }
+                }
+            }
+
+            return { approveText, alwaysAllowText, denyText, description, isGenerating };
+        }
+    }
+
+    // --- Strategy 2: Standard button-based confirmation dialog (original logic) ---
+    const allClickables = Array.from(scope.querySelectorAll('button, [role="button"], .cursor-pointer, label'))
         .filter(el => {
-            const isButton = el.tagName === 'BUTTON' || el.getAttribute('role') === 'button';
+            const isButton = el.tagName === 'BUTTON' || el.tagName === 'LABEL' || el.getAttribute('role') === 'button';
             const hasCursorPointer = el.classList.contains('cursor-pointer');
             if (!isButton && !hasCursorPointer) return false;
 
             const text = (el.textContent || '').trim();
-            if (text.length === 0 || text.length > 30) return false;
+            if (text.length === 0 || text.length > 50) return false;
 
-            const rect = el.getBoundingClientRect();
-            if (rect.width === 0 || rect.height === 0) return false;
-            const style = window.getComputedStyle(el);
-            if (style.display === 'none' || style.visibility === 'hidden') return false;
-            return true;
+            return isVisible(el);
         });
 
     const reversedClickables = [...allClickables].reverse();
@@ -169,12 +239,12 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
 
     if (!approveBtn) return null;
 
-    let container = approveBtn.closest('[role="dialog"], .modal, .dialog, .approval-container, .permission-dialog');
+    let container = approveBtn.closest('[role="dialog"], .modal, .dialog, .approval-container, .permission-dialog, div[class*="rounded-2xl"], div[class*="rounded-lg"], div[class*="border"]');
     if (!container) {
         let el = approveBtn.parentElement;
         for (let i = 0; i < 6 && el && el !== document.body; i++) {
-            const clickables = Array.from(el.querySelectorAll('button, span, div, [role="button"]')).filter(b => {
-                const isButton = b.tagName === 'BUTTON' || b.getAttribute('role') === 'button';
+            const clickables = Array.from(el.querySelectorAll('button, span, div, [role="button"], label')).filter(b => {
+                const isButton = b.tagName === 'BUTTON' || b.tagName === 'LABEL' || b.getAttribute('role') === 'button';
                 const hasCursorPointer = b.classList.contains('cursor-pointer');
                 if (!isButton && !hasCursorPointer) return false;
                 const rect = b.getBoundingClientRect();
@@ -189,9 +259,9 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
     }
     if (!container) container = scope;
 
-    const containerClickables = Array.from(container.querySelectorAll('button, [role="button"], .cursor-pointer'))
+    const containerClickables = Array.from(container.querySelectorAll('button, [role="button"], .cursor-pointer, label'))
         .filter(btn => {
-            const isButton = btn.tagName === 'BUTTON' || btn.getAttribute('role') === 'button';
+            const isButton = btn.tagName === 'BUTTON' || btn.tagName === 'LABEL' || btn.getAttribute('role') === 'button';
             const hasCursorPointer = btn.classList.contains('cursor-pointer');
             if (!isButton && !hasCursorPointer) return false;
             const rect = btn.getBoundingClientRect();
@@ -227,9 +297,9 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
         let ancestor = approveBtn.parentElement;
         for (let i = 0; i < 8 && ancestor && ancestor !== scope.parentElement && ancestor !== document.body; i++) {
             const clone = ancestor.cloneNode(true);
-            const clickables = Array.from(clone.querySelectorAll('button, span, div, [role="button"]'));
+            const clickables = Array.from(clone.querySelectorAll('button, span, div, [role="button"], label'));
             clickables.forEach(b => {
-                const isButton = b.tagName === 'BUTTON' || b.getAttribute('role') === 'button';
+                const isButton = b.tagName === 'BUTTON' || b.tagName === 'LABEL' || b.getAttribute('role') === 'button';
                 const hasCursorPointer = b.classList.contains('cursor-pointer');
                 if (isButton || hasCursorPointer) {
                     try { b.remove(); } catch (e) {}
@@ -354,9 +424,9 @@ export function buildClickScript(buttonText: string): string {
         const wanted = normalize(text);
         const panel = document.querySelector('.antigravity-agent-side-panel');
         const scope = panel || document;
-        const allClickables = Array.from(scope.querySelectorAll('button, [role="button"], .cursor-pointer'))
+        const allClickables = Array.from(scope.querySelectorAll('button, [role="button"], .cursor-pointer, label'))
             .filter(el => {
-                const isButton = el.tagName === 'BUTTON' || el.getAttribute('role') === 'button';
+                const isButton = el.tagName === 'BUTTON' || el.tagName === 'LABEL' || el.getAttribute('role') === 'button';
                 const hasCursorPointer = el.classList.contains('cursor-pointer');
                 if (!isButton && !hasCursorPointer) return false;
                 const rect = el.getBoundingClientRect();
@@ -372,6 +442,26 @@ export function buildClickScript(buttonText: string): string {
         });
         if (!target) return { ok: false, error: 'Button not found: ' + text };
         target.click();
+
+        const radio = target.querySelector('input[type="radio"], input[type="checkbox"]');
+        if (radio) {
+            radio.checked = true;
+            radio.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        const container = target.closest('[role="dialog"], .modal, .dialog, .approval-container, .permission-dialog, div[class*="rounded-2xl"], div[class*="rounded-lg"], div[class*="border"]')
+            || target.parentElement?.parentElement
+            || target.parentElement;
+        if (container) {
+            const submitBtn = Array.from(container.querySelectorAll('button')).find(btn => {
+                const t = normalize(btn.textContent || '');
+                return t === 'submit' || t.startsWith('submit');
+            });
+            if (submitBtn) {
+                submitBtn.click();
+                return { ok: true, submitted: true };
+            }
+        }
         return { ok: true };
     })()`;
 }
