@@ -29,7 +29,7 @@ export interface PersistedConfig {
 }
 
 function getConfigDir(): string {
-    return path.join(os.homedir(), CONFIG_DIR_NAME);
+    return path.resolve(__dirname, '..', '..', CONFIG_DIR_NAME);
 }
 
 function getConfigFilePath(): string {

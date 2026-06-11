@@ -31,24 +31,23 @@ describe('ConfigLoader', () => {
     });
 
     describe('getConfigDir()', () => {
-        it('returns ~/.remoat', () => {
-            expect(ConfigLoader.getConfigDir()).toBe(path.join(os.homedir(), '.remoat'));
+        it('returns project-local .remoat', () => {
+            const expected = path.resolve(__dirname, '..', '..', '.remoat');
+            expect(ConfigLoader.getConfigDir()).toBe(expected);
         });
     });
 
     describe('getConfigFilePath()', () => {
-        it('returns ~/.remoat/config.json', () => {
-            expect(ConfigLoader.getConfigFilePath()).toBe(
-                path.join(os.homedir(), '.remoat', 'config.json'),
-            );
+        it('returns project-local .remoat/config.json', () => {
+            const expected = path.resolve(__dirname, '..', '..', '.remoat', 'config.json');
+            expect(ConfigLoader.getConfigFilePath()).toBe(expected);
         });
     });
 
     describe('getDefaultDbPath()', () => {
-        it('returns ~/.remoat/antigravity.db', () => {
-            expect(ConfigLoader.getDefaultDbPath()).toBe(
-                path.join(os.homedir(), '.remoat', 'antigravity.db'),
-            );
+        it('returns project-local .remoat/antigravity.db', () => {
+            const expected = path.resolve(__dirname, '..', '..', '.remoat', 'antigravity.db');
+            expect(ConfigLoader.getDefaultDbPath()).toBe(expected);
         });
     });
 

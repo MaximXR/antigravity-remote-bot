@@ -9,6 +9,7 @@ node_modules/
 # Database (runtime data)
 *.db
 *.db-journal
+.remoat/
 
 # Build output
 dist/
