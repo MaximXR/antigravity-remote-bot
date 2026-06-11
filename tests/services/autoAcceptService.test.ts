@@ -1,5 +1,12 @@
 import { AutoAcceptService, AutoAcceptSettings } from '../../src/services/autoAcceptService';
 
+jest.mock('../../src/utils/configLoader', () => ({
+    ConfigLoader: {
+        save: jest.fn(),
+    },
+}));
+
+
 const makeSettings = (enabled: boolean): AutoAcceptSettings => ({
     enabled,
     fileEdits: false,

@@ -2211,7 +2211,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         let projectName = '';
                         if (matchedWorkspace) {
                             projectName = matchedWorkspace.name;
-                        } else if (workspacePath) {
+                        } else if (workspacePath && !workspacePath.startsWith('empty-workspace:')) {
                             projectName = path.basename(workspacePath);
                         } else {
                             // Fallback to title matching
@@ -2238,13 +2238,19 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             }
 
                             projectName = matchedWorkspace ? matchedWorkspace.name : cleanParsedName;
-                            workspacePath = matchedWorkspace ? matchedWorkspace.path : null;
+                            const isEmp = workspacePath && workspacePath.startsWith('empty-workspace:');
+                            workspacePath = matchedWorkspace ? matchedWorkspace.path : (isEmp ? workspacePath : null);
                         }
 
                         if (!workspacePath) {
                             workspacePath = `empty-workspace:${port}:${page.id}`;
                             const name = (projectName && projectName !== 'Unknown') ? projectName : 'Antigravity';
                             projectName = `${name} (без папки)`;
+                        } else if (workspacePath.startsWith('empty-workspace:')) {
+                            const name = (projectName && projectName !== 'Unknown') ? projectName : 'Antigravity';
+                            if (!name.endsWith(' (без папки)')) {
+                                projectName = `${name} (без папки)`;
+                            }
                         }
 
                         activeWindows.push({
@@ -2432,12 +2438,15 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         text += `<b>${t('Auto Approve')}:</b> ${autoAcceptStatus}\n`;
         text += `<b>${t('Mirror Mode')}:</b> 🖥️ ${escapeHtml(mirrorModeText)}\n\n`;
 
+        const activeWindows = await scanActiveWindows();
+
         // Get bound workspace for CURRENT chat
         const ch = getChannel(ctx);
         const binding = workspaceBindingRepo.findByChannelId(channelKey(ch));
         if (binding) {
             const isEmp = binding.workspacePath.startsWith('empty-workspace:');
-            const cleanFolderName = isEmp ? 'Antigravity (без папки)' : path.basename(binding.workspacePath).replace(/\.code-workspace$/i, '');
+            const matchingWin = activeWindows.find(win => win.workspacePath && win.workspacePath.toLowerCase() === binding.workspacePath.toLowerCase());
+            const cleanFolderName = matchingWin ? matchingWin.projectName : (isEmp ? 'Antigravity (без папки)' : path.basename(binding.workspacePath).replace(/\.code-workspace$/i, ''));
             text += `<b>${t('Current Workspace (this chat)')}:</b> 📂 <b>${escapeHtml(cleanFolderName)}</b>\n`;
             if (isEmp) {
                 text += `  <i>${t('Path unknown')}</i>\n\n`;
@@ -2447,8 +2456,6 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         } else {
             text += `<b>${t('Current Workspace (this chat)')}:</b> ⚪ ${t('None')}\n\n`;
         }
-
-        const activeWindows = await scanActiveWindows();
 
         // Proactively connect to any newly discovered open windows in the background
         activeWindows.forEach((win) => {
