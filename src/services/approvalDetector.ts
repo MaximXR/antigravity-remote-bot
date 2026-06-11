@@ -61,25 +61,7 @@ export function classifyApproval(info: ApprovalInfo): ApprovalType {
         return 'file_edits';
     }
 
-    // 3. Read access
-    if (
-        desc.includes('read_file') ||
-        desc.includes('read file') ||
-        desc.includes('view_file') ||
-        desc.includes('view file') ||
-        desc.includes('list_dir') ||
-        desc.includes('list directory') ||
-        desc.includes('read directory') ||
-        desc.includes('list contents') ||
-        desc.includes('read_browser_page') ||
-        desc.includes('read browser page') ||
-        desc.includes('read') ||
-        desc.includes('view')
-    ) {
-        return 'read_access';
-    }
-
-    // 4. URL/Web access
+    // 3. URL/Web access
     if (
         desc.includes('read_url') ||
         desc.includes('read url') ||
@@ -95,6 +77,24 @@ export function classifyApproval(info: ApprovalInfo): ApprovalType {
         desc.includes('website')
     ) {
         return 'url_access';
+    }
+
+    // 4. Read access
+    if (
+        desc.includes('read_file') ||
+        desc.includes('read file') ||
+        desc.includes('view_file') ||
+        desc.includes('view file') ||
+        desc.includes('list_dir') ||
+        desc.includes('list directory') ||
+        desc.includes('read directory') ||
+        desc.includes('list contents') ||
+        desc.includes('read_browser_page') ||
+        desc.includes('read browser page') ||
+        desc.includes('read') ||
+        desc.includes('view')
+    ) {
+        return 'read_access';
     }
 
     return 'other_requests';
@@ -441,7 +441,24 @@ export function buildClickScript(buttonText: string): string {
                 ariaLabel.includes(wanted);
         });
         if (!target) return { ok: false, error: 'Button not found: ' + text };
-        target.click();
+
+        const triggerClick = (el) => {
+            const rect = el.getBoundingClientRect();
+            const x = rect.left + rect.width / 2;
+            const y = rect.top + rect.height / 2;
+            const eventTypes = ['pointerdown', 'mousedown', 'mouseup', 'click'];
+            for (const type of eventTypes) {
+                el.dispatchEvent(new MouseEvent(type, {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    clientX: x,
+                    clientY: y
+                }));
+            }
+        };
+
+        triggerClick(target);
 
         const radio = target.querySelector('input[type="radio"], input[type="checkbox"]');
         if (radio) {
@@ -458,7 +475,7 @@ export function buildClickScript(buttonText: string): string {
                 return t === 'submit' || t.startsWith('submit');
             });
             if (submitBtn) {
-                submitBtn.click();
+                triggerClick(submitBtn);
                 return { ok: true, submitted: true };
             }
         }
