@@ -31,9 +31,7 @@ export function classifyApproval(info: ApprovalInfo): ApprovalType {
         desc.includes('shell command') ||
         desc.includes('terminal') ||
         approve.includes('run') ||
-        approve.includes('execute') ||
-        approve.includes('выполнить') ||
-        approve.includes('запустить')
+        approve.includes('execute')
     ) {
         return 'console_commands';
     }
@@ -58,12 +56,7 @@ export function classifyApproval(info: ApprovalInfo): ApprovalType {
         desc.includes('files changes') ||
         desc.includes('file with changes') ||
         desc.includes('files with changes') ||
-        /files? (?:with )?changes/i.test(desc) ||
-        desc.includes('изменить файл') ||
-        desc.includes('записать файл') ||
-        desc.includes('создать файл') ||
-        approve.includes('принять') ||
-        approve.includes('одобрить')
+        /files? (?:with )?changes/i.test(desc)
     ) {
         return 'file_edits';
     }
@@ -99,9 +92,7 @@ export function classifyApproval(info: ApprovalInfo): ApprovalType {
         desc.includes('read_browser_page') ||
         desc.includes('read browser page') ||
         desc.includes('read') ||
-        desc.includes('view') ||
-        desc.includes('прочитать') ||
-        desc.includes('посмотреть')
+        desc.includes('view')
     ) {
         return 'read_access';
     }
@@ -126,20 +117,16 @@ export interface ApprovalDetectorOptions {
  * Detects allow/deny button pairs and extracts descriptions with fallbacks.
  */
 const DETECT_APPROVAL_SCRIPT = `(() => {
-    const ALLOW_ONCE_PATTERNS = ['allow once', 'allow one time', 'allow this time', '今回のみ許可', '1回のみ許可', '一度許可', 'разрешить один раз', 'разрешить раз', 'однократно'];
+    const ALLOW_ONCE_PATTERNS = ['allow once', 'allow one time', 'allow this time', '今回のみ許可', '1回のみ許可', '一度許可'];
     const ALWAYS_ALLOW_PATTERNS = [
         'allow this conversation',
         'allow this chat',
         'always allow',
         '常に許可',
         'この会話を許可',
-        'разрешить для этой беседы',
-        'разрешить для этого чата',
-        'разрешать всегда',
-        'всегда разрешать',
     ];
-    const ALLOW_PATTERNS = ['allow', 'permit', 'run', 'execute', 'accept', 'approve', '許可', '承認', '確認', '実行', 'разрешить', 'принять', 'выполнить', 'одобрить'];
-    const DENY_PATTERNS = ['deny', 'reject', 'no', 'no (tell', '拒否', 'decline', '却下', 'отклонить', 'запретить', 'нет'];
+    const ALLOW_PATTERNS = ['allow', 'permit', 'run', 'execute', 'accept', 'approve', '許可', '承認', '確認', '実行'];
+    const DENY_PATTERNS = ['deny', 'reject', 'no', 'no (tell', '拒否', 'decline', '却下'];
 
     const normalize = (text) => (text || '').toLowerCase().replace(/\\\\s+/g, ' ').trim();
     const isVisible = (el) => {
@@ -378,17 +365,13 @@ const DETECT_APPROVAL_SCRIPT = `(() => {
  * Press the toggle on the right side of Allow Once to expand the Always Allow dropdown.
  */
 const EXPAND_ALWAYS_ALLOW_MENU_SCRIPT = `(() => {
-    const ALLOW_ONCE_PATTERNS = ['allow once', 'allow one time', '今回のみ許可', '1回のみ許可', '一度許可', 'разрешить один раз', 'разрешить раз', 'однократно'];
+    const ALLOW_ONCE_PATTERNS = ['allow once', 'allow one time', '今回のみ許可', '1回のみ許可', '一度許可'];
     const ALWAYS_ALLOW_PATTERNS = [
         'allow this conversation',
         'allow this chat',
         'always allow',
         '常に許可',
         'この会話を許可',
-        'разрешить для этой беседы',
-        'разрешить для этого чата',
-        'разрешать всегда',
-        'всегда разрешать',
     ];
 
     const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
@@ -662,10 +645,6 @@ export class ApprovalDetector {
             'この会話を許可',
             'Always Allow',
             '常に許可',
-            'разрешить для этой беседы',
-            'разрешить для этого чата',
-            'разрешать всегда',
-            'всегда разрешать',
         ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
 
         for (const candidate of directCandidates) {
