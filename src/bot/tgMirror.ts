@@ -378,17 +378,7 @@ export async function sendPromptToAntigravity(
                         } catch (e) { logger.error('[Rename] Failed:', e); }
                     }
 
-                    for (let i = 0; i < generatedImages.length; i++) {
-                        const file = await toTelegramInputFile(generatedImages[i], i);
-                        if (file) {
-                            try {
-                                await api.sendPhoto(channel.chatId, new InputFile(file.buffer, file.name), {
-                                    caption: `🖼️ Generated image (${i + 1}/${generatedImages.length})`,
-                                    message_thread_id: channel.threadId,
-                                });
-                            } catch (e) { logger.error('[sendGeneratedImages] Failed:', e); }
-                        }
-                    }
+
                 } catch (error) {
                     logger.error(`[sendPrompt:${monitorTraceId}] onComplete failed:`, error);
                 } finally {
@@ -704,17 +694,7 @@ export async function mirrorResponseToTelegram(
                         }
                     } catch (e) { logger.error('[mirror] Failed to sync session title:', e); }
 
-                    for (let i = 0; i < generatedImages.length; i++) {
-                        const file = await toTelegramInputFile(generatedImages[i], i);
-                        if (file) {
-                            try {
-                                await api.sendPhoto(channel.chatId, new InputFile(file.buffer, file.name), {
-                                    caption: `🖼️ Generated image (${i + 1}/${generatedImages.length})`,
-                                    message_thread_id: channel.threadId,
-                                });
-                            } catch (e) { logger.error('[mirror:sendImages] Failed:', e); }
-                        }
-                    }
+
                 } catch (error) {
                     logger.error(`[mirror:${monitorTraceId}] onComplete failed:`, error);
                 } finally {
