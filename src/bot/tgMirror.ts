@@ -305,7 +305,13 @@ export async function sendPromptToAntigravity(
             onActivityProgress: async ({ title, body, footer, isFinalized }) => {
                 enqueueActivity(async () => {
                     if (isFinalized) {
-                        await setProgressMessage(`<b>${PHASE_ICONS.complete} ${escapeHtml(modelLabel)} · ${footer}</b>\n\n${body}`);
+                        const text = `<b>${PHASE_ICONS.complete} ${escapeHtml(modelLabel)} · ${footer}</b>\n\n${body}`;
+                        lastLiveActivityKey = text.slice(0, 200);
+                        if (liveActivityMsgId) {
+                            await editMsg(liveActivityMsgId, text, undefined);
+                        } else {
+                            liveActivityMsgId = await sendMsg(text, undefined);
+                        }
                     } else {
                         const text = `<b>${escapeHtml(title)}</b>\n\n${body}\n\n<i>${escapeHtml(footer)}</i>`;
                         const bodySnap = body.length + '|' + title + '|' + footer;
@@ -626,7 +632,13 @@ export async function mirrorResponseToTelegram(
                 enqueueActivity(async () => {
                     if (shouldSkipMirroring()) return;
                     if (isFinalized) {
-                        await setProgressMessage(`<b>${PHASE_ICONS.complete} ${escapeHtml(modelLabel)} · ${footer}</b>\n\n${body}`);
+                        const text = `<b>${PHASE_ICONS.complete} ${escapeHtml(modelLabel)} · ${footer}</b>\n\n${body}`;
+                        lastLiveActivityKey = text.slice(0, 200);
+                        if (liveActivityMsgId) {
+                            await editMsg(liveActivityMsgId, text, undefined);
+                        } else {
+                            liveActivityMsgId = await sendMsg(text, undefined);
+                        }
                     } else {
                         const text = `<b>${escapeHtml(title)}</b>\n\n${body}\n\n<i>${escapeHtml(footer)}</i>`;
                         const bodySnap = body.length + '|' + title + '|' + footer;
