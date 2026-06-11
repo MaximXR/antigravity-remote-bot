@@ -9,6 +9,7 @@ import {
     PLAN_PAGE_PREFIX,
 } from '../../src/ui/planUi';
 import type { PlanningInfo } from '../../src/services/planningDetector';
+import { buildTelegramKeyboard } from '../../src/bot/telegramAdapter';
 
 describe('planUi', () => {
     const info: PlanningInfo = {
@@ -21,7 +22,8 @@ describe('planUi', () => {
 
     describe('buildPlanNotificationUI', () => {
         it('builds notification with all four buttons', () => {
-            const { text, keyboard } = buildPlanNotificationUI(info, 'my-project', '12345');
+            const { text, buttons } = buildPlanNotificationUI(info, 'my-project', '12345');
+            const keyboard = buildTelegramKeyboard(buttons);
 
             expect(text).toContain('Plan Ready');
             expect(text).toContain('refactor-auth.md');
@@ -94,7 +96,8 @@ describe('planUi', () => {
     describe('buildPlanContentUI', () => {
         it('builds single page without navigation buttons (no proceedText)', () => {
             const pages = ['Plan content here'];
-            const { text, keyboard } = buildPlanContentUI(pages, 0, 'proj', '123');
+            const { text, buttons } = buildPlanContentUI(pages, 0, 'proj', '123');
+            const keyboard = buildTelegramKeyboard(buttons);
 
             expect(text).toContain('Plan Content');
             expect(text).toContain('Plan content here');
@@ -114,7 +117,8 @@ describe('planUi', () => {
 
         it('includes Proceed button when proceedText is provided', () => {
             const pages = ['Plan content here'];
-            const { keyboard } = buildPlanContentUI(pages, 0, 'proj', '123', 'implementation_plan.md', 'Proceed');
+            const { buttons } = buildPlanContentUI(pages, 0, 'proj', '123', 'implementation_plan.md', 'Proceed');
+            const keyboard = buildTelegramKeyboard(buttons);
 
             const rows = (keyboard as any).inline_keyboard;
             const allButtons = rows.flat();
@@ -127,7 +131,8 @@ describe('planUi', () => {
             const pages = ['Page 1', 'Page 2', 'Page 3'];
 
             // First page: only Next
-            const { text: t1, keyboard: k1 } = buildPlanContentUI(pages, 0, 'proj', '123');
+            const { text: t1, buttons: b1 } = buildPlanContentUI(pages, 0, 'proj', '123');
+            const k1 = buildTelegramKeyboard(b1);
             expect(t1).toContain('(1/3)');
             const rows1 = (k1 as any).inline_keyboard;
             expect(rows1[0].length).toBe(1);
@@ -135,13 +140,15 @@ describe('planUi', () => {
             expect(rows1[0][0].text).toContain('Next');
 
             // Middle page: Prev and Next
-            const { text: t2, keyboard: k2 } = buildPlanContentUI(pages, 1, 'proj', '123');
+            const { text: t2, buttons: b2 } = buildPlanContentUI(pages, 1, 'proj', '123');
+            const k2 = buildTelegramKeyboard(b2);
             expect(t2).toContain('(2/3)');
             const rows2 = (k2 as any).inline_keyboard;
             expect(rows2[0].length).toBe(2);
 
             // Last page: only Prev
-            const { keyboard: k3 } = buildPlanContentUI(pages, 2, 'proj', '123');
+            const { buttons: b3 } = buildPlanContentUI(pages, 2, 'proj', '123');
+            const k3 = buildTelegramKeyboard(b3);
             const rows3 = (k3 as any).inline_keyboard;
             expect(rows3[0].length).toBe(1);
             expect(rows3[0][0].text).toContain('Prev');

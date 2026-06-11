@@ -6,7 +6,7 @@
  *   - Use a scored/priority-based selector approach for RESPONSE_TEXT
  */
 
-import { RESPONSE_SELECTORS } from '../../src/services/responseMonitor';
+import { RESPONSE_SELECTORS } from '../../src/utils/domSelectors';
 
 describe('Lean RESPONSE_SELECTORS', () => {
     // ---------------------------------------------------------------
@@ -182,13 +182,7 @@ describe('Lean RESPONSE_SELECTORS', () => {
         expect(script).toContain('.notify-user-container');
     });
 
-    // ---------------------------------------------------------------
-    // Test 19c: DUMP_ALL_TEXTS excludes .notify-user-container
-    // ---------------------------------------------------------------
-    it('DUMP_ALL_TEXTS script excludes .notify-user-container', () => {
-        const script = RESPONSE_SELECTORS.DUMP_ALL_TEXTS;
-        expect(script).toContain('.notify-user-container');
-    });
+
 
     // ---------------------------------------------------------------
     // Test 19d: PROCESS_LOGS excludes .notify-user-container
@@ -216,14 +210,6 @@ describe('Lean RESPONSE_SELECTORS', () => {
     });
 
     // ---------------------------------------------------------------
-    // Test 22: DUMP_ALL_TEXTS classifies quota popup as skip
-    // ---------------------------------------------------------------
-    it('DUMP_ALL_TEXTS script classifies quota popup as quota-popup skip', () => {
-        const script = RESPONSE_SELECTORS.DUMP_ALL_TEXTS.toLowerCase();
-        expect(script).toContain('quota-popup');
-    });
-
-    // ---------------------------------------------------------------
     // Test 23: QUOTA_ERROR detects inline "exhausted your quota" pattern
     // ---------------------------------------------------------------
     it('QUOTA_ERROR script detects inline exhausted quota pattern', () => {
@@ -248,11 +234,5 @@ describe('Lean RESPONSE_SELECTORS', () => {
         expect(script).toContain('exhausted your quota');
     });
 
-    // ---------------------------------------------------------------
-    // Test 26: DUMP_ALL_TEXTS catches inline exhausted quota pattern
-    // ---------------------------------------------------------------
-    it('DUMP_ALL_TEXTS catches inline exhausted quota as quota-popup skip', () => {
-        const script = RESPONSE_SELECTORS.DUMP_ALL_TEXTS.toLowerCase();
-        expect(script).toContain('exhausted your quota');
-    });
+
 });

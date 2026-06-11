@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import { acquireLock } from '../../src/utils/lockfile';
 
 const mockedFs = fs as jest.Mocked<typeof fs>;
-const expectedLockPath = path.join(os.homedir(), '.remoat', '.bot.lock');
+const expectedLockPath = path.resolve(__dirname, '..', '..', '.remoat', '.bot.lock');
 
 describe('lockfile', () => {
     let processKillSpy: jest.SpyInstance;

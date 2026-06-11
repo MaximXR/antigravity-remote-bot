@@ -197,7 +197,7 @@ describe('ErrorPopupDetector - error popup detection and remote execution', () =
         expect(mockCdpService.call).toHaveBeenCalledWith(
             'Runtime.evaluate',
             expect.objectContaining({
-                expression: expect.stringContaining('Dismiss'),
+                expression: expect.stringContaining('dismiss'),
                 returnByValue: true,
                 contextId: 42,
             }),
@@ -224,7 +224,7 @@ describe('ErrorPopupDetector - error popup detection and remote execution', () =
         expect(mockCdpService.call).toHaveBeenCalledWith(
             'Runtime.evaluate',
             expect.objectContaining({
-                expression: expect.stringContaining('Copy debug info'),
+                expression: expect.stringContaining('copy debug info'),
                 returnByValue: true,
                 contextId: 42,
             }),
@@ -251,7 +251,7 @@ describe('ErrorPopupDetector - error popup detection and remote execution', () =
         expect(mockCdpService.call).toHaveBeenCalledWith(
             'Runtime.evaluate',
             expect.objectContaining({
-                expression: expect.stringContaining('Retry'),
+                expression: expect.stringContaining('retry'),
                 returnByValue: true,
                 contextId: 42,
             }),

@@ -207,7 +207,7 @@ describe('PlanningDetector - planning button detection and remote execution', ()
         expect(mockCdpService.call).toHaveBeenCalledWith(
             'Runtime.evaluate',
             expect.objectContaining({
-                expression: expect.stringContaining('Open'),
+                expression: expect.stringContaining('open'),
                 returnByValue: true,
                 contextId: 42,
             }),
@@ -234,7 +234,7 @@ describe('PlanningDetector - planning button detection and remote execution', ()
         expect(mockCdpService.call).toHaveBeenCalledWith(
             'Runtime.evaluate',
             expect.objectContaining({
-                expression: expect.stringContaining('Proceed'),
+                expression: expect.stringContaining('proceed'),
                 returnByValue: true,
                 contextId: 42,
             }),
@@ -416,7 +416,7 @@ describe('PlanningDetector - planning button detection and remote execution', ()
         expect(mockCdpService.call).toHaveBeenLastCalledWith(
             'Runtime.evaluate',
             expect.objectContaining({
-                expression: expect.stringContaining('Open Plan'),
+                expression: expect.stringContaining('open plan'),
             }),
         );
     });
@@ -447,7 +447,7 @@ describe('PlanningDetector - planning button detection and remote execution', ()
         expect(mockCdpService.call).toHaveBeenLastCalledWith(
             'Runtime.evaluate',
             expect.objectContaining({
-                expression: expect.stringContaining('Start Implementation'),
+                expression: expect.stringContaining('start implementation'),
             }),
         );
     });

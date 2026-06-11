@@ -26,61 +26,39 @@ Note: jest.config.js ignores `responseMonitor.test.ts` and `responseMonitor.stop
 
 ## Architecture
 
-Three-layer design: **CLI → Bot → Services/DB**
+Three-layer design: **CLI → Bot Layer → IDE Core Layer → Services/DB**
 
 - **`src/bin/`** — Commander CLI with subcommands: `start`, `setup`, `doctor`, `open`
-- **`src/bot/index.ts`** — Main bot file (~63KB); grammy Telegram event handling, message routing, callback queries
-- **`src/commands/`** — Slash command handlers (`/project`, `/new`, `/chat`, `/model`, `/mode`, `/template`, `/stop`, `/screenshot`, `/status`, `/autoaccept`, `/cleanup`, `/help`) and message parser
-- **`src/services/`** — Core business logic (26 files):
-  - **CDP integration**: `cdpService.ts`, `cdpBridgeManager.ts`, `cdpConnectionPool.ts` — WebSocket communication with Antigravity
-  - **Response monitoring**: `responseMonitor.ts` (~42KB) — DOM polling at 2-second intervals with dual output streams (AI response text + activity log), completion detection via stop-button absence (3 consecutive checks for flicker resilience), baseline suppression to ignore previous turn content
-  - **Feature detectors**: `approvalDetector.ts`, `planningDetector.ts`, `errorPopupDetector.ts`, `userMessageDetector.ts`
-  - **Session/workspace management**: `chatSessionService.ts`, `workspaceService.ts`, `telegramTopicManager.ts`
-  - **Execution**: `promptDispatcher.ts`, `progressSender.ts`, `autoAcceptService.ts`
-- **`src/database/`** — SQLite via better-sqlite3; repositories for sessions, workspace bindings, templates, schedules
-- **`src/ui/`** — Telegram InlineKeyboard builders
-- **`src/utils/`** — Config loading, logging, Telegram formatting, HTML-to-markdown conversion, path security, i18n
-- **`src/middleware/`** — Auth (whitelist-based user ID) and input sanitization
+- **`src/bot/`** — Telegram bot event handling, message routing, callback queries, and UI components markup (`src/ui/`).
+- **`src/commands/`** — Slash command handlers (`/project`, `/new`, `/chat`, `/model`, `/mode`, `/template`, `/stop`, `/screenshot`, `/status`, `/autoaccept`, `/cleanup`, `/help`) and message parser.
+- **`src/services/`** — Core business logic:
+  - **IDE Prompt Runner**: `idePromptRunner.ts` — Decoupled runner managing prompt injections and response monitors.
+  - **QuickPick Selector**: `quickPickResolver.ts` — Automates IDE window selection and resolution.
+  - **CDP integration**: `cdpService.ts`, `cdpBridgeManager.ts`, `cdpConnectionPool.ts` — WebSocket communication with Antigravity.
+  - **Response monitoring**: `responseMonitor.ts` — Scrapes responses, thinking blocks, and logs.
+  - **Feature detectors**: `approvalDetector.ts`, `planningDetector.ts`, `errorPopupDetector.ts`, `userMessageDetector.ts`.
+- **`src/database/`** — SQLite persistence repositories.
+- **`src/ui/`** — Telegram InlineKeyboard builders.
+- **`src/utils/`** — Config loading, logging, Telegram formatting, path security, i18n.
 
 ## Key Technical Details
 
-- **TypeScript strict mode**, target ES2022, CommonJS modules
-- **Path alias**: `@/` maps to `src/` in jest.config.js `moduleNameMapper` only (for tests). Source code uses relative imports (`./`, `../`)
-- **Data flow**: Telegram long-polling (no webhooks) → auth middleware → command routing → CDP injection into Antigravity → DOM polling for responses → chunked/streamed back to Telegram (max 4096 chars/message)
-- **Config**: `.env` file or `~/.config/remoat/config.json` (see `src/utils/configLoader.ts`). Key env vars:
-  - `TELEGRAM_BOT_TOKEN`, `ALLOWED_USER_IDS` (required)
-  - `WORKSPACE_BASE_DIR` — projects parent directory
-  - `USE_TOPICS` — Telegram Forum Topics (default: true)
-  - `EXTRACTION_MODE` — `structured` or `legacy` (default: structured)
-  - `AUTO_APPROVE_FILE_EDITS`, `LOG_LEVEL`, `ANTIGRAVITY_PATH`
-- **Database**: Local SQLite file (`antigravity.db`) with 4 tables: `chat_sessions`, `workspace_bindings`, `prompt_templates`, `schedules`
-- **Optional features**: Voice transcription requires optional deps `nodejs-whisper` and `ffmpeg-static`
-- **i18n**: Translations in `locales/` (en, ja) loaded via `src/utils/i18n.ts`
+- **TypeScript strict mode**, target ES2022, CommonJS modules.
+- **Path alias**: `@/` maps to `src/` in tests only. Source code uses relative imports.
+- **Config**: `.env` or local `.remoat/config.json`.
+- **Database**: Local SQLite file (`.remoat/antigravity.db`) with schemas in [docs/DB_SCHEMA.md](file:///e:/Desktop/Remoat/docs/DB_SCHEMA.md).
 
-## Documentation
+## Code Conventions
 
-- `docs/DEVELOPER_INDEX.md` — Conceptual map and directory index for developers and AI agents (start here)
-- `docs/ARCHITECTURE.md` — System overview and design rationale
-- `docs/RESPONSE_MONITOR.md` — DOM polling strategy, dual output streams, scored selectors
-- `docs/ANTIGRAVITY_DOM_SELECTORS.md` — DOM selector reference (critical for CDP interaction code)
-- `docs/CHAT_SESSIONS_GUIDE.md` — Managing chat sessions, history panels, search inputs, and QuickPicks via CDP
-- `docs/dom-inspection-guide.md` — How to find new selectors
+- **Conventional Commits**: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`, `perf:`
+- Prefer `interface` over `type` for object definitions.
+- Prefer `const` over `let`; avoid direct object/array mutation (use spread).
+- CDP Button clicks normalization: Target strings inside expressions MUST be lowercase (e.g. `'allow'`, `'deny'`) to match normalization inside `buildClickScript`.
 
 ## Diagnostics & Scripts
 
-All diagnostic and CDP inspection scripts are located in the `diagnostics/` directory:
+All diagnostic and CDP inspection scripts are located in the `diagnostics/` directory.
 - `diagnostics/list_cdp_pages.js` - List active Chrome DevTools targets and ports.
 - `diagnostics/capture_real_screenshot.js` - Capture and save a screenshot of the active Antigravity IDE workbench.
 - `diagnostics/test_cdp_contexts.ts` - Check and log active CDP Execution Contexts.
 - `diagnostics/click_undo.js` - Align and click the Cascade rollback button.
-
-## Code Conventions
-
-- **Conventional Commits**: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`, `perf:`, `ci:`
-- Prefer `interface` over `type` for object definitions
-- Prefer `const` over `let`; avoid direct object/array mutation (use spread)
-- No linter configured — rely on `tsc` for type checking
-
-### CDP & Performance Conventions (CRITICAL)
-- **NO Generic Selectors**: Never use generic selectors (`div`, `span`, `*`) for full-page background polling (e.g. in detectors). This causes massive CPU lag in the Cascade UI thread. Always narrow down queries on the browser side using specific classes, roles, or tags (e.g., `button, [role="button"], .cursor-pointer`).
-- **Detector Pausing**: Non-critical background detectors (e.g., `PlanningDetector`, `ErrorPopupDetector`) must be paused during active AI response generation (when `ResponseMonitor` is active) to free up CPU resources.

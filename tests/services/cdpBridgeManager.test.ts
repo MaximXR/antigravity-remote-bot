@@ -185,8 +185,8 @@ describe('ensureApprovalDetector', () => {
     it('onResolved removes the keyboard markup from the last approval message', () => {
         const bridge = initCdpBridge();
         const cdp = makeCdp();
-        const mockEditMarkup = jest.fn().mockResolvedValue(undefined);
-        bridge.botApi = { editMessageReplyMarkup: mockEditMarkup } as any;
+        const mockCleanButtons = jest.fn().mockResolvedValue(undefined);
+        bridge.messenger = { cleanMessageButtons: mockCleanButtons } as any;
 
         ensureApprovalDetector(bridge, cdp, 'my-project');
         expect(capturedOptions).not.toBeNull();
@@ -197,14 +197,14 @@ describe('ensureApprovalDetector', () => {
 
         // Directly invoke onResolved — with no prior message it should be a no-op.
         capturedOptions!.onResolved?.();
-        expect(mockEditMarkup).not.toHaveBeenCalled();
+        expect(mockCleanButtons).not.toHaveBeenCalled();
     });
 
-    it('onResolved handles editMessageReplyMarkup failure without throwing', async () => {
+    it('onResolved handles cleanMessageButtons failure without throwing', async () => {
         const bridge = initCdpBridge();
         const cdp = makeCdp();
-        const mockEditMarkup = jest.fn().mockRejectedValue(new Error('400: Bad Request: message is not modified'));
-        bridge.botApi = { editMessageReplyMarkup: mockEditMarkup } as any;
+        const mockCleanButtons = jest.fn().mockRejectedValue(new Error('400: Bad Request: message is not modified'));
+        bridge.messenger = { cleanMessageButtons: mockCleanButtons, sendMessage: jest.fn().mockResolvedValue(42) } as any;
 
         // Capture the onApprovalRequired callback so we can trigger it and set lastMessageId
         let capturedOnApproval: ((info: any) => Promise<void>) | null = null;
@@ -216,14 +216,13 @@ describe('ensureApprovalDetector', () => {
 
         const channel = { chatId: 999 };
         bridge.approvalChannelByWorkspace.set('my-project', channel);
-        (bridge.botApi as any).sendMessage = jest.fn().mockResolvedValue({ message_id: 42 });
 
         ensureApprovalDetector(bridge, cdp, 'my-project');
 
         // Trigger onApprovalRequired to populate lastMessageId in the closure
         await capturedOnApproval!({ approveText: 'Allow', denyText: 'Deny', description: 'test' });
 
-        // Now call onResolved — editMessageReplyMarkup will fail with 400 but must not throw
+        // Now call onResolved — cleanMessageButtons will fail with 400 but must not throw
         await expect(
             new Promise<void>((resolve) => {
                 capturedOptions!.onResolved?.();

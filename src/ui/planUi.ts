@@ -1,6 +1,6 @@
-import { InlineKeyboard } from 'grammy';
 import { escapeHtml } from '../utils/telegramFormatter';
 import type { PlanningInfo } from '../services/planningDetector';
+import type { AbstractButton } from '../services/messengerPort';
 
 // Callback data prefixes
 export const PLAN_VIEW_BTN = 'plan_view_btn';
@@ -70,12 +70,12 @@ function markdownToTelegramHtml(md: string): string {
 
 export interface PlanNotificationUI {
     text: string;
-    keyboard: InlineKeyboard;
+    buttons: AbstractButton[][];
 }
 
 export interface PlanContentPage {
     text: string;
-    keyboard: InlineKeyboard;
+    buttons: AbstractButton[][];
 }
 
 /**
@@ -93,28 +93,31 @@ export function buildPlanNotificationUI(
     if (planName.toLowerCase().includes('task')) typeLabel = 'Task';
     else if (planName.toLowerCase().includes('walkthrough')) typeLabel = 'Walkthrough';
 
-    let text = `\u{1F4CB} <b>${typeLabel} Ready</b>\n\n`;
+    let text = `📋 <b>${typeLabel} Ready</b>\n\n`;
     text += escapeHtml(description) + `\n\n`;
     text += `<b>${typeLabel}:</b> ${escapeHtml(planName)}\n`;
     text += `<b>Workspace:</b> ${escapeHtml(projectName)}`;
 
     const suffix = `${projectName}:${targetChannelStr}`;
-    const keyboard = new InlineKeyboard();
 
+    const row1: AbstractButton[] = [];
     const openLabel = info.openText || `Open ${typeLabel}`;
-    keyboard.text(`\u{1F4D6} ${openLabel}`, `${PLAN_VIEW_BTN}:${suffix}`);
+    row1.push({ text: `📖 ${openLabel}`, action: `${PLAN_VIEW_BTN}:${suffix}` });
 
     if (info.proceedText) {
         const proceedLabel = info.proceedText;
         const proceedIcon = proceedLabel.toLowerCase().includes('accept') || proceedLabel.toLowerCase().includes('approve') ? '✅' : '▶';
-        keyboard.text(`${proceedIcon} ${proceedLabel}`, `${PLAN_PROCEED_BTN}:${suffix}`);
+        row1.push({ text: `${proceedIcon} ${proceedLabel}`, action: `${PLAN_PROCEED_BTN}:${suffix}` });
     }
 
-    keyboard.row()
-        .text(`\u270F\uFE0F Edit ${typeLabel}`, `${PLAN_EDIT_BTN}:${suffix}`)
-        .text('\u{1F504} Refresh', `${PLAN_REFRESH_BTN}:${suffix}`);
+    const row2: AbstractButton[] = [
+        { text: `✍️ Edit ${typeLabel}`, action: `${PLAN_EDIT_BTN}:${suffix}` },
+        { text: `🔄 Refresh`, action: `${PLAN_REFRESH_BTN}:${suffix}` }
+    ];
 
-    return { text, keyboard };
+    const buttons = [row1, row2];
+
+    return { text, buttons };
 }
 
 /**
@@ -167,35 +170,37 @@ export function buildPlanContentUI(
         else if (planTitle.toLowerCase().includes('walkthrough')) typeLabel = 'Walkthrough';
     }
 
-    let text = `<b>\u{1F4CB} ${typeLabel} Content</b>`;
+    let text = `<b>📋 ${typeLabel} Content</b>`;
     if (totalPages > 1) {
         text += ` (${currentPage + 1}/${totalPages})`;
     }
     text += `\n\n${markdownToTelegramHtml(page)}`;
 
     const suffix = `${projectName}:${targetChannelStr}`;
-    const keyboard = new InlineKeyboard();
+    const buttons: AbstractButton[][] = [];
 
+    const navRow: AbstractButton[] = [];
     if (totalPages > 1) {
         if (currentPage > 0) {
-            keyboard.text('\u25C0 Prev', `${PLAN_PAGE_PREFIX}:${currentPage - 1}:${suffix}`);
+            navRow.push({ text: '◀ Prev', action: `${PLAN_PAGE_PREFIX}:${currentPage - 1}:${suffix}` });
         }
         if (currentPage < totalPages - 1) {
-            keyboard.text('Next \u25B6', `${PLAN_PAGE_PREFIX}:${currentPage + 1}:${suffix}`);
+            navRow.push({ text: 'Next ▶', action: `${PLAN_PAGE_PREFIX}:${currentPage + 1}:${suffix}` });
         }
-        keyboard.row();
+    }
+    if (navRow.length > 0) {
+        buttons.push(navRow);
     }
 
+    const actionRow: AbstractButton[] = [];
     if (proceedText) {
         const proceedIcon = proceedText.toLowerCase().includes('accept') || proceedText.toLowerCase().includes('approve') ? '✅' : '▶';
-        keyboard.text(`${proceedIcon} ${proceedText}`, `${PLAN_PROCEED_BTN}:${suffix}`);
+        actionRow.push({ text: `${proceedIcon} ${proceedText}`, action: `${PLAN_PROCEED_BTN}:${suffix}` });
     }
+    actionRow.push({ text: '✍️ Edit', action: `${PLAN_EDIT_BTN}:${suffix}` });
+    actionRow.push({ text: '🔄 Refresh', action: `${PLAN_REFRESH_BTN}:${suffix}` });
+    actionRow.push({ text: '📖 View Full', action: `${PLAN_VIEW_BTN}:${suffix}` });
+    buttons.push(actionRow);
 
-    keyboard
-        .text('\u270F\uFE0F Edit', `${PLAN_EDIT_BTN}:${suffix}`)
-        .row()
-        .text('\u{1F504} Refresh', `${PLAN_REFRESH_BTN}:${suffix}`)
-        .text('\u{1F4D6} View Full', `${PLAN_VIEW_BTN}:${suffix}`);
-
-    return { text, keyboard };
+    return { text, buttons };
 }

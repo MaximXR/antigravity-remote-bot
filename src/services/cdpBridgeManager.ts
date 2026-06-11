@@ -1,5 +1,3 @@
-import { Api, InlineKeyboard } from 'grammy';
-
 import { t } from '../utils/i18n';
 import { logger } from '../utils/logger';
 import { escapeHtml } from '../utils/telegramFormatter';
@@ -13,22 +11,17 @@ import { QuotaService } from './quotaService';
 import { UserMessageDetector, UserMessageInfo } from './userMessageDetector';
 import { buildPlanNotificationUI } from '../ui/planUi';
 import { loadConfig } from '../utils/config';
-
-/** Represents a Telegram chat target: either a chat_id or chat_id + message_thread_id */
-export interface TelegramChannel {
-    chatId: number | string;
-    threadId?: number;
-}
+import { IMessengerPort, ChannelContext, AbstractButton } from './messengerPort';
 
 export interface CdpBridge {
     pool: CdpConnectionPool;
     quota: QuotaService;
     autoAccept: AutoAcceptService;
     lastActiveWorkspace: string | null;
-    lastActiveChannel: TelegramChannel | null;
-    approvalChannelByWorkspace: Map<string, TelegramChannel>;
-    approvalChannelBySession: Map<string, TelegramChannel>;
-    botApi: Api | null;
+    lastActiveChannel: ChannelContext | null;
+    approvalChannelByWorkspace: Map<string, ChannelContext>;
+    approvalChannelBySession: Map<string, ChannelContext>;
+    messenger: IMessengerPort | null;
     botToken: string;
 }
 
@@ -81,7 +74,7 @@ export async function getCurrentChatTitle(cdp: CdpService): Promise<string | nul
 export function registerApprovalWorkspaceChannel(
     bridge: CdpBridge,
     projectName: string,
-    channel: TelegramChannel,
+    channel: ChannelContext,
 ): void {
     bridge.approvalChannelByWorkspace.set(projectName, channel);
 }
@@ -90,7 +83,7 @@ export function registerApprovalSessionChannel(
     bridge: CdpBridge,
     projectName: string,
     sessionTitle: string,
-    channel: TelegramChannel,
+    channel: ChannelContext,
 ): void {
     if (!sessionTitle || sessionTitle.trim().length === 0) return;
     bridge.approvalChannelBySession.set(buildSessionRouteKey(projectName, sessionTitle), channel);
@@ -101,7 +94,7 @@ export function resolveApprovalChannelForCurrentChat(
     bridge: CdpBridge,
     projectName: string,
     currentChatTitle: string | null,
-): TelegramChannel | null {
+): ChannelContext | null {
     if (currentChatTitle && currentChatTitle.trim().length > 0) {
         const key = buildSessionRouteKey(projectName, currentChatTitle);
         const sessionChannel = bridge.approvalChannelBySession.get(key);
@@ -212,7 +205,7 @@ export function initCdpBridge(): CdpBridge {
         lastActiveChannel: null,
         approvalChannelByWorkspace: new Map(),
         approvalChannelBySession: new Map(),
-        botApi: null,
+        messenger: null,
         botToken: '',
     };
 }
@@ -228,25 +221,6 @@ export function getCurrentCdp(bridge: CdpBridge): CdpService | null {
         return bridge.pool.getConnected(activeNames[0]);
     }
     return null;
-}
-
-async function sendTelegramMessage(
-    api: Api,
-    channel: TelegramChannel,
-    text: string,
-    keyboard?: InlineKeyboard,
-): Promise<number | null> {
-    try {
-        const msg = await api.sendMessage(channel.chatId, text, {
-            parse_mode: 'HTML',
-            message_thread_id: channel.threadId,
-            reply_markup: keyboard,
-        });
-        return msg.message_id;
-    } catch (err) {
-        logger.error('[Telegram] Failed to send message:', err);
-        return null;
-    }
 }
 
 interface DeferredApproval {
@@ -269,14 +243,14 @@ export async function flushDeferredApproval(
     const currentChatTitle = await getCurrentChatTitle(cdp);
     const targetChannel = resolveApprovalChannelForCurrentChat(bridge, projectName, currentChatTitle);
 
-    if (!targetChannel || !bridge.botApi) {
-        logger.warn(`[ApprovalDetector:${projectName}] flushDeferredApproval skipped — no channel`);
+    if (!targetChannel || !bridge.messenger) {
+        logger.warn(`[ApprovalDetector:${projectName}] flushDeferredApproval skipped — no channel or messenger port connected`);
         return;
     }
 
     if (isAutoApproved) {
         const text = `✅ <b>Auto-approved (File Edits)</b>\nFile changes were automatically approved during generation.\n<b>Workspace:</b> ${escapeHtml(projectName)}`;
-        await sendTelegramMessage(bridge.botApi, targetChannel, text);
+        await bridge.messenger.sendMessage(targetChannel, text);
     } else {
         const targetChannelStr = targetChannel.threadId ? String(targetChannel.threadId) : String(targetChannel.chatId);
         
@@ -289,14 +263,16 @@ export async function flushDeferredApproval(
 
         const approveLabel = info.approveText.replace(/[⌃⌥⇧⏎⌘\u2318\u2325\u21B5]+/g, '').trim() || 'Allow';
         const denyLabel = info.denyText || 'Deny';
-        const keyboard = new InlineKeyboard()
-            .text(`✅ ${approveLabel}`, buildApprovalCustomId('approve', projectName, targetChannelStr));
-        if (info.alwaysAllowText) {
-            keyboard.text('✅ Allow Chat', buildApprovalCustomId('always_allow', projectName, targetChannelStr));
-        }
-        keyboard.text(`❌ ${denyLabel}`, buildApprovalCustomId('deny', projectName, targetChannelStr));
 
-        const msgId = await sendTelegramMessage(bridge.botApi, targetChannel, text, keyboard);
+        const buttons: AbstractButton[] = [
+            { text: `✅ ${approveLabel}`, action: buildApprovalCustomId('approve', projectName, targetChannelStr) }
+        ];
+        if (info.alwaysAllowText) {
+            buttons.push({ text: '✅ Allow Chat', action: buildApprovalCustomId('always_allow', projectName, targetChannelStr) });
+        }
+        buttons.push({ text: `❌ ${denyLabel}`, action: buildApprovalCustomId('deny', projectName, targetChannelStr) });
+
+        const msgId = await bridge.messenger.sendMessage(targetChannel, text, buttons);
         if (msgId) {
             const key = `${info.approveText}::${info.description}`;
             const db = (bridge as any).db;
@@ -366,13 +342,18 @@ export function ensureApprovalDetector(
                 }
             }
 
-            if (!msgId || !chatId || !bridge.botApi) return;
+            if (!msgId || !chatId || !bridge.messenger) return;
             
             lastMessageId = null;
             lastMessageChatId = null;
 
-            bridge.botApi.editMessageReplyMarkup(chatId, msgId, { reply_markup: undefined })
-                .catch((e) => logger.debug('[ApprovalDetector] Markup remove failed (expected if already removed):', e));
+            if (bridge.messenger.cleanMessageButtons) {
+                try {
+                    await bridge.messenger.cleanMessageButtons({ chatId: Number(chatId) }, msgId);
+                } catch (err) {
+                    logger.debug('[ApprovalDetector] cleanMessageButtons failed:', err);
+                }
+            }
         },
         onApprovalRequired: async (info: ApprovalInfo) => {
             logger.debug(`[ApprovalDetector:${projectName}] Approval detected`);
@@ -380,8 +361,8 @@ export function ensureApprovalDetector(
             const currentChatTitle = await getCurrentChatTitle(cdp);
             const targetChannel = resolveApprovalChannelForCurrentChat(bridge, projectName, currentChatTitle);
 
-            if (!targetChannel || !bridge.botApi) {
-                logger.warn(`[ApprovalDetector:${projectName}] Skipped — no target channel`);
+            if (!targetChannel || !bridge.messenger) {
+                logger.warn(`[ApprovalDetector:${projectName}] Skipped — no target channel or messenger port`);
                 return;
             }
 
@@ -434,8 +415,10 @@ export function ensureApprovalDetector(
                     return;
                 } else {
                     // Different approval, remove keyboard from old message and delete it from DB
-                    bridge.botApi.editMessageReplyMarkup(existingRow.chat_id, existingRow.message_id, { reply_markup: undefined })
-                        .catch(() => {});
+                    if (bridge.messenger.cleanMessageButtons) {
+                        await bridge.messenger.cleanMessageButtons({ chatId: Number(existingRow.chat_id) }, existingRow.message_id)
+                            .catch(() => {});
+                    }
                     if (db) {
                         try {
                             db.prepare('DELETE FROM active_approvals WHERE project_name = ?').run(projectName);
@@ -450,7 +433,7 @@ export function ensureApprovalDetector(
                 const text = accepted
                     ? `✅ <b>Auto-approved (${categoryLabel})</b>\nAn action was automatically approved.\n<b>Workspace:</b> ${escapeHtml(projectName)}`
                     : `⚠️ <b>Auto-approve failed (${categoryLabel})</b>\nManual approval required.\n<b>Workspace:</b> ${escapeHtml(projectName)}`;
-                await sendTelegramMessage(bridge.botApi, targetChannel, text);
+                await bridge.messenger.sendMessage(targetChannel, text);
                 if (accepted) return;
             }
 
@@ -464,14 +447,16 @@ export function ensureApprovalDetector(
             // Use actual button labels from the UI
             const approveLabel = info.approveText.replace(/[⌃⌥⇧⏎⌘\u2318\u2325\u21B5]+/g, '').trim() || 'Allow';
             const denyLabel = info.denyText || 'Deny';
-            const keyboard = new InlineKeyboard()
-                .text(`✅ ${approveLabel}`, buildApprovalCustomId('approve', projectName, targetChannelStr));
-            if (info.alwaysAllowText) {
-                keyboard.text('✅ Allow Chat', buildApprovalCustomId('always_allow', projectName, targetChannelStr));
-            }
-            keyboard.text(`❌ ${denyLabel}`, buildApprovalCustomId('deny', projectName, targetChannelStr));
 
-            const msgId = await sendTelegramMessage(bridge.botApi, targetChannel, text, keyboard);
+            const buttons: AbstractButton[] = [
+                { text: `✅ ${approveLabel}`, action: buildApprovalCustomId('approve', projectName, targetChannelStr) }
+            ];
+            if (info.alwaysAllowText) {
+                buttons.push({ text: '✅ Allow Chat', action: buildApprovalCustomId('always_allow', projectName, targetChannelStr) });
+            }
+            buttons.push({ text: `❌ ${denyLabel}`, action: buildApprovalCustomId('deny', projectName, targetChannelStr) });
+
+            const msgId = await bridge.messenger.sendMessage(targetChannel, text, buttons);
             if (msgId) {
                 lastMessageId = msgId;
                 lastMessageChatId = targetChannel.chatId;
@@ -523,13 +508,15 @@ export function ensurePlanningDetector(
         cdpService: cdp,
         pollIntervalMs: 2000,
         onResolved: () => {
-            if (!lastMessageId || !lastMessageChatId || !bridge.botApi) return;
+            if (!lastMessageId || !lastMessageChatId || !bridge.messenger) return;
             const msgId = lastMessageId;
             const chatId = lastMessageChatId;
             lastMessageId = null;
             lastMessageChatId = null;
-            bridge.botApi.editMessageReplyMarkup(chatId, msgId, { reply_markup: undefined })
-                .catch((e) => logger.debug('[PlanningDetector] Markup remove failed (expected if already removed):', e));
+            if (bridge.messenger.cleanMessageButtons) {
+                bridge.messenger.cleanMessageButtons({ chatId: Number(chatId) }, msgId)
+                    .catch((e) => logger.debug('[PlanningDetector] Markup remove failed (expected if already removed):', e));
+            }
         },
         onPlanningRequired: async (info: PlanningInfo) => {
             logger.debug(`[PlanningDetector:${projectName}] Planning detected`);
@@ -537,13 +524,13 @@ export function ensurePlanningDetector(
             const currentChatTitle = await getCurrentChatTitle(cdp);
             const targetChannel = resolveApprovalChannelForCurrentChat(bridge, projectName, currentChatTitle);
 
-            if (!targetChannel || !bridge.botApi) return;
+            if (!targetChannel || !bridge.messenger) return;
 
             const targetChannelStr = targetChannel.threadId ? String(targetChannel.threadId) : String(targetChannel.chatId);
 
-            const { text, keyboard } = buildPlanNotificationUI(info, projectName, targetChannelStr);
+            const { text, buttons } = buildPlanNotificationUI(info, projectName, targetChannelStr);
 
-            const msgId = await sendTelegramMessage(bridge.botApi, targetChannel, text, keyboard);
+            const msgId = await bridge.messenger.sendMessage(targetChannel, text, buttons);
             if (msgId) {
                 lastMessageId = msgId;
                 lastMessageChatId = targetChannel.chatId;
@@ -555,10 +542,10 @@ export function ensurePlanningDetector(
             const currentChatTitle = await getCurrentChatTitle(cdp);
             const targetChannel = resolveApprovalChannelForCurrentChat(bridge, projectName, currentChatTitle);
 
-            if (!targetChannel || !bridge.botApi) return;
+            if (!targetChannel || !bridge.messenger) return;
 
             const text = `📄 <b>${chipText}</b> opened in <b>${projectName}</b>\n\n<i>Auto-opened — view in Antigravity editor.</i>`;
-            await sendTelegramMessage(bridge.botApi, targetChannel, text);
+            await bridge.messenger.sendMessage(targetChannel, text);
         },
     });
 
@@ -582,13 +569,15 @@ export function ensureErrorPopupDetector(
         cdpService: cdp,
         pollIntervalMs: 3000,
         onResolved: () => {
-            if (!lastMessageId || !lastMessageChatId || !bridge.botApi) return;
+            if (!lastMessageId || !lastMessageChatId || !bridge.messenger) return;
             const msgId = lastMessageId;
             const chatId = lastMessageChatId;
             lastMessageId = null;
             lastMessageChatId = null;
-            bridge.botApi.editMessageReplyMarkup(chatId, msgId, { reply_markup: undefined })
-                .catch(logger.error);
+            if (bridge.messenger.cleanMessageButtons) {
+                bridge.messenger.cleanMessageButtons({ chatId: Number(chatId) }, msgId)
+                    .catch(logger.error);
+            }
         },
         onErrorPopup: async (info: ErrorPopupInfo) => {
             logger.debug(`[ErrorPopupDetector:${projectName}] Error popup detected`);
@@ -596,7 +585,7 @@ export function ensureErrorPopupDetector(
             const currentChatTitle = await getCurrentChatTitle(cdp);
             const targetChannel = resolveApprovalChannelForCurrentChat(bridge, projectName, currentChatTitle);
 
-            if (!targetChannel || !bridge.botApi) return;
+            if (!targetChannel || !bridge.messenger) return;
 
             const targetChannelStr = targetChannel.threadId ? String(targetChannel.threadId) : String(targetChannel.chatId);
             const bodyText = info.body || t('An error occurred in the Antigravity agent.');
@@ -606,12 +595,13 @@ export function ensureErrorPopupDetector(
             text += `<b>Buttons:</b> ${escapeHtml(info.buttons.join(', ') || '(None)')}\n`;
             text += `<b>Workspace:</b> ${escapeHtml(projectName)}`;
 
-            const keyboard = new InlineKeyboard()
-                .text('🔇 Dismiss', buildErrorPopupCustomId('dismiss', projectName, targetChannelStr))
-                .text('📋 Copy Debug', buildErrorPopupCustomId('copy_debug', projectName, targetChannelStr))
-                .text('🔄 Retry', buildErrorPopupCustomId('retry', projectName, targetChannelStr));
+            const buttons: AbstractButton[] = [
+                { text: '🔇 Dismiss', action: buildErrorPopupCustomId('dismiss', projectName, targetChannelStr) },
+                { text: '📋 Copy Debug', action: buildErrorPopupCustomId('copy_debug', projectName, targetChannelStr) },
+                { text: '🔄 Retry', action: buildErrorPopupCustomId('retry', projectName, targetChannelStr) }
+            ];
 
-            const msgId = await sendTelegramMessage(bridge.botApi, targetChannel, text, keyboard);
+            const msgId = await bridge.messenger.sendMessage(targetChannel, text, buttons);
             if (msgId) {
                 lastMessageId = msgId;
                 lastMessageChatId = targetChannel.chatId;

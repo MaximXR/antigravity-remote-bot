@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { logger } from '../utils/logger';
 import { CdpService } from './cdpService';
+import { RESPONSE_SELECTORS } from '../utils/domSelectors';
 
 /** User message information detected from the DOM */
 export interface UserMessageInfo {
@@ -274,10 +275,23 @@ export class UserMessageDetector {
 
                 // First poll (and not in DB): seed the current DOM state without firing callback
                 // But only if the database is completely empty (first run). If the DB has history,
-                // this is a restart, so we forward the unmirrored message to Telegram.
+                // we check if active generation is running. If not, we still prime it to prevent
+                // mirroring old message history upon workspace connection.
                 if (wasPriming) {
                     const dbEmpty = this.isDbEmpty();
-                    if (dbEmpty) {
+                    
+                    let isGenerating = false;
+                    try {
+                        const stopResult = await this.cdpService.call('Runtime.evaluate', {
+                            expression: RESPONSE_SELECTORS.STOP_BUTTON,
+                            returnByValue: true,
+                        });
+                        isGenerating = !!stopResult?.result?.value?.isGenerating;
+                    } catch (err) {
+                        logger.debug('[UserMessageDetector] Failed to check active generation state during startup check:', err);
+                    }
+
+                    if (dbEmpty || !isGenerating) {
                         this.lastDetectedHash = hash;
                         this.addToSeenHashes(hash);
                         if (this.db) {
@@ -287,10 +301,10 @@ export class UserMessageDetector {
                                 logger.error('[UserMessageDetector] DB insert error:', err);
                             }
                         }
-                        logger.debug(`[UserMessageDetector] Primed (empty DB) with existing message: "${preview}..."`);
+                        logger.debug(`[UserMessageDetector] Primed (dbEmpty=${dbEmpty}, isGenerating=${isGenerating}) with existing message: "${preview}..."`);
                         return;
                     } else {
-                        logger.debug(`[UserMessageDetector] Startup check: found unmirrored message: "${preview}...", forwarding to Telegram`);
+                        logger.debug(`[UserMessageDetector] Startup check: found active unmirrored generation for message: "${preview}...", forwarding to Telegram`);
                     }
                 }
 

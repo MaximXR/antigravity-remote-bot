@@ -1,5 +1,5 @@
 import { logger } from '../utils/logger';
-import { TelegramChannel } from './cdpBridgeManager';
+import { ChannelContext } from './messengerPort';
 import { CdpService } from './cdpService';
 
 /**
@@ -28,15 +28,15 @@ export interface WorkspaceResolverDeps {
     getWorkspacePath: (workspaceName: string) => string;
     getOrConnect: (fullPath: string) => Promise<CdpService>;
     extractProjectName: (fullPath: string) => string;
-    onConnected?: (cdp: CdpService, projectName: string, channel: TelegramChannel) => void;
+    onConnected?: (cdp: CdpService, projectName: string, channel: ChannelContext) => void;
 }
 
 /**
- * Build a channel key string from a TelegramChannel.
+ * Build a channel key string from a ChannelContext.
  * Private-chat / non-forum group → chatId only.
  * Forum topic → chatId:threadId.
  */
-export function channelKeyFromChannel(ch: TelegramChannel): string {
+export function channelKeyFromChannel(ch: ChannelContext): string {
     return ch.threadId ? `${ch.chatId}:${ch.threadId}` : String(ch.chatId);
 }
 
@@ -48,7 +48,7 @@ export function channelKeyFromChannel(ch: TelegramChannel): string {
  * - `cdp_failed` → binding exists but Antigravity/CDP is unreachable
  */
 export async function resolveWorkspaceAndCdp(
-    ch: TelegramChannel,
+    ch: ChannelContext,
     deps: WorkspaceResolverDeps,
 ): Promise<ResolveOutcome> {
     const key = channelKeyFromChannel(ch);

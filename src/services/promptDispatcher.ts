@@ -1,11 +1,12 @@
 import { ChatSessionRepository } from '../database/chatSessionRepository';
 import { logger } from '../utils/logger';
-import { CdpBridge, TelegramChannel } from './cdpBridgeManager';
+import { CdpBridge } from './cdpBridgeManager';
+import { ChannelContext } from './messengerPort';
 import { CdpService } from './cdpService';
 import { ModeService } from './modeService';
 import { ModelService } from './modelService';
 import { TitleGeneratorService } from './titleGeneratorService';
-import { TelegramTopicManager } from './telegramTopicManager';
+import { TelegramTopicManager } from '../bot/telegramTopicManager';
 import { ChatSessionService } from './chatSessionService';
 import { InboundImageAttachment } from '../utils/imageHandler';
 
@@ -17,7 +18,7 @@ export interface PromptDispatchOptions {
 }
 
 export interface PromptDispatchRequest {
-    channel: TelegramChannel;
+    channel: ChannelContext;
     prompt: string;
     cdp: CdpService;
     inboundImages?: InboundImageAttachment[];
@@ -30,7 +31,7 @@ export interface PromptDispatcherDeps {
     modelService: ModelService;
     sendPromptImpl: (
         bridge: CdpBridge,
-        channel: TelegramChannel,
+        channel: ChannelContext,
         prompt: string,
         cdp: CdpService,
         modeService: ModeService,
@@ -39,7 +40,7 @@ export interface PromptDispatcherDeps {
         options?: PromptDispatchOptions,
     ) => Promise<void>;
     /** Called after each task completes (success or error). Used for auto-queue fallback. */
-    onTaskComplete?: (channel: TelegramChannel, wsKey: string) => void;
+    onTaskComplete?: (channel: ChannelContext, wsKey: string) => void;
 }
 
 export class PromptDispatcher {
@@ -50,7 +51,7 @@ export class PromptDispatcher {
 
     constructor(private readonly deps: PromptDispatcherDeps) { }
 
-    private channelKey(ch: TelegramChannel): string {
+    private channelKey(ch: ChannelContext): string {
         return ch.threadId ? `${ch.chatId}:${ch.threadId}` : String(ch.chatId);
     }
 
@@ -58,7 +59,7 @@ export class PromptDispatcher {
      * Resolve the workspace lock key for a channel + cdp pair.
      * Exposed so the interrupt state module can use the same key.
      */
-    getWorkspaceKey(ch: TelegramChannel, cdp: CdpService): string {
+    getWorkspaceKey(ch: ChannelContext, cdp: CdpService): string {
         const wsName = cdp.getCurrentWorkspaceName();
         return wsName ? `ws:${wsName}` : this.channelKey(ch);
     }
@@ -67,7 +68,7 @@ export class PromptDispatcher {
      * Check if a workspace is currently processing a prompt.
      * Returns true when a workspace lock is held (generation in progress).
      */
-    isBusy(ch: TelegramChannel, cdp: CdpService): boolean {
+    isBusy(ch: ChannelContext, cdp: CdpService): boolean {
         const lockKey = this.getWorkspaceKey(ch, cdp);
         const busy = this.workspaceLocks.has(lockKey);
         logger.debug(`[PromptDispatcher] isBusy(${lockKey}) = ${busy} (locks: ${this.workspaceLocks.size})`);
@@ -119,7 +120,7 @@ export class PromptDispatcher {
      * Manually acquire the lock for a workspace/channel with an external promise.
      * Used for mirroring IDE messages where generation is initiated externally.
      */
-    acquireLock(ch: TelegramChannel, cdp: CdpService, current: Promise<void>): void {
+    acquireLock(ch: ChannelContext, cdp: CdpService, current: Promise<void>): void {
         const chKey = this.channelKey(ch);
         const wsName = cdp.getCurrentWorkspaceName();
         const wsKey = wsName ? `ws:${wsName}` : null;

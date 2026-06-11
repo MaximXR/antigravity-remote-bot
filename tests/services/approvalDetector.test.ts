@@ -141,7 +141,7 @@ describe('ApprovalDetector - approval button detection and remote execution', ()
         expect(mockCdpService.call).toHaveBeenCalledWith(
             'Runtime.evaluate',
             expect.objectContaining({
-                expression: expect.stringContaining('Allow'),
+                expression: expect.stringContaining('allow'),
                 returnByValue: true,
                 contextId: 42,
             })
@@ -168,7 +168,7 @@ describe('ApprovalDetector - approval button detection and remote execution', ()
         expect(mockCdpService.call).toHaveBeenCalledWith(
             'Runtime.evaluate',
             expect.objectContaining({
-                expression: expect.stringContaining('Deny'),
+                expression: expect.stringContaining('deny'),
                 returnByValue: true,
                 contextId: 42,
             })
@@ -192,7 +192,7 @@ describe('ApprovalDetector - approval button detection and remote execution', ()
         expect(mockCdpService.call).toHaveBeenCalledWith(
             'Runtime.evaluate',
             expect.objectContaining({
-                expression: expect.stringContaining('Allow This Conversation'),
+                expression: expect.stringContaining('allow this conversation'),
                 returnByValue: true,
                 contextId: 42,
             })
@@ -211,7 +211,7 @@ describe('ApprovalDetector - approval button detection and remote execution', ()
             }
 
             // Only succeed the conversation allow button click after expansion
-            if (expanded && expression.includes('Allow This Conversation')) {
+            if (expanded && expression.includes('allow this conversation')) {
                 return { result: { value: { ok: true } } } as any;
             }
 
@@ -230,7 +230,7 @@ describe('ApprovalDetector - approval button detection and remote execution', ()
         const expressions = mockCdpService.call.mock.calls
             .map((call) => call?.[1]?.expression as string);
         expect(expressions.some((exp) => exp.includes('ALLOW_ONCE_PATTERNS'))).toBe(true);
-        expect(expressions.some((exp) => exp.includes('Allow This Conversation'))).toBe(true);
+        expect(expressions.some((exp) => exp.includes('allow this conversation'))).toBe(true);
     });
 
     // ──────────────────────────────────────────────────────

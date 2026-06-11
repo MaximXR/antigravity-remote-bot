@@ -8,7 +8,7 @@
  * Inspired by cc-claw's pendingInterrupts / bypassBusyCheck pattern.
  */
 
-import type { TelegramChannel } from './cdpBridgeManager';
+import type { ChannelContext } from './messengerPort';
 import type { CdpService } from './cdpService';
 import type { PromptDispatchOptions } from './promptDispatcher';
 import type { InboundImageAttachment } from '../utils/imageHandler';
@@ -21,7 +21,7 @@ export interface PendingInterrupt {
     /** The user's prompt text */
     prompt: string;
     /** Telegram channel (chatId + threadId) */
-    channel: TelegramChannel;
+    channel: ChannelContext;
     /** CDP service for the target workspace */
     cdp: CdpService;
     /** Images attached to the message */

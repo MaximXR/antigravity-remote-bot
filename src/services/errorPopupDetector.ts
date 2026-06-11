@@ -1,5 +1,5 @@
 import { logger } from '../utils/logger';
-import { buildClickScript } from './approvalDetector';
+import { buildClickScript, ERROR_POPUP_SELECTORS } from '../utils/domSelectors';
 import { CdpService } from './cdpService';
 
 /** Error popup information */
@@ -23,88 +23,7 @@ export interface ErrorPopupDetectorOptions {
     onResolved?: () => void;
 }
 
-/**
- * Detection script for the Antigravity UI error popup.
- *
- * Looks for dialog/modal containers containing error-related text patterns
- * like "agent terminated", "error", "failed", etc. and extracts popup info.
- */
-const DETECT_ERROR_POPUP_SCRIPT = `(() => {
-    const ERROR_PATTERNS = [
-        'agent terminated',
-        'terminated due to error',
-        'unexpected error',
-        'something went wrong',
-        'an error occurred',
-    ];
 
-    const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
-
-    // Try dialog/modal first
-    const dialogs = Array.from(document.querySelectorAll(
-        '[role="dialog"], [role="alertdialog"], .modal, .dialog'
-    )).filter(el => el.offsetParent !== null || el.getAttribute('aria-modal') === 'true');
-
-    // Fallback: look for fixed/absolute positioned overlays
-    if (dialogs.length === 0) {
-        const overlays = Array.from(document.querySelectorAll('div[class*="fixed"], div[class*="absolute"]'))
-            .filter(el => {
-                const style = window.getComputedStyle(el);
-                return (style.position === 'fixed' || style.position === 'absolute')
-                    && style.zIndex && parseInt(style.zIndex, 10) > 10
-                    && el.querySelector('button');
-            });
-        dialogs.push(...overlays);
-    }
-
-    for (const dialog of dialogs) {
-        const fullText = normalize(dialog.textContent || '');
-        const isError = ERROR_PATTERNS.some(p => fullText.includes(p));
-        if (!isError) continue;
-
-        // Extract title from heading elements or first prominent text
-        const headingEl = dialog.querySelector('h1, h2, h3, h4, [class*="title"], [class*="heading"]');
-        const title = headingEl ? (headingEl.textContent || '').trim() : '';
-
-        // Extract body text (excluding button text and title)
-        const allButtons = Array.from(dialog.querySelectorAll('button'))
-            .filter(btn => btn.offsetParent !== null);
-        const buttonTexts = new Set(allButtons.map(btn => (btn.textContent || '').trim()));
-
-        const bodyParts = [];
-        const walker = document.createTreeWalker(dialog, NodeFilter.SHOW_TEXT);
-        let node;
-        while ((node = walker.nextNode())) {
-            const text = (node.textContent || '').trim();
-            if (!text) continue;
-            if (buttonTexts.has(text)) continue;
-            if (text === title) continue;
-            bodyParts.push(text);
-        }
-        const body = bodyParts.join(' ').slice(0, 1000);
-
-        const buttons = allButtons.map(btn => (btn.textContent || '').trim()).filter(t => t.length > 0);
-
-        if (buttons.length === 0) continue;
-
-        return { title: title || 'Error', body, buttons };
-    }
-
-    return null;
-})()`;
-
-/**
- * Read clipboard content via navigator.clipboard.readText().
- * Requires awaitPromise=true since clipboard API returns a Promise.
- */
-const READ_CLIPBOARD_SCRIPT = `(async () => {
-    try {
-        const text = await navigator.clipboard.readText();
-        return text || null;
-    } catch (e) {
-        return null;
-    }
-})()`;
 
 /**
  * Detects error popup dialogs (e.g. "Agent terminated due to error") in the
@@ -217,7 +136,7 @@ export class ErrorPopupDetector {
      */
     async readClipboard(): Promise<string | null> {
         try {
-            const result = await this.runEvaluateScript(READ_CLIPBOARD_SCRIPT, true);
+            const result = await this.runEvaluateScript(ERROR_POPUP_SELECTORS.READ_CLIPBOARD_SCRIPT, true);
             return typeof result === 'string' ? result : null;
         } catch (error) {
             logger.error('[ErrorPopupDetector] Error reading clipboard:', error);
@@ -247,7 +166,7 @@ export class ErrorPopupDetector {
         try {
             const contextId = this.cdpService.getPrimaryContextId();
             const callParams: Record<string, unknown> = {
-                expression: DETECT_ERROR_POPUP_SCRIPT,
+                expression: ERROR_POPUP_SELECTORS.DETECT_ERROR_POPUP_SCRIPT,
                 returnByValue: true,
                 awaitPromise: false,
             };

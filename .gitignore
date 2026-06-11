@@ -29,6 +29,7 @@ Thumbs.db
 # Temporary files
 tmp_*
 *.tmp
+temp/
 
 # Bot lock file (duplicate start prevention)
 .bot.lock

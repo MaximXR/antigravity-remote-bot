@@ -15,7 +15,7 @@ interface UpdateCheckCache {
 }
 
 function getCachePath(): string {
-    return path.join(os.homedir(), CONFIG_DIR, UPDATE_CHECK_FILE);
+    return path.resolve(__dirname, '..', '..', '.remoat', UPDATE_CHECK_FILE);
 }
 
 /**

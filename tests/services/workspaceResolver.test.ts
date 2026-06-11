@@ -4,7 +4,7 @@ import {
     WorkspaceResolverDeps,
     ResolveOutcome,
 } from '../../src/services/workspaceResolver';
-import { TelegramChannel } from '../../src/services/cdpBridgeManager';
+import { ChannelContext } from '../../src/services/messengerPort';
 
 // ---------------------------------------------------------------------------
 // channelKeyFromChannel
@@ -32,7 +32,7 @@ describe('channelKeyFromChannel', () => {
     });
 
     it('handles string chatId', () => {
-        expect(channelKeyFromChannel({ chatId: '999' })).toBe('999');
+        expect(channelKeyFromChannel({ chatId: '999' } as any)).toBe('999');
     });
 });
 
@@ -40,8 +40,8 @@ describe('channelKeyFromChannel', () => {
 // resolveWorkspaceAndCdp
 // ---------------------------------------------------------------------------
 describe('resolveWorkspaceAndCdp', () => {
-    const channel: TelegramChannel = { chatId: 12345 };
-    const forumChannel: TelegramChannel = { chatId: 12345, threadId: 7 };
+    const channel: ChannelContext = { chatId: 12345 };
+    const forumChannel: ChannelContext = { chatId: 12345, threadId: 7 };
 
     const fakeCdp = { isConnected: () => true } as any;
 
@@ -268,33 +268,33 @@ describe('resolveWorkspaceAndCdp', () => {
     describe('channel key consistency between binding save and lookup', () => {
         it('private chat: same key for callback and message contexts', async () => {
             // Simulates callback context (project selection)
-            const callbackChannel: TelegramChannel = { chatId: 55555 };
+            const callbackChannel: ChannelContext = { chatId: 55555 };
             // Simulates message context (subsequent message)
-            const messageChannel: TelegramChannel = { chatId: 55555 };
+            const messageChannel: ChannelContext = { chatId: 55555 };
 
             expect(channelKeyFromChannel(callbackChannel))
                 .toBe(channelKeyFromChannel(messageChannel));
         });
 
         it('forum topic: same key when both contexts have the same threadId', async () => {
-            const callbackChannel: TelegramChannel = { chatId: 55555, threadId: 10 };
-            const messageChannel: TelegramChannel = { chatId: 55555, threadId: 10 };
+            const callbackChannel: ChannelContext = { chatId: 55555, threadId: 10 };
+            const messageChannel: ChannelContext = { chatId: 55555, threadId: 10 };
 
             expect(channelKeyFromChannel(callbackChannel))
                 .toBe(channelKeyFromChannel(messageChannel));
         });
 
         it('forum topic: different keys when threadId differs', async () => {
-            const callbackChannel: TelegramChannel = { chatId: 55555, threadId: 10 };
-            const messageChannel: TelegramChannel = { chatId: 55555, threadId: 20 };
+            const callbackChannel: ChannelContext = { chatId: 55555, threadId: 10 };
+            const messageChannel: ChannelContext = { chatId: 55555, threadId: 20 };
 
             expect(channelKeyFromChannel(callbackChannel))
                 .not.toBe(channelKeyFromChannel(messageChannel));
         });
 
         it('forum topic: different keys when callback has no threadId but message does', async () => {
-            const callbackChannel: TelegramChannel = { chatId: 55555 };
-            const messageChannel: TelegramChannel = { chatId: 55555, threadId: 10 };
+            const callbackChannel: ChannelContext = { chatId: 55555 };
+            const messageChannel: ChannelContext = { chatId: 55555, threadId: 10 };
 
             expect(channelKeyFromChannel(callbackChannel))
                 .not.toBe(channelKeyFromChannel(messageChannel));

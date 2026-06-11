@@ -25,7 +25,7 @@ const mockedOs = jest.mocked(os);
 
 // Stable home directory for all tests
 const FAKE_HOME = '/home/testuser';
-const CACHE_PATH = path.join(FAKE_HOME, '.remoat', UPDATE_CHECK_FILE);
+const CACHE_PATH = path.resolve(__dirname, '..', '..', '.remoat', UPDATE_CHECK_FILE);
 
 beforeEach(() => {
     jest.clearAllMocks();

@@ -6,6 +6,7 @@ import * as http from 'http';
 import * as net from 'net';
 import { spawn } from 'child_process';
 import { getAntigravityCliPath, extractProjectNameFromPath, isTitleMatch, isWorkspaceMatch, isUntitledTitle } from '../utils/pathUtils';
+import { CORE_SELECTORS } from '../utils/domSelectors';
 import WebSocket from 'ws';
 
 export interface CdpServiceOptions {
@@ -47,17 +48,7 @@ export interface UiSyncResult {
     error?: string;
 }
 
-/** Antigravity UI DOM selector constants */
-const SELECTORS = {
-    /** Chat input box: textbox excluding xterm */
-    CHAT_INPUT: 'div[role="textbox"]:not(.xterm-helper-textarea), div[role="combobox"]:not(.xterm-helper-textarea)',
-    /** Submit button search target tag */
-    SUBMIT_BUTTON_CONTAINER: 'button',
-    /** Submit icon SVG class candidates */
-    SUBMIT_BUTTON_SVG_CLASSES: ['lucide-arrow-right', 'lucide-arrow-up', 'lucide-send'],
-    /** Keyword to identify message injection target context (legacy; removed in v1.21.6+) */
-    CONTEXT_URL_KEYWORD: 'cascade-panel',
-};
+
 
 export class CdpService extends EventEmitter {
     private ports: number[];
@@ -1250,7 +1241,7 @@ export class CdpService extends EventEmitter {
         while (Date.now() - start < timeoutMs) {
             // Legacy: cascade-panel context
             const cascadeCtx = this.contexts.find(
-                c => c.url && c.url.includes(SELECTORS.CONTEXT_URL_KEYWORD),
+                c => c.url && c.url.includes(CORE_SELECTORS.CONTEXT_URL_KEYWORD),
             );
             if (cascadeCtx) {
                 return true;
@@ -1356,7 +1347,7 @@ export class CdpService extends EventEmitter {
      */
     private async focusChatInput(): Promise<{ ok: boolean; contextId?: number; error?: string }> {
         const focusScript = `(() => {
-            const editors = Array.from(document.querySelectorAll('${SELECTORS.CHAT_INPUT}'));
+            const editors = Array.from(document.querySelectorAll('${CORE_SELECTORS.CHAT_INPUT}'));
             const visible = editors.filter(el => el.offsetParent !== null);
             const editor = visible[visible.length - 1];
             if (!editor) return { ok: false, error: 'No editor found' };
