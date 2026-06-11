@@ -1,6 +1,7 @@
 import { logger } from '../utils/logger';
 import { CDP_PORTS } from '../utils/cdpPorts';
 import { EventEmitter } from 'events';
+import * as fs from 'fs';
 import * as http from 'http';
 import * as net from 'net';
 import { spawn } from 'child_process';
@@ -791,6 +792,86 @@ export class CdpService extends EventEmitter {
         projectName: string,
         workspacePath: string,
     ): Promise<boolean> {
+        try {
+            // Configuration-based workspace matching (precise check)
+            const configExpr = `(() => {
+                if (typeof window === 'undefined' || !window.vscode || !window.vscode.context || typeof window.vscode.context.configuration !== 'function') {
+                    return null;
+                }
+                try {
+                    const config = window.vscode.context.configuration();
+                    if (!config) return null;
+                    if (config.workspace) {
+                        if (config.workspace.uri && config.workspace.uri.path) {
+                            return {
+                                type: 'folder',
+                                path: config.workspace.uri.path
+                            };
+                        }
+                        if (config.workspace.configPath && config.workspace.configPath.path) {
+                            return {
+                                type: 'workspace',
+                                path: config.workspace.configPath.path
+                            };
+                        }
+                    }
+                } catch (e) {
+                    // Ignore
+                }
+                return null;
+            })()`;
+
+            const configRes = await this.call('Runtime.evaluate', {
+                expression: configExpr,
+                returnByValue: true,
+            });
+
+            const configVal = configRes?.result?.value;
+            if (configVal) {
+                const normalize = (p: string): string => {
+                    let clean = p.trim();
+                    if (clean.startsWith('file:')) {
+                        clean = clean.replace(/^file:\/\/\/?/, '');
+                    }
+                    clean = decodeURIComponent(clean);
+                    clean = clean.replace(/^\/([a-zA-Z]):/, '$1:');
+                    clean = clean.replace(/\//g, '\\').toLowerCase();
+                    if (clean.endsWith('\\')) {
+                        clean = clean.slice(0, -1);
+                    }
+                    return clean;
+                };
+
+                const targetNorm = normalize(workspacePath);
+
+                if (configVal.type === 'folder' && configVal.path) {
+                    if (normalize(configVal.path) === targetNorm) {
+                        this.currentWorkspaceName = projectName;
+                        logger.debug(`[CdpService] Confirmed folder workspace match via configuration: "${workspacePath}"`);
+                        return true;
+                    }
+                } else if (configVal.type === 'workspace' && configVal.path) {
+                    const wsJsonPath = normalize(configVal.path);
+                    if (fs.existsSync(wsJsonPath)) {
+                        const content = fs.readFileSync(wsJsonPath, 'utf8');
+                        const parsed = JSON.parse(content);
+                        if (parsed.folders && Array.isArray(parsed.folders)) {
+                            for (const folder of parsed.folders) {
+                                const folderPath = folder.path || folder.uri;
+                                if (folderPath && normalize(folderPath) === targetNorm) {
+                                    this.currentWorkspaceName = projectName;
+                                    logger.debug(`[CdpService] Confirmed multi-folder workspace match via configuration: "${workspacePath}"`);
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (err: any) {
+            logger.warn(`[CdpService] Configuration-based workspace probe failed (falling back to DOM-based):`, err);
+        }
+
         try {
             // Instead of DOM/document.title, check folder parameter in page URL or
             // folder name in explorer view
