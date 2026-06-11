@@ -2034,9 +2034,32 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                                             let workspacePath = null;
                                             let workspaceId = null;
                                             if (window.vscode && window.vscode.context) {
-                                                const config = await window.vscode.context.resolveConfiguration();
-                                                workspacePath = config.workspace?.configPath?._fsPath || config.workspace?.uri?._fsPath || null;
-                                                workspaceId = config.workspace?.id || null;
+                                                try {
+                                                    const config = typeof window.vscode.context.configuration === 'function' 
+                                                        ? window.vscode.context.configuration()
+                                                        : (typeof window.vscode.context.resolveConfiguration === 'function'
+                                                            ? await window.vscode.context.resolveConfiguration()
+                                                            : null);
+                                                    if (config && config.workspace) {
+                                                        workspaceId = config.workspace.id || null;
+                                                        
+                                                        const cp = config.workspace.configPath;
+                                                        const uri = config.workspace.uri;
+                                                        const rawPath = cp?.fsPath || cp?._fsPath || cp?.path || uri?.fsPath || uri?._fsPath || uri?.path || null;
+                                                        if (rawPath) {
+                                                            let clean = rawPath.trim();
+                                                            if (clean.startsWith('file:')) {
+                                                                clean = clean.replace(/^file:\\/\\/\\/?/, '');
+                                                            }
+                                                            clean = decodeURIComponent(clean);
+                                                            clean = clean.replace(/^\\/([a-zA-Z]):/, '$1:');
+                                                            clean = clean.replace(/\\//g, '\\\\');
+                                                            workspacePath = clean;
+                                                        }
+                                                    }
+                                                } catch (e) {
+                                                    // ignore
+                                                }
                                             }
                                             
                                             let title = '';
