@@ -795,11 +795,12 @@ export class CdpService extends EventEmitter {
         try {
             // Configuration-based workspace matching (precise check)
             const configExpr = `(() => {
-                if (typeof window === 'undefined' || !window.vscode || !window.vscode.context || typeof window.vscode.context.configuration !== 'function') {
+                const vs = typeof vscode !== 'undefined' ? vscode : (typeof window !== 'undefined' && window.vscode ? window.vscode : null);
+                if (!vs || !vs.context || typeof vs.context.configuration !== 'function') {
                     return null;
                 }
                 try {
-                    const config = window.vscode.context.configuration();
+                    const config = vs.context.configuration();
                     if (!config) return null;
                     if (config.workspace) {
                         if (config.workspace.uri && config.workspace.uri.path) {

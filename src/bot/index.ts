@@ -2033,12 +2033,13 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                                         expression: `(async () => {
                                             let workspacePath = null;
                                             let workspaceId = null;
-                                            if (window.vscode && window.vscode.context) {
+                                            const vs = typeof vscode !== 'undefined' ? vscode : (typeof window !== 'undefined' && window.vscode ? window.vscode : null);
+                                            if (vs && vs.context) {
                                                 try {
-                                                    const config = typeof window.vscode.context.configuration === 'function' 
-                                                        ? window.vscode.context.configuration()
-                                                        : (typeof window.vscode.context.resolveConfiguration === 'function'
-                                                            ? await window.vscode.context.resolveConfiguration()
+                                                    const config = typeof vs.context.configuration === 'function' 
+                                                        ? vs.context.configuration()
+                                                        : (typeof vs.context.resolveConfiguration === 'function'
+                                                            ? await vs.context.resolveConfiguration()
                                                             : null);
                                                     if (config && config.workspace) {
                                                         workspaceId = config.workspace.id || null;
