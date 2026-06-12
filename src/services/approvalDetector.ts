@@ -240,6 +240,27 @@ export class ApprovalDetector {
     }
 
     /**
+     * Perform a single query to detect if an approval dialog is currently open.
+     */
+    async checkOnce(): Promise<ApprovalInfo | null> {
+        try {
+            const contextId = this.cdpService.getPrimaryContextId();
+            const callParams: Record<string, unknown> = {
+                expression: APPROVAL_SELECTORS.DETECT_APPROVAL_SCRIPT,
+                returnByValue: true,
+                awaitPromise: false,
+            };
+            if (contextId !== null) {
+                callParams.contextId = contextId;
+            }
+            const result = await this.cdpService.call('Runtime.evaluate', callParams);
+            return result?.result?.value ?? null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    /**
      * Click the approve button with the specified text via CDP.
      * @param buttonText Text of the button to click (default: detected approveText or "Allow")
      * @returns true if click succeeded

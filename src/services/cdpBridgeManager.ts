@@ -526,18 +526,49 @@ export function ensureApprovalDetector(
         },
     });
 
-    if ((cdp as any)._deferredFlushListener) {
-        cdp.removeListener('response-monitor:stop', (cdp as any)._deferredFlushListener);
+    if ((cdp as any)._approvalStartListener) {
+        cdp.removeListener('response-monitor:start', (cdp as any)._approvalStartListener);
+    }
+    const startHandler = () => {
+        logger.debug(`[ApprovalDetector:${projectName}] Starting detector due to response-monitor:start`);
+        detector.start();
+    };
+    (cdp as any)._approvalStartListener = startHandler;
+    cdp.on('response-monitor:start', startHandler);
+
+    if ((cdp as any)._approvalStopListener) {
+        cdp.removeListener('response-monitor:stop', (cdp as any)._approvalStopListener);
     }
     const stopHandler = async () => {
+        logger.debug(`[ApprovalDetector:${projectName}] Stopping detector due to response-monitor:stop`);
+        await detector.stop();
         await flushDeferredApproval(bridge, projectName, cdp);
     };
-    (cdp as any)._deferredFlushListener = stopHandler;
+    (cdp as any)._approvalStopListener = stopHandler;
     cdp.on('response-monitor:stop', stopHandler);
 
-    detector.start();
     bridge.pool.registerApprovalDetector(projectName, detector);
-    logger.debug(`[ApprovalDetector:${projectName}] Started`);
+
+    const checkStartup = async () => {
+        if (cdp.isCurrentlyGenerating()) {
+            logger.debug(`[ApprovalDetector:${projectName}] Generation active on startup, starting detector.`);
+            detector.start();
+            return;
+        }
+
+        const info = await detector.checkOnce().catch(() => null);
+        if (info) {
+            logger.info(`[ApprovalDetector:${projectName}] Hanging approval dialog detected on startup, starting detector.`);
+            detector.start();
+            // Manually trigger callback to mirror the dialog
+            await (detector as any).onApprovalRequired(info);
+        } else {
+            logger.debug(`[ApprovalDetector:${projectName}] No active approval dialog or generation on startup, keeping detector stopped.`);
+        }
+    };
+    checkStartup().catch(err => {
+        logger.error(`[ApprovalDetector:${projectName}] Startup check failed:`, err);
+    });
 }
 
 export function ensurePlanningDetector(
