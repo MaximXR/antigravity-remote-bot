@@ -352,6 +352,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         threadId: ctx.callbackQuery?.message?.message_thread_id ?? undefined,
     });
 
+    const ideGenerationCheckTimers = new Map<string, NodeJS.Timeout>();
+
     const setupWorkspaceDetectors = (cdp: any, projectName: string, channel: ChannelContext) => {
         bridge.lastActiveWorkspace = projectName;
         bridge.lastActiveChannel = channel;
@@ -360,6 +362,85 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         ensureErrorPopupDetector(bridge, cdp, projectName);
         ensurePlanningDetector(bridge, cdp, projectName);
         ensureQuestionDetector(bridge, cdp, projectName);
+
+        // Periodically check if the IDE started generating a response while the bot is idle
+        const checkIdeGenerating = async () => {
+            if (!cdp.isConnected()) return;
+            try {
+                if (promptDispatcher.isBusy(channel, cdp)) return;
+
+                const isGeneratingScript = `(() => {
+                    const panel = document.querySelector('.antigravity-agent-side-panel');
+                    const scope = panel || document;
+                    const isVisible = (el) => el && el.offsetParent !== null;
+                    const el = scope.querySelector('[data-tooltip-id="input-send-button-cancel-tooltip"]');
+                    if (isVisible(el)) return true;
+                    
+                    const normalize = (value) => (value || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+                    const STOP_PATTERNS = [/^stop$/, /^stop generating$/, /^stop response$/, /^停止$/, /^生成を停止$/, /^応答を停止$/];
+                    const isStopLabel = (value) => { const n = normalize(value); return n ? STOP_PATTERNS.some((re) => re.test(n)) : false; };
+                    const buttons = scope.querySelectorAll('button, [role="button"]');
+                    for (let i = 0; i < buttons.length; i++) {
+                        const btn = buttons[i];
+                        if (isVisible(btn) && [btn.textContent || '', btn.getAttribute('aria-label') || '', btn.getAttribute('title') || ''].some(isStopLabel)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                })()`;
+
+                const contextId = cdp.getPrimaryContextId();
+                const evalParams: Record<string, unknown> = {
+                    expression: isGeneratingScript,
+                    returnByValue: true,
+                    awaitPromise: false,
+                };
+                if (contextId !== null) evalParams.contextId = contextId;
+                const result = await cdp.call('Runtime.evaluate', evalParams);
+                const isGenerating = !!result?.result?.value;
+
+                if (isGenerating) {
+                    logger.info(`[setupWorkspaceDetectors:${projectName}] Detected active generation in IDE while idle. Starting response mirror.`);
+                    
+                    const mirrorPromise = mirrorResponseToTelegram(bridge, channel, cdp, 'IDE Action', {
+                        chatSessionService,
+                        chatSessionRepo,
+                        topicManager,
+                        titleGenerator,
+                        modelService,
+                        modeService,
+                        workspaceBindingRepo
+                    });
+
+                    promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
+                }
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                if (msg.includes('WebSocket is not connected') || msg.includes('WebSocket disconnected')) return;
+                logger.error(`[checkIdeGenerating:${projectName}] Error checking IDE generation:`, err);
+            }
+        };
+
+        const clearTimer = () => {
+            const t = ideGenerationCheckTimers.get(projectName);
+            if (t) {
+                clearInterval(t);
+                ideGenerationCheckTimers.delete(projectName);
+            }
+        };
+
+        const startTimer = () => {
+            clearTimer();
+            const t = setInterval(checkIdeGenerating, 2000);
+            ideGenerationCheckTimers.set(projectName, t);
+        };
+
+        // Start polling for IDE actions
+        startTimer();
+
+        cdp.on('disconnected', clearTimer);
+        cdp.on('reconnectFailed', clearTimer);
+        cdp.on('reconnected', startTimer);
 
         const onUserMessageCallback = (info: any): boolean => {
             const conf = loadConfig();

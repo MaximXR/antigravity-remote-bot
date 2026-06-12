@@ -99,13 +99,14 @@ export function buildPlanNotificationUI(
     text += `<b>Workspace:</b> ${escapeHtml(projectName)}`;
 
     const suffix = `${projectName}:${targetChannelStr}`;
+    const isReadOnly = typeLabel !== 'Plan';
 
     const row1: AbstractButton[] = [];
     const openLabel = info.openText || `Open ${typeLabel}`;
     row1.push({ text: `📖 ${openLabel}`, action: `${PLAN_VIEW_BTN}:${suffix}` });
 
-    if (info.proceedText) {
-        const proceedLabel = info.proceedText;
+    const proceedLabel = info.proceedText || (!isReadOnly ? 'Proceed' : null);
+    if (proceedLabel) {
         const proceedIcon = proceedLabel.toLowerCase().includes('accept') || proceedLabel.toLowerCase().includes('approve') ? '✅' : '▶';
         row1.push({ text: `${proceedIcon} ${proceedLabel}`, action: `${PLAN_PROCEED_BTN}:${suffix}` });
     }
@@ -193,9 +194,11 @@ export function buildPlanContentUI(
     }
 
     const actionRow: AbstractButton[] = [];
-    if (proceedText) {
-        const proceedIcon = proceedText.toLowerCase().includes('accept') || proceedText.toLowerCase().includes('approve') ? '✅' : '▶';
-        actionRow.push({ text: `${proceedIcon} ${proceedText}`, action: `${PLAN_PROCEED_BTN}:${suffix}` });
+    const isReadOnly = planTitle ? (planTitle.toLowerCase().includes('walkthrough') || planTitle.toLowerCase().includes('task')) : true;
+    const effectiveProceedText = proceedText || (!isReadOnly ? 'Proceed' : undefined);
+    if (effectiveProceedText) {
+        const proceedIcon = effectiveProceedText.toLowerCase().includes('accept') || effectiveProceedText.toLowerCase().includes('approve') ? '✅' : '▶';
+        actionRow.push({ text: `${proceedIcon} ${effectiveProceedText}`, action: `${PLAN_PROCEED_BTN}:${suffix}` });
     }
     actionRow.push({ text: '✍️ Edit', action: `${PLAN_EDIT_BTN}:${suffix}` });
     actionRow.push({ text: '🔄 Refresh', action: `${PLAN_REFRESH_BTN}:${suffix}` });
