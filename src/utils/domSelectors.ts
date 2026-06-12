@@ -34,7 +34,7 @@ export const buildClickScript = (buttonText: string): string => {
     const normalizedTarget = buttonText.toLowerCase().trim();
     return `(() => {
         const target = ${JSON.stringify(normalizedTarget)};
-        const normalize = (val) => (val || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+        const normalize = (val) => (val || '').toLowerCase().replace(/^\\s*\\d+[\\s.)]*/, '').replace(/\\s+/g, ' ').trim();
         const matchPattern = (text, pattern) => {
             if (!text || !pattern) return false;
             if (/^[a-z]+$/i.test(pattern)) {
@@ -45,7 +45,7 @@ export const buildClickScript = (buttonText: string): string => {
             }
             return text.includes(pattern);
         };
-        const buttons = Array.from(document.querySelectorAll('button, [role="button"], a.monaco-button'))
+        const buttons = Array.from(document.querySelectorAll('button, [role="button"], a.monaco-button, label, .cursor-pointer'))
             .filter(btn => btn.offsetParent !== null);
         
         for (const btn of buttons) {
@@ -59,6 +59,38 @@ export const buildClickScript = (buttonText: string): string => {
             
             if ((matchesText || matchesAria || matchesTitle) && typeof btn.click === 'function') {
                 btn.click();
+                
+                // Auto-submit form if this was a label/option and there's a Submit button in the container
+                let container = btn.closest('[role="dialog"], .modal, .dialog, .approval-container, .permission-dialog, div[class*="rounded-"], div[class*="border"]');
+                if (!container) {
+                    let curr = btn.parentElement;
+                    for (let i = 0; i < 5 && curr; i++) {
+                        if (curr.querySelector('button')) {
+                            const hasSubmit = Array.from(curr.querySelectorAll('button')).some(b => {
+                                const t = (b.textContent || '').toLowerCase().trim();
+                                return t === 'submit' || t.startsWith('submit');
+                            });
+                            if (hasSubmit) {
+                                container = curr;
+                                break;
+                            }
+                        }
+                        curr = curr.parentElement;
+                    }
+                }
+                if (container) {
+                    const submitBtn = Array.from(container.querySelectorAll('button, [role="button"]'))
+                        .find(b => {
+                            const t = (b.textContent || '').toLowerCase().trim();
+                            return t === 'submit' || t.startsWith('submit');
+                        });
+                    if (submitBtn && submitBtn !== btn && typeof submitBtn.click === 'function') {
+                        setTimeout(() => {
+                            try { submitBtn.click(); } catch(e) {}
+                        }, 50);
+                    }
+                }
+                
                 return { ok: true, text: btn.textContent };
             }
         }
@@ -400,7 +432,7 @@ export const APPROVAL_SELECTORS = {
         const ALLOW_PATTERNS = ['allow', 'permit', 'run', 'execute', 'accept', 'approve', '許可', '承認', '確認', '実行'];
         const DENY_PATTERNS = ['deny', 'reject', 'no', 'no (tell', '拒否', 'decline', '却下'];
 
-        const normalize = (text) => (text || '').toLowerCase().replace(/\\\\s+/g, ' ').trim();
+        const normalize = (text) => (text || '').toLowerCase().replace(/^\\\\s*\\\\d+[\\\\s.)]*/, '').replace(/\\\\s+/g, ' ').trim();
         const isVisible = (el) => {
             if (!el) return false;
             const rect = el.getBoundingClientRect();
@@ -430,7 +462,7 @@ export const APPROVAL_SELECTORS = {
         });
 
         if (submitBtn) {
-            const container = submitBtn.closest('[role="dialog"], .modal, .dialog, .approval-container, .permission-dialog, div[class*="rounded-2xl"], div[class*="rounded-lg"], div[class*="border"]') || scope;
+            const container = submitBtn.closest('[role="dialog"], .modal, .dialog, .approval-container, .permission-dialog, div[class*="rounded-"], div[class*="border"]') || scope;
             const options = Array.from(container.querySelectorAll('label, button, [role="button"], .cursor-pointer'))
                 .filter(el => {
                     if (!isVisible(el)) return false;
