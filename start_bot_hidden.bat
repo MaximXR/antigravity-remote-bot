@@ -20,8 +20,7 @@ echo WshShell.CurrentDirectory = scriptPath >> "%temp%\remoat_start.vbs"
 echo WshShell.Run "cmd.exe /c _start_bot_background.bat", 0, False >> "%temp%\remoat_start.vbs"
 wscript.exe "%temp%\remoat_start.vbs"
 del "%temp%\remoat_start.vbs"
-echo [OK] Startup script completed.
-ping -n 2 127.0.0.1 >nul
 exit
+
 
 
