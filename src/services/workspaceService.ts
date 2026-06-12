@@ -119,7 +119,7 @@ export class WorkspaceService {
      */
     public existsAbsolutePath(fullPath: string): boolean {
         try {
-            return fs.existsSync(fullPath) && (fs.statSync(fullPath).isDirectory() || fullPath.endsWith('.code-workspace'));
+            return fs.existsSync(fullPath) && (fs.statSync(fullPath).isDirectory() || fullPath.endsWith('.code-workspace') || fullPath.endsWith('workspace.json'));
         } catch {
             return false;
         }

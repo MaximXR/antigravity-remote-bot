@@ -769,7 +769,35 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         const guildId = String(ch.chatId);
         const isForum = ctx.chat?.type === 'supergroup' && (ctx.chat as any).is_forum === true;
         const folderName = path.basename(workspacePath);
-        const cleanFolderName = folderName.replace(/\.code-workspace$/i, '');
+        let cleanFolderName = folderName.replace(/\.code-workspace$/i, '');
+        if (workspacePath.endsWith('workspace.json')) {
+            try {
+                if (fs.existsSync(workspacePath)) {
+                    const content = fs.readFileSync(workspacePath, 'utf8');
+                    const parsed = JSON.parse(content);
+                    if (parsed.folders && Array.isArray(parsed.folders) && parsed.folders.length > 0) {
+                        const folderNames = parsed.folders.map((f: any) => {
+                            const p = f.path || f.uri || '';
+                            let clean = p.trim();
+                            if (clean.startsWith('file:')) {
+                                clean = clean.replace(/^file:\/\/\/?/, '');
+                            }
+                            clean = decodeURIComponent(clean);
+                            clean = clean.replace(/^\/([a-zA-Z]):/, '$1:');
+                            return path.basename(clean.replace(/\//g, '\\'));
+                        }).filter(Boolean);
+
+                        if (folderNames.length > 1) {
+                            cleanFolderName = `🗂️ ${folderNames.join(' + ')}`;
+                        } else if (folderNames.length === 1) {
+                            cleanFolderName = folderNames[0];
+                        }
+                    }
+                }
+            } catch (err) {
+                logger.error(`[switchWorkspaceInternal] Failed to parse workspace.json at ${workspacePath}:`, err);
+            }
+        }
         const fullPath = workspaceService.getWorkspacePath(workspacePath);
 
         let cdp: any = null;
