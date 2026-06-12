@@ -434,18 +434,23 @@ export class CdpService extends EventEmitter {
             return false;
         }
 
+        let liveTitle = '';
         try {
             const titleResult = await this.call('Runtime.evaluate', {
                 expression: 'document.title',
                 returnByValue: true,
             });
-            const liveTitle = String(titleResult?.result?.value || '');
+            liveTitle = String(titleResult?.result?.value || '');
             if (isTitleMatch(liveTitle, projectName)) {
                 this.currentWorkspaceName = projectName;
                 return true;
             }
         } catch {
             // Fall through to folder-path probe.
+        }
+
+        if (isUntitledTitle(liveTitle)) {
+            return false;
         }
 
         return this.probeWorkspaceFolderPath(projectName, workspacePath);
@@ -832,7 +837,8 @@ export class CdpService extends EventEmitter {
                 }
 
                 // If title match failed and workspacePath is provided, verify by folder/workspace path
-                if (workspacePath) {
+                // We only do this if the page is not an untitled/empty window, to avoid matching by CWD fallback
+                if (workspacePath && !isUntitledTitle(liveTitle)) {
                     const folderMatch = await this.probeWorkspaceFolderPath(projectName, workspacePath);
                     if (folderMatch) {
                         return true;
