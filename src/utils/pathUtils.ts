@@ -103,7 +103,7 @@ export function isWorkspaceMatch(
             }
             extractedPath = extractedPath.replace(/^\/([a-z]):/, '$1:').replace(/\//g, '\\');
 
-            if (extractedPath === normPath || extractedPath === normPath + '\\') {
+            if (extractedPath === normPath || extractedPath.startsWith(normPath + '\\') || normPath.startsWith(extractedPath + '\\')) {
                 return true;
             }
 
@@ -122,7 +122,7 @@ export function isWorkspaceMatch(
         cleanPath = cleanPath.replace(/^[a-z0-9-]+:\/\/[^/]+\//, '');
         cleanPath = cleanPath.replace(/^\/([a-z]):/, '$1:').replace(/\//g, '\\');
 
-        if (cleanPath === normPath || cleanPath === normPath + '\\') {
+        if (cleanPath === normPath || cleanPath.startsWith(normPath + '\\') || normPath.startsWith(cleanPath + '\\')) {
             return true;
         }
 

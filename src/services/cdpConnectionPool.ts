@@ -230,7 +230,14 @@ export class CdpConnectionPool extends EventEmitter {
      * Get the approval detector for a workspace.
      */
     getApprovalDetector(projectName: string): ApprovalDetector | undefined {
-        return this.approvalDetectors.get(projectName);
+        const exact = this.approvalDetectors.get(projectName);
+        if (exact) return exact;
+        for (const [name, detector] of this.approvalDetectors.entries()) {
+            if (name.startsWith(projectName) || projectName.startsWith(name)) {
+                return detector;
+            }
+        }
+        return undefined;
     }
 
     /**
@@ -249,7 +256,14 @@ export class CdpConnectionPool extends EventEmitter {
      * Get the error popup detector for a workspace.
      */
     getErrorPopupDetector(projectName: string): ErrorPopupDetector | undefined {
-        return this.errorPopupDetectors.get(projectName);
+        const exact = this.errorPopupDetectors.get(projectName);
+        if (exact) return exact;
+        for (const [name, detector] of this.errorPopupDetectors.entries()) {
+            if (name.startsWith(projectName) || projectName.startsWith(name)) {
+                return detector;
+            }
+        }
+        return undefined;
     }
 
     /**
@@ -268,7 +282,14 @@ export class CdpConnectionPool extends EventEmitter {
      * Get the planning detector for a workspace.
      */
     getPlanningDetector(projectName: string): PlanningDetector | undefined {
-        return this.planningDetectors.get(projectName);
+        const exact = this.planningDetectors.get(projectName);
+        if (exact) return exact;
+        for (const [name, detector] of this.planningDetectors.entries()) {
+            if (name.startsWith(projectName) || projectName.startsWith(name)) {
+                return detector;
+            }
+        }
+        return undefined;
     }
 
     /**

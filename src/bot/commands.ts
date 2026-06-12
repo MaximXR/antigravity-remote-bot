@@ -300,7 +300,7 @@ export function registerCommands(bot: Bot, deps: CommandDependencies) {
 
         // Proactively connect to any newly discovered open windows in the background
         activeWindows.forEach((win: any) => {
-            if (win.workspacePath && !bridge.pool.getConnected(win.projectName)) {
+            if (win.workspacePath && !bridge.pool.getConnectedByWebSocketUrl(win.webSocketDebuggerUrl)) {
                 bridge.pool.getOrConnect(win.workspacePath).then((cdp) => {
                     deps.setupWorkspaceDetectors(cdp, win.projectName, ch);
                     logger.info(`[status] Proactively connected to open window: ${win.projectName}`);

@@ -25,14 +25,38 @@ export interface CdpBridge {
     botToken: string;
 }
 
-const APPROVE_ACTION_PREFIX = 'approve_action';
-const ALWAYS_ALLOW_ACTION_PREFIX = 'always_allow_action';
-const DENY_ACTION_PREFIX = 'deny_action';
-const PLANNING_OPEN_ACTION_PREFIX = 'planning_open_action';
-const PLANNING_PROCEED_ACTION_PREFIX = 'planning_proceed_action';
-const ERROR_POPUP_DISMISS_ACTION_PREFIX = 'error_popup_dismiss_action';
-const ERROR_POPUP_COPY_DEBUG_ACTION_PREFIX = 'error_popup_copy_debug_action';
-const ERROR_POPUP_RETRY_ACTION_PREFIX = 'error_popup_retry_action';
+const APPROVE_ACTION_PREFIX = 'app_a';
+const ALWAYS_ALLOW_ACTION_PREFIX = 'alw_a';
+const DENY_ACTION_PREFIX = 'dny_a';
+const PLANNING_OPEN_ACTION_PREFIX = 'pln_o';
+const PLANNING_PROCEED_ACTION_PREFIX = 'pln_p';
+const ERROR_POPUP_DISMISS_ACTION_PREFIX = 'err_d';
+const ERROR_POPUP_COPY_DEBUG_ACTION_PREFIX = 'err_c';
+const ERROR_POPUP_RETRY_ACTION_PREFIX = 'err_r';
+
+function truncateToBytes(str: string, maxBytes: number): string {
+    const buf = Buffer.from(str, 'utf8');
+    if (buf.length <= maxBytes) return str;
+    let sliced = buf.subarray(0, maxBytes).toString('utf8');
+    if (sliced.endsWith('\uFFFD') || (sliced.length > 0 && sliced.codePointAt(sliced.length - 1) === 0xFFFD)) {
+        sliced = sliced.slice(0, -1);
+    }
+    return sliced;
+}
+
+function buildCustomIdWithLimit(
+    prefix: string,
+    projectName: string,
+    channelId?: string,
+): string {
+    const channelPart = channelId && channelId.trim().length > 0 ? `:${channelId}` : '';
+    const maxProjectNameBytes = 64 - prefix.length - channelPart.length - 1;
+    let safeProjectName = projectName;
+    if (Buffer.from(projectName, 'utf8').length > maxProjectNameBytes) {
+        safeProjectName = truncateToBytes(projectName, maxProjectNameBytes);
+    }
+    return channelPart ? `${prefix}:${safeProjectName}${channelPart}` : `${prefix}:${safeProjectName}`;
+}
 
 function normalizeSessionTitle(title: string): string {
     return title.trim().toLowerCase();
@@ -113,14 +137,19 @@ export function buildApprovalCustomId(
         : action === 'always_allow'
             ? ALWAYS_ALLOW_ACTION_PREFIX
             : DENY_ACTION_PREFIX;
-    if (channelId && channelId.trim().length > 0) {
-        return `${prefix}:${projectName}:${channelId}`;
-    }
-    return `${prefix}:${projectName}`;
+    return buildCustomIdWithLimit(prefix, projectName, channelId);
 }
 
 export function parseApprovalCustomId(customId: string): { action: 'approve' | 'always_allow' | 'deny'; projectName: string | null; channelId: string | null } | null {
-    for (const [action, prefix] of [['approve', APPROVE_ACTION_PREFIX], ['always_allow', ALWAYS_ALLOW_ACTION_PREFIX], ['deny', DENY_ACTION_PREFIX]] as const) {
+    const pairs = [
+        ['approve', APPROVE_ACTION_PREFIX],
+        ['always_allow', ALWAYS_ALLOW_ACTION_PREFIX],
+        ['deny', DENY_ACTION_PREFIX],
+        ['approve', 'approve_action'],
+        ['always_allow', 'always_allow_action'],
+        ['deny', 'deny_action'],
+    ] as const;
+    for (const [action, prefix] of pairs) {
         if (customId === prefix) return { action, projectName: null, channelId: null };
         if (customId.startsWith(`${prefix}:`)) {
             const rest = customId.substring(`${prefix}:`.length);
@@ -137,12 +166,17 @@ export function buildPlanningCustomId(
     channelId?: string,
 ): string {
     const prefix = action === 'open' ? PLANNING_OPEN_ACTION_PREFIX : PLANNING_PROCEED_ACTION_PREFIX;
-    if (channelId && channelId.trim().length > 0) return `${prefix}:${projectName}:${channelId}`;
-    return `${prefix}:${projectName}`;
+    return buildCustomIdWithLimit(prefix, projectName, channelId);
 }
 
 export function parsePlanningCustomId(customId: string): { action: 'open' | 'proceed'; projectName: string | null; channelId: string | null } | null {
-    for (const [action, prefix] of [['open', PLANNING_OPEN_ACTION_PREFIX], ['proceed', PLANNING_PROCEED_ACTION_PREFIX]] as const) {
+    const pairs = [
+        ['open', PLANNING_OPEN_ACTION_PREFIX],
+        ['proceed', PLANNING_PROCEED_ACTION_PREFIX],
+        ['open', 'planning_open_action'],
+        ['proceed', 'planning_proceed_action'],
+    ] as const;
+    for (const [action, prefix] of pairs) {
         if (customId === prefix) return { action, projectName: null, channelId: null };
         if (customId.startsWith(`${prefix}:`)) {
             const rest = customId.substring(`${prefix}:`.length);
@@ -163,12 +197,19 @@ export function buildErrorPopupCustomId(
         : action === 'copy_debug'
             ? ERROR_POPUP_COPY_DEBUG_ACTION_PREFIX
             : ERROR_POPUP_RETRY_ACTION_PREFIX;
-    if (channelId && channelId.trim().length > 0) return `${prefix}:${projectName}:${channelId}`;
-    return `${prefix}:${projectName}`;
+    return buildCustomIdWithLimit(prefix, projectName, channelId);
 }
 
 export function parseErrorPopupCustomId(customId: string): { action: 'dismiss' | 'copy_debug' | 'retry'; projectName: string | null; channelId: string | null } | null {
-    for (const [action, prefix] of [['dismiss', ERROR_POPUP_DISMISS_ACTION_PREFIX], ['copy_debug', ERROR_POPUP_COPY_DEBUG_ACTION_PREFIX], ['retry', ERROR_POPUP_RETRY_ACTION_PREFIX]] as const) {
+    const pairs = [
+        ['dismiss', ERROR_POPUP_DISMISS_ACTION_PREFIX],
+        ['copy_debug', ERROR_POPUP_COPY_DEBUG_ACTION_PREFIX],
+        ['retry', ERROR_POPUP_RETRY_ACTION_PREFIX],
+        ['dismiss', 'error_popup_dismiss_action'],
+        ['copy_debug', 'error_popup_copy_debug_action'],
+        ['retry', 'error_popup_retry_action'],
+    ] as const;
+    for (const [action, prefix] of pairs) {
         if (customId === prefix) return { action, projectName: null, channelId: null };
         if (customId.startsWith(`${prefix}:`)) {
             const rest = customId.substring(`${prefix}:`.length);
@@ -356,13 +397,17 @@ export function ensureApprovalDetector(
             }
         },
         onApprovalRequired: async (info: ApprovalInfo) => {
-            logger.debug(`[ApprovalDetector:${projectName}] Approval detected`);
+            logger.debug(`[ApprovalDetector:${projectName}] Approval detected, info: ${JSON.stringify(info)}`);
 
+            logger.debug(`[ApprovalDetector:${projectName}] Getting current chat title...`);
             const currentChatTitle = await getCurrentChatTitle(cdp);
+            logger.debug(`[ApprovalDetector:${projectName}] Current chat title: ${currentChatTitle}`);
+
             const targetChannel = resolveApprovalChannelForCurrentChat(bridge, projectName, currentChatTitle);
+            logger.debug(`[ApprovalDetector:${projectName}] Resolved target channel: ${JSON.stringify(targetChannel)}`);
 
             if (!targetChannel || !bridge.messenger) {
-                logger.warn(`[ApprovalDetector:${projectName}] Skipped — no target channel or messenger port`);
+                logger.warn(`[ApprovalDetector:${projectName}] Skipped — no target channel or messenger port (messenger exists: ${!!bridge.messenger})`);
                 return;
             }
 
@@ -456,7 +501,9 @@ export function ensureApprovalDetector(
             }
             buttons.push({ text: `❌ ${denyLabel}`, action: buildApprovalCustomId('deny', projectName, targetChannelStr) });
 
+            logger.debug(`[ApprovalDetector:${projectName}] Calling bridge.messenger.sendMessage with text length: ${text.length}`);
             const msgId = await bridge.messenger.sendMessage(targetChannel, text, buttons);
+            logger.debug(`[ApprovalDetector:${projectName}] bridge.messenger.sendMessage returned msgId: ${msgId}`);
             if (msgId) {
                 lastMessageId = msgId;
                 lastMessageChatId = targetChannel.chatId;

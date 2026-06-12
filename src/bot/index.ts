@@ -1054,15 +1054,15 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 if (!win.workspacePath) continue;
                 
                 // Check if already connected
-                if (bridge.pool.getConnected(win.projectName)) continue;
+                if (bridge.pool.getConnectedByWebSocketUrl(win.webSocketDebuggerUrl)) continue;
 
-                // Find channel target: either from DB, or fallback to last active channel
+                // Find channel target: either from DB, or fallback to last active channel, or first binding in DB
                 let targetChannel: ChannelContext | null = null;
                 const bindings = workspaceBindingRepo.findAll();
                 const matched = bindings.find(b => {
                     const normB = b.workspacePath.toLowerCase().replace(/\//g, '\\').trim();
                     const normW = win.workspacePath!.toLowerCase().replace(/\//g, '\\').trim();
-                    return normB === normW;
+                    return normB === normW || normW.startsWith(normB + '\\') || normB.startsWith(normW + '\\');
                 });
 
                 if (matched) {
@@ -1072,6 +1072,13 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     };
                 } else if (bridge.lastActiveChannel) {
                     targetChannel = bridge.lastActiveChannel;
+                } else if (bindings.length > 0) {
+                    // Fallback to the first workspace binding channel if no active channel is set yet (e.g. after restart)
+                    const first = bindings[0];
+                    targetChannel = {
+                        chatId: first.channelId.includes(':') ? Number(first.channelId.split(':')[0]) : Number(first.channelId),
+                        threadId: first.channelId.includes(':') ? Number(first.channelId.split(':')[1]) : undefined,
+                    };
                 }
 
                 if (targetChannel) {

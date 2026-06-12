@@ -191,6 +191,7 @@ export class ApprovalDetector {
     private async poll(): Promise<void> {
         try {
             const contextId = this.cdpService.getPrimaryContextId();
+            logger.debug(`[ApprovalDetector:${this.cdpService.getCurrentWorkspaceName()}] Polling contextId=${contextId}`);
             const callParams: Record<string, unknown> = {
                 expression: APPROVAL_SELECTORS.DETECT_APPROVAL_SCRIPT,
                 returnByValue: true,
@@ -201,11 +202,17 @@ export class ApprovalDetector {
             }
 
             const result = await this.cdpService.call('Runtime.evaluate', callParams);
+            logger.debug(`[ApprovalDetector:${this.cdpService.getCurrentWorkspaceName()}] Raw evaluate result: ${JSON.stringify(result)}`);
             const info: ApprovalInfo | null = result?.result?.value ?? null;
+
+            if (result?.result?.description || result?.exceptionDetails) {
+                logger.warn(`[ApprovalDetector] Evaluation warning or exception:`, result.result?.description || result.exceptionDetails);
+            }
 
             if (info) {
                 // Duplicate prevention: use approveText + description combination as key
                 const key = `${info.approveText}::${info.description}`;
+                logger.debug(`[ApprovalDetector:${this.cdpService.getCurrentWorkspaceName()}] Detected info, key=${key}, lastKey=${this.lastDetectedKey}`);
                 if (key !== this.lastDetectedKey) {
                     this.lastDetectedKey = key;
                     this.lastDetectedInfo = info;

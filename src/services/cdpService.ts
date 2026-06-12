@@ -666,8 +666,8 @@ export class CdpService extends EventEmitter {
                 const normDetected = detectedPath.toLowerCase().replace(/\//g, '\\');
                 const normTarget = workspacePath.toLowerCase().replace(/\//g, '\\');
 
-                // If exact path match, it is definitely NOT different
-                if (normDetected === normTarget) {
+                // If exact path or subfolder/parent folder match, it is definitely NOT different
+                if (normDetected === normTarget || normDetected.startsWith(normTarget + '\\') || normTarget.startsWith(normDetected + '\\')) {
                     return false;
                 }
 
@@ -831,8 +831,8 @@ export class CdpService extends EventEmitter {
                     return true;
                 }
 
-                // If title is "Untitled (Workspace)", verify by folder path
-                if (isUntitledTitle(liveTitle) && workspacePath) {
+                // If title match failed and workspacePath is provided, verify by folder/workspace path
+                if (workspacePath) {
                     const folderMatch = await this.probeWorkspaceFolderPath(projectName, workspacePath);
                     if (folderMatch) {
                         return true;
@@ -915,23 +915,32 @@ export class CdpService extends EventEmitter {
                 const targetNorm = normalize(workspacePath);
 
                 if (configVal.type === 'folder' && configVal.path) {
-                    if (normalize(configVal.path) === targetNorm) {
+                    const folderPath = normalize(configVal.path);
+                    if (folderPath === targetNorm || folderPath.startsWith(targetNorm + '\\') || targetNorm.startsWith(folderPath + '\\')) {
                         this.currentWorkspaceName = projectName;
                         logger.debug(`[CdpService] Confirmed folder workspace match via configuration: "${workspacePath}"`);
                         return true;
                     }
                 } else if (configVal.type === 'workspace' && configVal.path) {
                     const wsJsonPath = normalize(configVal.path);
+                    if (wsJsonPath === targetNorm || wsJsonPath.startsWith(targetNorm + '\\') || targetNorm.startsWith(wsJsonPath + '\\')) {
+                        this.currentWorkspaceName = projectName;
+                        logger.debug(`[CdpService] Confirmed workspace file match via configuration: "${workspacePath}"`);
+                        return true;
+                    }
                     if (fs.existsSync(wsJsonPath)) {
                         const content = fs.readFileSync(wsJsonPath, 'utf8');
                         const parsed = JSON.parse(content);
                         if (parsed.folders && Array.isArray(parsed.folders)) {
                             for (const folder of parsed.folders) {
                                 const folderPath = folder.path || folder.uri;
-                                if (folderPath && normalize(folderPath) === targetNorm) {
-                                    this.currentWorkspaceName = projectName;
-                                    logger.debug(`[CdpService] Confirmed multi-folder workspace match via configuration: "${workspacePath}"`);
-                                    return true;
+                                if (folderPath) {
+                                    const folderPathNorm = normalize(folderPath);
+                                    if (folderPathNorm === targetNorm || folderPathNorm.startsWith(targetNorm + '\\') || targetNorm.startsWith(folderPathNorm + '\\')) {
+                                        this.currentWorkspaceName = projectName;
+                                        logger.debug(`[CdpService] Confirmed multi-folder workspace match via configuration: "${workspacePath}"`);
+                                        return true;
+                                    }
                                 }
                             }
                         }

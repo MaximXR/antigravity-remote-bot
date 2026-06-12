@@ -31,7 +31,7 @@ export const GET_CURRENT_CHAT_TITLE_SCRIPT = `(() => {
 
 // Dynamic script builder to click a button by its text (with word boundaries for short words)
 export const buildClickScript = (buttonText: string): string => {
-    const normalizedTarget = buttonText.toLowerCase().trim();
+    const normalizedTarget = buttonText.toLowerCase().replace(/^\s*\d+[\s.)]*/, '').replace(/\s+/g, ' ').trim();
     return `(() => {
         const target = ${JSON.stringify(normalizedTarget)};
         const normalize = (val) => (val || '').toLowerCase().replace(/^\\s*\\d+[\\s.)]*/, '').replace(/\\s+/g, ' ').trim();
@@ -87,7 +87,7 @@ export const buildClickScript = (buttonText: string): string => {
                     if (submitBtn && submitBtn !== btn && typeof submitBtn.click === 'function') {
                         setTimeout(() => {
                             try { submitBtn.click(); } catch(e) {}
-                        }, 50);
+                        }, 200);
                     }
                 }
                 
@@ -432,7 +432,7 @@ export const APPROVAL_SELECTORS = {
         const ALLOW_PATTERNS = ['allow', 'permit', 'run', 'execute', 'accept', 'approve', '許可', '承認', '確認', '実行'];
         const DENY_PATTERNS = ['deny', 'reject', 'no', 'no (tell', '拒否', 'decline', '却下'];
 
-        const normalize = (text) => (text || '').toLowerCase().replace(/^\\\\s*\\\\d+[\\\\s.)]*/, '').replace(/\\\\s+/g, ' ').trim();
+        const normalize = (text) => (text || '').toLowerCase().replace(/^\\s*\\d+[\\s.)]*/, '').replace(/\\s+/g, ' ').trim();
         const isVisible = (el) => {
             if (!el) return false;
             const rect = el.getBoundingClientRect();
@@ -502,7 +502,7 @@ export const APPROVAL_SELECTORS = {
                         if (text && text.length > 2 && text.length < 200) {
                             const isOptionOrSubmit = options.some(opt => opt.contains(el)) || submitBtn.contains(el);
                             if (!isOptionOrSubmit && text !== description && !additionalTexts.includes(text)) {
-                                if (!/^(yes|no|submit|cancel|ok|allow|deny|\\\\d+)$/i.test(text)) {
+                                if (!/^(yes|no|submit|cancel|ok|allow|deny|\\d+)$/i.test(text)) {
                                     additionalTexts.push(text);
                                 }
                             }

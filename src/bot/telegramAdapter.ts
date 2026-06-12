@@ -47,13 +47,16 @@ export class TelegramAdapter implements IMessengerPort {
     }
 
     public async sendMessage(channel: ChannelContext, text: string, buttons?: AbstractButton[] | AbstractButton[][]): Promise<number | null> {
+        logger.debug(`[TelegramAdapter:sendMessage] Sending message to chatId ${channel.chatId}, threadId ${channel.threadId}...`);
         try {
             const markup = this.buildKeyboard(buttons);
+            logger.debug(`[TelegramAdapter:sendMessage] Markup built successfully`);
             const msg = await this.api.sendMessage(channel.chatId, text, {
                 parse_mode: 'HTML',
                 message_thread_id: channel.threadId,
                 reply_markup: markup,
             });
+            logger.debug(`[TelegramAdapter:sendMessage] api.sendMessage succeeded: msgId ${msg.message_id}`);
             return msg.message_id;
         } catch (e: any) {
             logger.error('[TelegramAdapter:sendMessage] Failed:', e?.message || e);
