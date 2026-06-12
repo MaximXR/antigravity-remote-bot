@@ -196,5 +196,6 @@
   "Mirror all open VS Code windows.": "Транслировать сообщения из всех открытых окон VS Code.",
   "Mirror only the active (bound) workspace.": "Транслировать сообщения только из активной привязанной рабочей области.",
   "Set Mirror Mode": "Задать режим трансляции",
-  "Select a mirror mode:": "Выберите режим трансляции:"
+  "Select a mirror mode:": "Выберите режим трансляции:",
+  "⚠️ This workspace is currently closed or not running in the IDE!": "⚠️ Эта рабочая область сейчас закрыта или не запущена в IDE!"
 }

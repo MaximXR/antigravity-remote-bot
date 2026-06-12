@@ -163,5 +163,6 @@
   "Mirror all open VS Code windows.": "Mirror all open VS Code windows.",
   "Mirror only the active (bound) workspace.": "Mirror only the active (bound) workspace.",
   "Set Mirror Mode": "Set Mirror Mode",
-  "Select a mirror mode:": "Select a mirror mode:"
+  "Select a mirror mode:": "Select a mirror mode:",
+  "⚠️ This workspace is currently closed or not running in the IDE!": "⚠️ This workspace is currently closed or not running in the IDE!"
 }

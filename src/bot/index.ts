@@ -940,7 +940,11 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             if (isEmp) {
                 text += `  <i>${t('Path unknown')}</i>\n\n`;
             } else {
-                text += `  <code>${escapeHtml(getWorkspaceDisplayPath(binding.workspacePath))}</code>\n\n`;
+                text += `  <code>${escapeHtml(getWorkspaceDisplayPath(binding.workspacePath))}</code>\n`;
+                if (!matchingWin) {
+                    text += `  <b>${escapeHtml(t('⚠️ This workspace is currently closed or not running in the IDE!'))}</b>\n`;
+                }
+                text += '\n';
             }
         } else {
             text += `<b>${t('Current Workspace (this chat)')}:</b> ⚪ ${t('None')}\n\n`;
