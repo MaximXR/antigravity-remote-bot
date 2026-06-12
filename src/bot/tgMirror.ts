@@ -21,6 +21,7 @@ import { IdePromptRunner } from '../services/idePromptRunner';
 import { channelKeyFromChannel } from '../services/workspaceResolver';
 import { buildModelsUI } from '../ui/modelsUi';
 import { getAntigravityCdpHint } from '../utils/pathUtils';
+import { loadConfig } from '../utils/config';
 import {
     telegramSentPrompts,
     userStopRequestedChannels,
@@ -450,12 +451,17 @@ export async function mirrorResponseToTelegram(
     const workspaceName = cdp.getCurrentWorkspaceName();
 
     const shouldSkipMirroring = (): boolean => {
-        const conf = options.workspaceBindingRepo ? options.workspaceBindingRepo.findByChannelId(channelKey(channel)) : null;
-        if (!conf) return false;
-        const activeProjectName = bridge.pool.extractProjectName(conf.workspacePath);
-        if (activeProjectName !== workspaceName) {
-            logger.debug(`[mirror:${workspaceName}] mirrorMode is active but this is not the active workspace (${activeProjectName}), skipping.`);
-            return true;
+        const appConf = loadConfig();
+        const mirrorMode = appConf.mirrorMode || (appConf.onlyActiveWorkspaceMessages ? 'active' : 'all');
+
+        if (mirrorMode === 'active') {
+            const conf = options.workspaceBindingRepo ? options.workspaceBindingRepo.findByChannelId(channelKey(channel)) : null;
+            if (!conf) return false;
+            const activeProjectName = bridge.pool.extractProjectName(conf.workspacePath);
+            if (activeProjectName !== workspaceName) {
+                logger.debug(`[mirror:${workspaceName}] mirrorMode is active but this is not the active workspace (${activeProjectName}), skipping.`);
+                return true;
+            }
         }
         return false;
     };
@@ -549,6 +555,7 @@ export async function mirrorResponseToTelegram(
     };
 
     if (!cdp.isConnected()) return;
+    if (shouldSkipMirroring()) return;
 
     const currentModel = (await cdp.getCurrentModel()) || options.modelService.getCurrentModel();
     const modelLabel = `${currentModel}`;

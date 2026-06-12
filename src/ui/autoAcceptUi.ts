@@ -32,7 +32,7 @@ export async function sendAutoAcceptUI(
         `⚙️ ${t('other_requests')}: ${otherRequestsStatus}`;
 
     const keyboard = new InlineKeyboard()
-        .text(s.enabled ? `🔴 ${t('Disable Master')}` : `🟢 ${t('Enable Master')}`, AUTOACCEPT_TOGGLE_MASTER)
+        .text(s.enabled ? `🟢 ${t('Disable Master')}` : `🔴 ${t('Enable Master')}`, AUTOACCEPT_TOGGLE_MASTER)
         .row()
         .text(s.fileEdits ? `📂 ${t('File Edits')}: ✅` : `📂 ${t('File Edits')}: ❌`, `${AUTOACCEPT_TOGGLE_CAT_PREFIX}fileEdits`)
         .text(s.consoleCommands ? `💻 ${t('Console')}: ✅` : `💻 ${t('Console')}: ❌`, `${AUTOACCEPT_TOGGLE_CAT_PREFIX}consoleCommands`)
