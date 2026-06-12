@@ -873,7 +873,7 @@ export const RESPONSE_SELECTORS = {
             if (el.closest('[class*="metadata"]') || el.closest('[class*="metrics"]')) return true;
             
             const normalized = text.toLowerCase().trim();
-            if (/^(?:explored|thought|run|ran|npm|npx|git|python|tsc|test|search|artifact|task|status)\\b/i.test(normalized)) return true;
+            if (/^(?:explored|explore|thought|thinking|run|running|ran|npm|npx|git|python|tsc|test|testing|search|searching|artifact|task|tasks|status|scan|scanning|inspect|inspecting|read|reading|write|writing|resolve|resolving|execute|executing|analyze|analyzing|install|installing|build|building|compile|compiling)\b/i.test(normalized)) return true;
             if (/\\b(?:seconds|credits|worked for|gemini|claude)\\b/i.test(normalized)) return true;
             if (normalized === 'отменить' || normalized === 'остановить' || normalized === 'cancel') return true;
             if (/^[+-]\\d+\\s+[+-]\\d+$/.test(normalized)) return true;

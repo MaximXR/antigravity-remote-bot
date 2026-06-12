@@ -652,30 +652,30 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             cdpInfo = await queryWorkspacePath(page.webSocketDebuggerUrl);
                             sessionInfo = cdpInfo?.sessionInfo || null;
                         }
+                        let tempProjectName = '';
                         if (cdpInfo && cdpInfo.workspacePath) {
                             if (cdpInfo.workspacePath.endsWith('workspace.json')) {
-                                workspacePath = null;
+                                workspacePath = cdpInfo.workspacePath;
                                 try {
                                     if (fs.existsSync(cdpInfo.workspacePath)) {
                                         const content = fs.readFileSync(cdpInfo.workspacePath, 'utf8');
                                         const parsed = JSON.parse(content);
                                         if (parsed.folders && Array.isArray(parsed.folders) && parsed.folders.length > 0) {
-                                            const firstFolder = parsed.folders[0].path || parsed.folders[0].uri;
-                                            if (firstFolder) {
-                                                let cleanFolder = firstFolder.trim();
-                                                if (cleanFolder.startsWith('file:')) {
-                                                    cleanFolder = cleanFolder.replace(/^file:\/\/\/?/, '');
+                                            const folderNames = parsed.folders.map((f: any) => {
+                                                const p = f.path || f.uri || '';
+                                                let clean = p.trim();
+                                                if (clean.startsWith('file:')) {
+                                                    clean = clean.replace(/^file:\/\/\/?/, '');
                                                 }
-                                                cleanFolder = decodeURIComponent(cleanFolder);
-                                                cleanFolder = cleanFolder.replace(/^\/([a-zA-Z]):/, '$1:');
-                                                cleanFolder = cleanFolder.replace(/\//g, '\\');
-                                                workspacePath = cleanFolder;
+                                                clean = decodeURIComponent(clean);
+                                                clean = clean.replace(/^\/([a-zA-Z]):/, '$1:');
+                                                return path.basename(clean.replace(/\//g, '\\'));
+                                            }).filter(Boolean);
 
-                                                const normPath = cleanFolder.toLowerCase().trim();
-                                                matchedWorkspace = recentWorkspaces.find(w => {
-                                                    const normWPath = w.path.toLowerCase().replace(/\//g, '\\').trim();
-                                                    return normWPath === normPath;
-                                                }) || null;
+                                            if (folderNames.length > 1) {
+                                                tempProjectName = `(Составная область) ${folderNames.join(' + ')}`;
+                                            } else if (folderNames.length === 1) {
+                                                tempProjectName = folderNames[0];
                                             }
                                         }
                                     }
@@ -696,7 +696,11 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         if (matchedWorkspace) {
                             projectName = matchedWorkspace.name;
                         } else if (workspacePath && !workspacePath.startsWith('empty-workspace:')) {
-                            projectName = path.basename(workspacePath);
+                            if (workspacePath.endsWith('workspace.json') && tempProjectName) {
+                                projectName = tempProjectName;
+                            } else {
+                                projectName = path.basename(workspacePath);
+                            }
                         } else {
                             // Fallback to title matching
                             for (const w of recentWorkspaces) {
