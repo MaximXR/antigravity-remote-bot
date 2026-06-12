@@ -556,6 +556,9 @@ export function ensureApprovalDetector(
             return;
         }
 
+        // Delay the check by 2 seconds to allow execution contexts to be populated after connection
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
         const info = await detector.checkOnce().catch(() => null);
         if (info) {
             logger.info(`[ApprovalDetector:${projectName}] Hanging approval dialog detected on startup, starting detector.`);

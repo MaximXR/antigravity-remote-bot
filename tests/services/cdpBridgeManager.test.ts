@@ -151,6 +151,7 @@ describe('ensureApprovalDetector', () => {
         cdp.getPrimaryContextId = jest.fn().mockReturnValue(null);
         cdp.getContexts = jest.fn().mockReturnValue([]);
         cdp.call = jest.fn().mockResolvedValue({ result: { value: null } });
+        cdp.isCurrentlyGenerating = jest.fn().mockReturnValue(true);
         return cdp;
     }
 
