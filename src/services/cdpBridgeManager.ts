@@ -360,7 +360,14 @@ export async function flushDeferredApproval(
         text += `<b>Approve:</b> ${escapeHtml(info.approveText)}\n`;
         if (info.alwaysAllowText) text += `<b>Always:</b> ${escapeHtml(info.alwaysAllowText)}\n`;
         text += `<b>Deny:</b> ${escapeHtml(info.denyText || '(None)')}\n`;
-        text += `<b>Workspace:</b> ${escapeHtml(projectName)}`;
+        let displayWorkspace = projectName;
+        if (cdp) {
+            const dn = cdp.getDisplayName();
+            if (dn && dn !== 'workspace.json') {
+                displayWorkspace = dn;
+            }
+        }
+        text += `<b>Workspace:</b> ${escapeHtml(displayWorkspace)}`;
 
         const approveLabel = cleanLabel(info.approveText) || 'Allow';
         const denyLabel = cleanLabel(info.denyText) || 'Deny';
@@ -559,7 +566,14 @@ export function ensureApprovalDetector(
             text += `<b>Approve:</b> ${escapeHtml(info.approveText)}\n`;
             if (info.alwaysAllowText) text += `<b>Always:</b> ${escapeHtml(info.alwaysAllowText)}\n`;
             text += `<b>Deny:</b> ${escapeHtml(info.denyText || '(None)')}\n`;
-            text += `<b>Workspace:</b> ${escapeHtml(projectName)}`;
+            let displayWorkspace = projectName;
+            if (cdp) {
+                const dn = cdp.getDisplayName();
+                if (dn && dn !== 'workspace.json') {
+                    displayWorkspace = dn;
+                }
+            }
+            text += `<b>Workspace:</b> ${escapeHtml(displayWorkspace)}`;
 
             // Use actual button labels from the UI
             const approveLabel = cleanLabel(info.approveText) || 'Allow';

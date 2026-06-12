@@ -70,6 +70,8 @@ export class CdpService extends EventEmitter {
     private isReconnecting: boolean = false;
     /** Currently connected workspace name */
     private currentWorkspaceName: string | null = null;
+    /** User-friendly display name (from window title or recent workspaces) */
+    private displayName: string | null = null;
     /** Last requested workspace path (used for deterministic reconnect) */
     private currentWorkspacePath: string | null = null;
     /** Workspace switching flag (suppresses disconnected event) */
@@ -160,9 +162,12 @@ export class CdpService extends EventEmitter {
         if (target && target.webSocketDebuggerUrl) {
             this.targetUrl = target.webSocketDebuggerUrl;
             // Extract workspace name from title (e.g., "ProjectName — Antigravity")
-            if (target.title && !this.currentWorkspaceName) {
+            if (target.title) {
                 const titleParts = target.title.split(/\s[—–-]\s/);
-                if (titleParts.length > 0) {
+                const parsedProjectName = titleParts.length >= 2 ? titleParts[titleParts.length - 2] : (titleParts[0] || 'Unknown');
+                const cleanParsedName = parsedProjectName.replace(/\s*\([^)]+\)$/, '').replace(/\.code-workspace$/i, '').trim();
+                this.displayName = cleanParsedName;
+                if (!this.currentWorkspaceName && titleParts.length > 0) {
                     this.currentWorkspaceName = titleParts[0].trim();
                 }
             }
@@ -380,6 +385,14 @@ export class CdpService extends EventEmitter {
         return this.currentWorkspaceName;
     }
 
+    getDisplayName(): string | null {
+        return this.displayName;
+    }
+
+    setDisplayName(name: string | null) {
+        this.displayName = name;
+    }
+
     /**
      * Return the currently connected workspace path.
      */
@@ -594,6 +607,12 @@ export class CdpService extends EventEmitter {
         // No reconnection needed if already connected to the same URL
         if (this.isConnectedFlag && this.targetUrl === page.webSocketDebuggerUrl) {
             this.currentWorkspaceName = projectName;
+            if (page.title) {
+                const titleParts = page.title.split(/\s[—–-]\s/);
+                const parsedProjectName = titleParts.length >= 2 ? titleParts[titleParts.length - 2] : (titleParts[0] || 'Unknown');
+                const cleanParsedName = parsedProjectName.replace(/\s*\([^)]+\)$/, '').replace(/\.code-workspace$/i, '').trim();
+                this.displayName = cleanParsedName;
+            }
             return true;
         }
 
@@ -601,6 +620,12 @@ export class CdpService extends EventEmitter {
         this.targetUrl = page.webSocketDebuggerUrl;
         await this.connect();
         this.currentWorkspaceName = projectName;
+        if (page.title) {
+            const titleParts = page.title.split(/\s[—–-]\s/);
+            const parsedProjectName = titleParts.length >= 2 ? titleParts[titleParts.length - 2] : (titleParts[0] || 'Unknown');
+            const cleanParsedName = parsedProjectName.replace(/\s*\([^)]+\)$/, '').replace(/\.code-workspace$/i, '').trim();
+            this.displayName = cleanParsedName;
+        }
         logger.debug(`[CdpService] Connected to workspace "${projectName}"`);
 
         return true;
