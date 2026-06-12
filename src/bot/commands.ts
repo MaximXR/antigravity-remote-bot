@@ -74,7 +74,7 @@ export interface CommandDependencies {
     topicManager: TelegramTopicManager;
     resolveWorkspaceAndCdp: (ch: any) => Promise<any>;
     setupWorkspaceDetectors: (cdp: any, projectName: string, channel: any) => void;
-    queryWorkspacePath: (wsUrl: string) => Promise<any>;
+    queryWorkspacePath: (wsUrl: string, title?: string) => Promise<any>;
     scanActiveWindows: () => Promise<any>;
     switchWorkspaceInternal: (ctx: Context, workspacePath: string, silent?: boolean) => Promise<any>;
 }

@@ -358,37 +358,19 @@ export class UserMessageDetector {
                 // we check if active generation is running. If not, we still prime it to prevent
                 // mirroring old message history upon workspace connection.
                 if (wasPriming) {
+                    this.lastDetectedHash = dbHash;
                     this.lastDetectedIndex = currentIndex;
-                    const dbEmpty = this.isDbEmpty();
-                    
-                    let isGenerating = false;
-                    try {
-                        const stopResult = await this.cdpService.call('Runtime.evaluate', {
-                            expression: RESPONSE_SELECTORS.STOP_BUTTON,
-                            returnByValue: true,
-                        });
-                        isGenerating = !!stopResult?.result?.value?.isGenerating;
-                    } catch (err) {
-                        logger.debug('[UserMessageDetector] Failed to check active generation state during startup check:', err);
-                    }
-
-                    if (dbEmpty || !isGenerating) {
-                        this.lastDetectedHash = dbHash;
-                        this.lastDetectedIndex = currentIndex;
-                        this.addToSeenHashes(dbHash);
-                        if (this.db) {
-                            try {
-                                this.db.prepare('INSERT OR IGNORE INTO seen_user_messages (message_hash) VALUES (?)').run(dbHash);
-                                this.db.prepare("DELETE FROM seen_user_messages WHERE created_at < datetime('now', '-24 hours')").run();
-                            } catch (err) {
-                                logger.error('[UserMessageDetector] DB insert/cleanup error:', err);
-                            }
+                    this.addToSeenHashes(dbHash);
+                    if (this.db) {
+                        try {
+                            this.db.prepare('INSERT OR IGNORE INTO seen_user_messages (message_hash) VALUES (?)').run(dbHash);
+                            this.db.prepare("DELETE FROM seen_user_messages WHERE created_at < datetime('now', '-24 hours')").run();
+                        } catch (err) {
+                            logger.error('[UserMessageDetector] DB insert/cleanup error:', err);
                         }
-                        logger.debug(`[UserMessageDetector] Primed (dbEmpty=${dbEmpty}, isGenerating=${isGenerating}) with existing message: "${preview}..."`);
-                        return;
-                    } else {
-                        logger.debug(`[UserMessageDetector] Startup check: found active unmirrored generation for message: "${preview}...", forwarding to Telegram`);
                     }
+                    logger.debug(`[UserMessageDetector] Primed with existing message: "${preview}..."`);
+                    return;
                 }
 
                 // Skip if same as last detected message in memory

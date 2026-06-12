@@ -441,7 +441,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     
 
     // Helper to query workspace path directly from a running IDE window via CDP
-    const queryWorkspacePath = async (wsUrl: string): Promise<{ workspacePath: string | null; workspaceId: string | null; sessionInfo?: { title: string; hasActiveChat: boolean } | null } | null> => {
+    const queryWorkspacePath = async (wsUrl: string, title?: string): Promise<{ workspacePath: string | null; workspaceId: string | null; sessionInfo?: { title: string; hasActiveChat: boolean } | null } | null> => {
         return new Promise((resolve) => {
             const ws = new WebSocket(wsUrl);
             let resolved = false;
@@ -455,7 +455,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 try { ws.close(); } catch {}
             };
 
-            const timeout = setTimeout(cleanup, 4000);
+            const timeout = setTimeout(cleanup, 6000);
 
             ws.on('message', (dataStr) => {
                 try {
@@ -477,112 +477,129 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     params: {}
                 }));
 
-                setTimeout(async () => {
-                    if (resolved) return;
-                    
+                const isUntitled = title ? isUntitledTitle(title) : false;
+                const maxAttempts = isUntitled ? 1 : 4;
+
+                (async () => {
                     let workspacePath: string | null = null;
                     let workspaceId: string | null = null;
                     let sessionInfo: { title: string; hasActiveChat: boolean } | null = null;
 
-                    const contextsToTry = [undefined, ...contexts];
-                    
-                    for (const cid of contextsToTry) {
-                        try {
-                            const res = await new Promise<any>((resEval, rejEval) => {
-                                const evalId = Math.floor(Math.random() * 1000000);
-                                const onEvalMsg = (msg: any) => {
-                                    try {
-                                        const d = JSON.parse(msg.toString());
-                                        if (d.id === evalId) {
-                                            ws.removeListener('message', onEvalMsg);
-                                            if (d.error) rejEval(d.error);
-                                            else resEval(d.result?.result?.value);
-                                        }
-                                    } catch {}
-                                };
-                                ws.on('message', onEvalMsg);
-                                ws.send(JSON.stringify({
-                                    id: evalId,
-                                    method: 'Runtime.evaluate',
-                                    params: {
-                                        expression: `(async () => {
-                                            let workspacePath = null;
-                                            let workspaceId = null;
-                                            const vs = typeof vscode !== 'undefined' ? vscode : (typeof window !== 'undefined' && window.vscode ? window.vscode : null);
-                                            if (vs && vs.context) {
-                                                try {
-                                                    const config = typeof vs.context.configuration === 'function' 
-                                                        ? vs.context.configuration()
-                                                        : (typeof vs.context.resolveConfiguration === 'function'
-                                                            ? await vs.context.resolveConfiguration()
-                                                            : null);
-                                                    if (config && config.workspace) {
-                                                        workspaceId = config.workspace.id || null;
-                                                        
-                                                        const cp = config.workspace.configPath;
-                                                        const uri = config.workspace.uri;
-                                                        const rawPath = cp?.fsPath || cp?._fsPath || cp?.path || uri?.fsPath || uri?._fsPath || uri?.path || null;
-                                                        if (rawPath) {
-                                                            let clean = rawPath.trim();
-                                                            if (clean.startsWith('file:')) {
-                                                                clean = clean.replace(/^file:\\/\\/\\/?/, '');
+                    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                        if (resolved) return;
+
+                        if (attempt === 1) {
+                            await new Promise(r => setTimeout(r, 400));
+                        } else {
+                            await new Promise(r => setTimeout(r, 500));
+                        }
+
+                        if (resolved) return;
+
+                        const contextsToTry = [undefined, ...contexts];
+                        
+                        for (const cid of contextsToTry) {
+                            try {
+                                const res = await new Promise<any>((resEval, rejEval) => {
+                                    const evalId = Math.floor(Math.random() * 1000000);
+                                    const onEvalMsg = (msg: any) => {
+                                        try {
+                                            const d = JSON.parse(msg.toString());
+                                            if (d.id === evalId) {
+                                                ws.removeListener('message', onEvalMsg);
+                                                if (d.error) rejEval(d.error);
+                                                else resEval(d.result?.result?.value);
+                                            }
+                                        } catch {}
+                                    };
+                                    ws.on('message', onEvalMsg);
+                                    ws.send(JSON.stringify({
+                                        id: evalId,
+                                        method: 'Runtime.evaluate',
+                                        params: {
+                                            expression: `(async () => {
+                                                let workspacePath = null;
+                                                let workspaceId = null;
+                                                const vs = typeof vscode !== 'undefined' ? vscode : (typeof window !== 'undefined' && window.vscode ? window.vscode : null);
+                                                if (vs && vs.context) {
+                                                    try {
+                                                        const config = typeof vs.context.configuration === 'function' 
+                                                            ? vs.context.configuration()
+                                                            : (typeof vs.context.resolveConfiguration === 'function'
+                                                                ? await vs.context.resolveConfiguration()
+                                                                : null);
+                                                        if (config && config.workspace) {
+                                                            workspaceId = config.workspace.id || null;
+                                                            
+                                                            const cp = config.workspace.configPath;
+                                                            const uri = config.workspace.uri;
+                                                            const rawPath = cp?.fsPath || cp?._fsPath || cp?.path || uri?.fsPath || uri?._fsPath || uri?.path || null;
+                                                            if (rawPath) {
+                                                                let clean = rawPath.trim();
+                                                                if (clean.startsWith('file:')) {
+                                                                    clean = clean.replace(/^file:\\/\\/\\/?/, '');
+                                                                }
+                                                                clean = decodeURIComponent(clean);
+                                                                clean = clean.replace(/^\\/([a-zA-Z]):/, '$1:');
+                                                                clean = clean.replace(/\\//g, '\\\\');
+                                                                workspacePath = clean;
                                                             }
-                                                            clean = decodeURIComponent(clean);
-                                                            clean = clean.replace(/^\\/([a-zA-Z]):/, '$1:');
-                                                            clean = clean.replace(/\\//g, '\\\\');
-                                                            workspacePath = clean;
+                                                        }
+                                                    } catch (e) {
+                                                        // ignore
+                                                    }
+                                                }
+                                                
+                                                let title = '';
+                                                let hasActiveChat = false;
+                                                const panel = document.querySelector('.antigravity-agent-side-panel');
+                                                if (panel) {
+                                                    const header = panel.querySelector('div[class*="border-b"]');
+                                                    if (header) {
+                                                        const titleEl = header.querySelector('div[class*="text-ellipsis"]');
+                                                        title = titleEl ? (titleEl.textContent || '').trim() : '';
+                                                        hasActiveChat = title.length > 0 && title !== 'Agent';
+                                                        if (!title) {
+                                                            title = '(Untitled)';
                                                         }
                                                     }
-                                                } catch (e) {
-                                                    // ignore
                                                 }
-                                            }
-                                            
-                                            let title = '';
-                                            let hasActiveChat = false;
-                                            const panel = document.querySelector('.antigravity-agent-side-panel');
-                                            if (panel) {
-                                                const header = panel.querySelector('div[class*="border-b"]');
-                                                if (header) {
-                                                    const titleEl = header.querySelector('div[class*="text-ellipsis"]');
-                                                    title = titleEl ? (titleEl.textContent || '').trim() : '';
-                                                    hasActiveChat = title.length > 0 && title !== 'Agent';
-                                                    if (!title) {
-                                                        title = '(Untitled)';
-                                                    }
-                                                }
-                                            }
-                                            
-                                            return {
-                                                workspacePath,
-                                                workspaceId,
-                                                sessionInfo: title ? { title, hasActiveChat } : null
-                                            };
-                                        })()`,
-                                        returnByValue: true,
-                                        awaitPromise: true,
-                                        contextId: cid
-                                    }
-                                }));
-                                setTimeout(() => {
-                                    ws.removeListener('message', onEvalMsg);
-                                    rejEval(new Error('timeout'));
-                                }, 1000);
-                            });
+                                                
+                                                return {
+                                                    workspacePath,
+                                                    workspaceId,
+                                                    sessionInfo: title ? { title, hasActiveChat } : null
+                                                };
+                                            })()`,
+                                            returnByValue: true,
+                                            awaitPromise: true,
+                                            contextId: cid
+                                        }
+                                    }));
+                                    setTimeout(() => {
+                                        ws.removeListener('message', onEvalMsg);
+                                        rejEval(new Error('timeout'));
+                                    }, 1000);
+                                });
 
-                            if (res) {
-                                if (res.workspacePath && !workspacePath) {
-                                    workspacePath = res.workspacePath;
+                                if (res) {
+                                    if (res.workspacePath && !workspacePath) {
+                                        workspacePath = res.workspacePath;
+                                    }
+                                    if (res.workspaceId && !workspaceId) {
+                                        workspaceId = res.workspaceId;
+                                    }
+                                    if (res.sessionInfo && !sessionInfo) {
+                                        sessionInfo = res.sessionInfo;
+                                    }
                                 }
-                                if (res.workspaceId && !workspaceId) {
-                                    workspaceId = res.workspaceId;
-                                }
-                                if (res.sessionInfo && !sessionInfo) {
-                                    sessionInfo = res.sessionInfo;
-                                }
+                            } catch (e) {
+                                // ignore
                             }
-                        } catch (e) {
-                            // ignore
+                        }
+
+                        if (workspacePath) {
+                            break;
                         }
                     }
 
@@ -590,7 +607,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     resolved = true;
                     resolve({ workspacePath, workspaceId, sessionInfo });
                     try { ws.close(); } catch {}
-                }, 400);
+                })();
             });
 
             ws.on('error', cleanup);
@@ -651,7 +668,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             cdpInfo = { workspacePath: existingPath, workspaceId: null, sessionInfo: cachedSession };
                             sessionInfo = cachedSession;
                         } else {
-                            cdpInfo = await queryWorkspacePath(page.webSocketDebuggerUrl);
+                            cdpInfo = await queryWorkspacePath(page.webSocketDebuggerUrl, page.title);
                             sessionInfo = cdpInfo?.sessionInfo || null;
                         }
                         // 1. Parse project name from title first
@@ -1037,39 +1054,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     
                     setupWorkspaceDetectors(cdp, projectName, channel);
 
-                    // Detect if a run is already in progress and start passive monitoring
-                    cdp.call('Runtime.evaluate', {
-                        expression: RESPONSE_SELECTORS.STOP_BUTTON,
-                        returnByValue: true,
-                    }).then((res: any) => {
-                        const isGenerating = res?.result?.value?.isGenerating;
-                        if (isGenerating) {
-                            const conf = loadConfig();
-                            if (conf.onlyActiveWorkspaceMessages) {
-                                const binding = workspaceBindingRepo.findByChannelId(channelKey(channel));
-                                const activeProjectName = binding ? bridge.pool.extractProjectName(binding.workspacePath) : null;
-                                if (activeProjectName !== projectName) {
-                                    logger.debug(`[startup] onlyActiveWorkspaceMessages is true and this is not the active workspace (${activeProjectName}), skipping passive monitoring.`);
-                                    return;
-                                }
-                            }
 
-                            logger.info(`[startup] Detected active run in progress for workspace ${binding.workspacePath}. Starting passive monitoring.`);
-                            const lastUserMsg = 'Activity in IDE'; 
-                            const mirrorPromise = mirrorResponseToTelegram(bridge, channel, cdp, lastUserMsg, {
-                                chatSessionService,
-                                chatSessionRepo,
-                                topicManager,
-                                titleGenerator,
-                                modelService,
-                                modeService,
-                                workspaceBindingRepo
-                            });
-                            promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
-                        }
-                    }).catch(err => {
-                        logger.debug(`[startup] Stop button probe failed for ${binding.workspacePath}:`, err);
-                    });
 
                 }).catch((err) => {
                     logger.warn(`[startup] Failed proactive connection for ${binding.workspacePath}: ${err?.message || err}. Retrying in 10s...`);
