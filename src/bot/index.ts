@@ -181,7 +181,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 if (!freshCdp) {
                     logger.warn(`[autoQueue] Workspace ${wsKey} no longer connected, discarding queued message`);
                     if (pending.inboundImages?.length) {
-                        cleanupInboundImageAttachments(pending.inboundImages).catch(() => {});
+                        cleanupInboundImageAttachments(pending.inboundImages).catch(() => { });
                     }
                     continue;
                 }
@@ -288,7 +288,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }
 
         const keyboard = new InlineKeyboard();
-        
+
         if (workspacePath) {
             const shortId = `rest_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
             restoreWindowPathCache.set(shortId, workspacePath);
@@ -299,11 +299,11 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
         if (isMain) {
             text += `${t('The active workspace is offline. You can restore it or switch to another open window:')}\n`;
-            
+
             // Scan other active windows
             const activeWindows = await scanActiveWindows();
             const otherWindows = activeWindows.filter(w => w.projectName !== projectName);
-            
+
             if (otherWindows.length > 0) {
                 text += `\n<b>${t('Other open windows:')}</b>\n`;
                 let btnCount = 0;
@@ -388,7 +388,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             }
 
             logger.info(`[UserMessageDetector:${projectName}] Detected user message from IDE: "${info.text.slice(0, 50)}..."`);
-            
+
             if (promptDispatcher.isBusy(channel, cdp)) {
                 logger.debug(`[UserMessageDetector:${projectName}] Workspace is busy, skipping user message mirror.`);
                 return false;
@@ -411,7 +411,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 titleGenerator,
                 modelService,
                 modeService,
-                                workspaceBindingRepo
+                workspaceBindingRepo
             });
 
             promptDispatcher.acquireLock(channel, cdp, mirrorPromise);
@@ -438,7 +438,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         });
     };
 
-    
+
 
     // Helper to query workspace path directly from a running IDE window via CDP
     const queryWorkspacePath = async (wsUrl: string, title?: string): Promise<{ workspacePath: string | null; workspaceId: string | null; sessionInfo?: { title: string; hasActiveChat: boolean } | null } | null> => {
@@ -446,13 +446,13 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             const ws = new WebSocket(wsUrl);
             let resolved = false;
             const contexts: number[] = [];
-            
+
             const cleanup = () => {
                 if (!resolved) {
                     resolved = true;
                     resolve(null);
                 }
-                try { ws.close(); } catch {}
+                try { ws.close(); } catch { }
             };
 
             const timeout = setTimeout(cleanup, 6000);
@@ -466,7 +466,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             contexts.push(cid);
                         }
                     }
-                } catch {}
+                } catch { }
             });
 
             ws.on('open', () => {
@@ -497,7 +497,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         if (resolved) return;
 
                         const contextsToTry = [undefined, ...contexts];
-                        
+
                         for (const cid of contextsToTry) {
                             try {
                                 const res = await new Promise<any>((resEval, rejEval) => {
@@ -510,7 +510,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                                                 if (d.error) rejEval(d.error);
                                                 else resEval(d.result?.result?.value);
                                             }
-                                        } catch {}
+                                        } catch { }
                                     };
                                     ws.on('message', onEvalMsg);
                                     ws.send(JSON.stringify({
@@ -606,7 +606,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     clearTimeout(timeout);
                     resolved = true;
                     resolve({ workspacePath, workspaceId, sessionInfo });
-                    try { ws.close(); } catch {}
+                    try { ws.close(); } catch { }
                 })();
             });
 
@@ -1046,12 +1046,12 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 chatId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[0]) : Number(binding.channelId),
                 threadId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[1]) : undefined,
             };
-            
+
             const connectProactively = () => {
                 bridge.pool.getOrConnect(workspacePath, false, undefined, false).then((cdp) => {
                     const projectName = bridge.pool.extractProjectName(binding.workspacePath);
                     logger.info(`[startup] Proactively connected to workspace: ${projectName} (${binding.workspacePath})`);
-                    
+
                     setupWorkspaceDetectors(cdp, projectName, channel);
 
 
@@ -1072,7 +1072,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             const activeWindows = await scanActiveWindows();
             for (const win of activeWindows) {
                 if (!win.workspacePath) continue;
-                
+
                 // Check if already connected
                 if (bridge.pool.getConnectedByWebSocketUrl(win.webSocketDebuggerUrl)) continue;
 
@@ -1114,16 +1114,16 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         threadId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[1]) : undefined,
                     };
                     const key = channelKey(ch);
-                    
+
                     const bindingProjectName = bridge.pool.extractProjectName(binding.workspacePath);
                     const isBindingConnected = !!bridge.pool.getConnected(bindingProjectName);
-                    
+
                     if (!isBindingConnected && !promptSelectionSentChannels.has(key)) {
                         promptSelectionSentChannels.add(key);
-                        
+
                         let text = `🖥️ <b>${t('Multiple open IDE windows detected:')}</b>\n\n`;
                         text += `${t('Select which workspace window you want to work with:')}`;
-                        
+
                         const keyboard = new InlineKeyboard();
                         let btnCount = 0;
                         for (const win of activeWindows) {
@@ -1134,7 +1134,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                                 keyboard.text(`🔌 ${cleanName}`, `switch_window:${swId}`).row();
                             }
                         }
-                        
+
                         bot.api.sendMessage(ch.chatId, text, {
                             parse_mode: 'HTML',
                             message_thread_id: ch.threadId,
@@ -1150,7 +1150,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
     // Run background scanner immediately on start and then every 10s
     scanAndConnectNewWindows().catch(err => logger.error('[background] Initial scanAndConnectNewWindows failed:', err));
-    setInterval(scanAndConnectNewWindows, 10000);
+    setInterval(scanAndConnectNewWindows, 7000);
 
     logger.info('Starting Remoat Telegram bot...');
 
