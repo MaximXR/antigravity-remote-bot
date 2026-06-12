@@ -44,6 +44,29 @@ describe('pathUtils', () => {
         it('returns name as-is for simple name', () => {
             expect(extractProjectNameFromPath('MyProject')).toBe('MyProject');
         });
+
+        it('handles workspace.json by falling back to parent folder name if file does not exist', () => {
+            expect(extractProjectNameFromPath('C:\\Users\\test\\Code\\MyProject\\workspace.json')).toBe('MyProject');
+        });
+
+        it('handles workspace.json by parsing the file name if file exists', () => {
+            const fs = require('fs');
+            const path = require('path');
+            const tempFile = path.resolve(__dirname, 'temp_extract_test_workspace.json');
+            try {
+                fs.writeFileSync(tempFile, JSON.stringify({
+                    folders: [
+                        { path: 'FolderA' },
+                        { path: 'FolderB' }
+                    ]
+                }));
+                expect(extractProjectNameFromPath(tempFile)).toBe('🗂️ FolderA + FolderB');
+            } finally {
+                if (fs.existsSync(tempFile)) {
+                    fs.unlinkSync(tempFile);
+                }
+            }
+        });
     });
 
     describe('getAntigravityCdpHint()', () => {

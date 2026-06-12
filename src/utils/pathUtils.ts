@@ -33,6 +33,17 @@ export function extractProjectNameFromPath(workspacePath: string): string {
         const parts = workspacePath.split(':');
         return `empty-window-${parts[1]}-${parts[2].slice(0, 6)}`;
     }
+    if (workspacePath.endsWith('workspace.json')) {
+        const parsedName = parseWorkspaceJsonName(workspacePath);
+        if (parsedName) {
+            return parsedName;
+        }
+        // Fallback to parent directory name if workspace.json couldn't be parsed
+        const parts = workspacePath.split(/[/\\]/).filter(Boolean);
+        if (parts.length >= 2) {
+            return parts[parts.length - 2];
+        }
+    }
     const last = workspacePath.split(/[/\\]/).filter(Boolean).pop() || '';
     if (last.endsWith('.code-workspace')) {
         return last.slice(0, -'.code-workspace'.length);
@@ -241,6 +252,43 @@ export function getWorkspaceDisplayPath(workspacePath: string): string {
         }
     }
     return workspacePath;
+}
+
+export function parseWorkspaceJsonName(workspaceJsonPath: string): string | null {
+    if (!workspaceJsonPath || !workspaceJsonPath.endsWith('workspace.json')) return null;
+    try {
+        const fs = require('fs');
+        if (fs.existsSync(workspaceJsonPath)) {
+            const content = fs.readFileSync(workspaceJsonPath, 'utf8');
+            const parsed = JSON.parse(content);
+            if (parsed.folders && Array.isArray(parsed.folders) && parsed.folders.length > 0) {
+                const path = require('path');
+                const baseDir = path.dirname(workspaceJsonPath);
+                const folderNames = parsed.folders.map((f: any) => {
+                    const p = f.path || f.uri || '';
+                    let clean = p.trim();
+                    if (clean.startsWith('file:')) {
+                        clean = clean.replace(/^file:\/\/\/?/, '');
+                    }
+                    clean = decodeURIComponent(clean);
+                    clean = clean.replace(/^\/([a-zA-Z]):/, '$1:');
+                    if (!path.isAbsolute(clean) && !/^[a-zA-Z]:/.test(clean)) {
+                        clean = path.resolve(baseDir, clean);
+                    }
+                    return path.basename(clean.replace(/\//g, '\\'));
+                }).filter(Boolean);
+
+                if (folderNames.length > 1) {
+                    return `🗂️ ${folderNames.join(' + ')}`;
+                } else if (folderNames.length === 1) {
+                    return folderNames[0];
+                }
+            }
+        }
+    } catch {
+        // ignore
+    }
+    return null;
 }
 
 

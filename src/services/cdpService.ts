@@ -6,7 +6,7 @@ import * as path from 'path';
 import * as http from 'http';
 import * as net from 'net';
 import { spawn } from 'child_process';
-import { getAntigravityCliPath, extractProjectNameFromPath, isTitleMatch, isWorkspaceMatch, isUntitledTitle } from '../utils/pathUtils';
+import { getAntigravityCliPath, extractProjectNameFromPath, isTitleMatch, isWorkspaceMatch, isUntitledTitle, parseWorkspaceJsonName } from '../utils/pathUtils';
 import { CORE_SELECTORS } from '../utils/domSelectors';
 import WebSocket from 'ws';
 
@@ -166,7 +166,7 @@ export class CdpService extends EventEmitter {
                 const titleParts = target.title.split(/\s[—–-]\s/);
                 const parsedProjectName = titleParts.length >= 2 ? titleParts[titleParts.length - 2] : (titleParts[0] || 'Unknown');
                 const cleanParsedName = parsedProjectName.replace(/\s*\([^)]+\)$/, '').replace(/\.code-workspace$/i, '').trim();
-                this.displayName = cleanParsedName;
+                this.displayName = this.resolveDisplayName(cleanParsedName);
                 if (!this.currentWorkspaceName && titleParts.length > 0) {
                     this.currentWorkspaceName = titleParts[0].trim();
                 }
@@ -389,8 +389,24 @@ export class CdpService extends EventEmitter {
         return this.displayName;
     }
 
+    private resolveDisplayName(cleanParsedName: string | null): string | null {
+        if (!cleanParsedName) return null;
+        if (cleanParsedName === 'workspace.json' && this.currentWorkspacePath) {
+            const parsedName = parseWorkspaceJsonName(this.currentWorkspacePath);
+            if (parsedName) {
+                return parsedName;
+            }
+            // Fallback to parent directory name if workspace.json couldn't be parsed
+            const parts = this.currentWorkspacePath.split(/[/\\]/).filter(Boolean);
+            if (parts.length >= 2) {
+                return parts[parts.length - 2];
+            }
+        }
+        return cleanParsedName;
+    }
+
     setDisplayName(name: string | null) {
-        this.displayName = name;
+        this.displayName = this.resolveDisplayName(name);
     }
 
     /**
@@ -611,7 +627,7 @@ export class CdpService extends EventEmitter {
                 const titleParts = page.title.split(/\s[—–-]\s/);
                 const parsedProjectName = titleParts.length >= 2 ? titleParts[titleParts.length - 2] : (titleParts[0] || 'Unknown');
                 const cleanParsedName = parsedProjectName.replace(/\s*\([^)]+\)$/, '').replace(/\.code-workspace$/i, '').trim();
-                this.displayName = cleanParsedName;
+                this.displayName = this.resolveDisplayName(cleanParsedName);
             }
             return true;
         }
@@ -624,7 +640,7 @@ export class CdpService extends EventEmitter {
             const titleParts = page.title.split(/\s[—–-]\s/);
             const parsedProjectName = titleParts.length >= 2 ? titleParts[titleParts.length - 2] : (titleParts[0] || 'Unknown');
             const cleanParsedName = parsedProjectName.replace(/\s*\([^)]+\)$/, '').replace(/\.code-workspace$/i, '').trim();
-            this.displayName = cleanParsedName;
+            this.displayName = this.resolveDisplayName(cleanParsedName);
         }
         logger.debug(`[CdpService] Connected to workspace "${projectName}"`);
 
