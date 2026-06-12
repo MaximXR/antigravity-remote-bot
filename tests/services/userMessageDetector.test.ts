@@ -1,5 +1,6 @@
 import { UserMessageDetector, UserMessageInfo } from '../../src/services/userMessageDetector';
 import { CdpService } from '../../src/services/cdpService';
+import Database from 'better-sqlite3';
 
 jest.mock('../../src/services/cdpService');
 const MockedCdpService = CdpService as jest.MockedClass<typeof CdpService>;
@@ -355,5 +356,124 @@ describe('UserMessageDetector', () => {
         expect(onUserMessage).toHaveBeenCalledTimes(2);
 
         await detector.stop();
+    });
+
+    it('dynamic priming works when chat title changes', async () => {
+        const onUserMessage = jest.fn();
+        let queryCount = 0;
+        mockCdpService.call.mockImplementation(async (method, params) => {
+            if (method === 'Runtime.evaluate') {
+                const expr = params?.expression;
+                if (typeof expr === 'string' && !expr.includes('STOP_BUTTON') && !expr.includes('isGenerating')) {
+                    queryCount++;
+                    if (queryCount === 1) {
+                        // priming: title = 'Agent'
+                        return { result: { value: { text: 'Hello', chatTitle: 'Agent', index: 1, timestamp: '10:00' } } };
+                    }
+                    if (queryCount === 2) {
+                        // Same message text and index, but title changed to 'New Title'
+                        return { result: { value: { text: 'Hello', chatTitle: 'New Title', index: 1, timestamp: '10:00' } } };
+                    }
+                    // User types a new message in the renamed chat
+                    return { result: { value: { text: 'How are you', chatTitle: 'New Title', index: 2, timestamp: '10:01' } } };
+                }
+                // Stop button check
+                return { result: { value: { isGenerating: false } } };
+            }
+            return { result: { value: null } };
+        });
+
+        const detector = new UserMessageDetector({
+            cdpService: mockCdpService,
+            pollIntervalMs: 100,
+            onUserMessage,
+        });
+
+        detector.start();
+
+        // 1. Priming poll (sees 'Hello' in 'Agent' chat)
+        await tick(100);
+        expect(onUserMessage).not.toHaveBeenCalled();
+
+        // 2. Poll 2 (sees title changed to 'New Title'). This should trigger priming because of title change.
+        // So it should NOT trigger callback.
+        await tick(100);
+        expect(onUserMessage).not.toHaveBeenCalled();
+
+        // 3. Poll 3 (sees new message 'How are you' at index 2). This should trigger callback.
+        await tick(100);
+        expect(onUserMessage).toHaveBeenCalledTimes(1);
+        expect(onUserMessage).toHaveBeenLastCalledWith(expect.objectContaining({ text: 'How are you' }));
+
+        await detector.stop();
+    });
+
+    it('allows repeating the same message text at different index/timestamp', async () => {
+        const onUserMessage = jest.fn();
+        let queryCount = 0;
+        mockCdpService.call.mockImplementation(async (method, params) => {
+            if (method === 'Runtime.evaluate') {
+                const expr = params?.expression;
+                if (typeof expr === 'string' && !expr.includes('STOP_BUTTON') && !expr.includes('isGenerating')) {
+                    queryCount++;
+                    if (queryCount === 1) {
+                        // priming: empty DOM
+                        return { result: { value: null } };
+                    }
+                    if (queryCount === 2) {
+                        // message at index 1
+                        return { result: { value: { text: 'repeat me', chatTitle: 'Agent', index: 1, timestamp: '10:00' } } };
+                    }
+                    // same message at index 2
+                    return { result: { value: { text: 'repeat me', chatTitle: 'Agent', index: 2, timestamp: '10:01' } } };
+                }
+                return { result: { value: { isGenerating: false } } };
+            }
+            return { result: { value: null } };
+        });
+
+        const detector = new UserMessageDetector({
+            cdpService: mockCdpService,
+            pollIntervalMs: 100,
+            onUserMessage,
+        });
+
+        detector.start();
+
+        await tick(100); // priming
+        await tick(100); // index 1 message detected
+        expect(onUserMessage).toHaveBeenCalledTimes(1);
+
+        await tick(100); // index 2 message detected (even though text is the same!)
+        expect(onUserMessage).toHaveBeenCalledTimes(2);
+
+        await detector.stop();
+    });
+
+    it('database cleanup keeps hashes within 24h and deletes older', () => {
+        const db = new Database(':memory:');
+        db.exec(`
+            CREATE TABLE seen_user_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_hash TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            )
+        `);
+
+        // Insert a fresh hash and a stale hash (older than 24h)
+        db.prepare("INSERT INTO seen_user_messages (message_hash, created_at) VALUES (?, datetime('now', '-25 hours'))").run('stale_hash');
+        db.prepare("INSERT INTO seen_user_messages (message_hash, created_at) VALUES (?, datetime('now', '-1 hour'))").run('fresh_hash');
+
+        const detector = new UserMessageDetector({
+            cdpService: mockCdpService,
+            pollIntervalMs: 100,
+            onUserMessage: jest.fn(),
+            db
+        });
+
+        // The constructor should trigger the 24-hour cleanup
+        const rows = db.prepare('SELECT message_hash FROM seen_user_messages').all() as { message_hash: string }[];
+        expect(rows.map(r => r.message_hash)).toContain('fresh_hash');
+        expect(rows.map(r => r.message_hash)).not.toContain('stale_hash');
     });
 });

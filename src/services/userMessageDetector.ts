@@ -8,6 +8,12 @@ import { RESPONSE_SELECTORS } from '../utils/domSelectors';
 export interface UserMessageInfo {
     /** Message text content */
     text: string;
+    /** Title of the chat/conversation */
+    chatTitle?: string;
+    /** Index of the message in the DOM list (1-based count) */
+    index?: number;
+    /** Timestamp text of the message if available */
+    timestamp?: string;
 }
 
 export interface UserMessageDetectorOptions {
@@ -42,7 +48,12 @@ const DETECT_USER_MESSAGE_SCRIPT = `(() => {
     const panel = document.querySelector('.antigravity-agent-side-panel');
     const scope = panel || document;
 
+    const header = panel ? panel.querySelector('div[class*="border-b"]') : null;
+    const titleEl = header ? header.querySelector('div[class*="text-ellipsis"]') : null;
+    const chatTitle = titleEl ? (titleEl.textContent || '').trim() : '';
+
     // Strategy A (primary): Query based on the modern data-testid="user-input-step"
+    const steps = Array.from(scope.querySelectorAll('[data-testid="user-input-step"], [class*="user-input-step"]'));
     const textEls = Array.from(scope.querySelectorAll(
         '[data-testid="user-input-step"] .whitespace-pre-wrap, [class*="user-input-step"] .whitespace-pre-wrap'
     ));
@@ -57,7 +68,25 @@ const DETECT_USER_MESSAGE_SCRIPT = `(() => {
     if (combinedEls.length > 0) {
         const lastTextEl = combinedEls[combinedEls.length - 1];
         const text = (lastTextEl.textContent || '').trim();
-        if (text.length > 0) return { text };
+        
+        let timestamp = '';
+        const lastStep = steps[steps.length - 1];
+        if (lastStep) {
+            const timeEl = lastStep.querySelector('.absolute.bottom-1.right-1, [class*="bottom-1"][class*="right-1"]');
+            if (timeEl) {
+                timestamp = (timeEl.textContent || '').trim();
+            }
+        }
+
+        if (text.length > 0) {
+            return {
+                text,
+                chatTitle,
+                index: combinedEls.length,
+                timestamp
+            };
+        }
+        return { text: '', chatTitle, index: 0, timestamp: '' };
     }
 
     // Strategy B (fallback)
@@ -65,7 +94,9 @@ const DETECT_USER_MESSAGE_SCRIPT = `(() => {
         '[data-testid="user-input-step"], [class*="user-input-step"], [class*="bg-gray-500/15"][class*="rounded-lg"][class*="select-text"]'
     )).filter(el => !el.querySelector('[data-testid="user-input-step"], [class*="user-input-step"], [class*="bg-gray-500/15"][class*="select-text"]'));
 
-    if (userBubbles.length === 0) return null;
+    if (userBubbles.length === 0) {
+        return { text: '', chatTitle, index: 0, timestamp: '' };
+    }
 
     const lastBubble = userBubbles[userBubbles.length - 1];
     const textEl = lastBubble.querySelector('.whitespace-pre-wrap')
@@ -75,9 +106,22 @@ const DETECT_USER_MESSAGE_SCRIPT = `(() => {
         ? (textEl.textContent || '').trim()
         : (lastBubble.textContent || '').trim();
 
-    if (!text || text.length < 1) return null;
+    if (!text || text.length < 1) {
+        return { text: '', chatTitle, index: 0, timestamp: '' };
+    }
 
-    return { text };
+    let timestamp = '';
+    const timeEl = lastBubble.querySelector('.absolute.bottom-1.right-1, [class*="bottom-1"][class*="right-1"]');
+    if (timeEl) {
+        timestamp = (timeEl.textContent || '').trim();
+    }
+
+    return {
+        text,
+        chatTitle,
+        index: userBubbles.length,
+        timestamp
+    };
 })()`;
 
 /**
@@ -96,6 +140,14 @@ function computeEchoHash(text: string): string {
 }
 
 /**
+ * Compute a short hash for database seen messages, including metadata context.
+ */
+function computeDbHash(chatTitle: string, text: string, index: number, timestamp: string): string {
+    const combined = `${chatTitle || ''}_${normalizeForHash(text)}_${index}_${timestamp || ''}`;
+    return createHash('sha256').update(combined).digest('hex').slice(0, 16);
+}
+
+/**
  * Detects user messages posted directly in the Antigravity UI (e.g., from a PC).
  * Follows the ApprovalDetector polling pattern.
  */
@@ -109,6 +161,8 @@ export class UserMessageDetector {
     private isRunning: boolean = false;
     /** Hash of the last detected message (for duplicate prevention) */
     private lastDetectedHash: string | null = null;
+    /** Chat title tracked during the last poll iteration */
+    private lastChatTitle: string | null = null;
     /** Set of echo hashes — messages sent by Remoat that should be ignored */
     private readonly echoHashes = new Set<string>();
     /** Set of all previously detected message hashes (defense-in-depth dedup) */
@@ -132,8 +186,11 @@ export class UserMessageDetector {
                         created_at TEXT NOT NULL DEFAULT (datetime('now'))
                     )
                 `);
+                // Clean up hashes older than 24 hours
+                this.db.prepare("DELETE FROM seen_user_messages WHERE created_at < datetime('now', '-24 hours')").run();
+                logger.debug('[UserMessageDetector] Cleaned up seen_user_messages hashes older than 24h');
             } catch (err) {
-                logger.error('[UserMessageDetector] Failed to create seen_user_messages table:', err);
+                logger.error('[UserMessageDetector] Failed to create or prune seen_user_messages table:', err);
             }
         }
     }
@@ -170,6 +227,7 @@ export class UserMessageDetector {
         if (this.isRunning) return;
         this.isRunning = true;
         this.lastDetectedHash = null;
+        this.lastChatTitle = null;
         this.seenHashes.clear();
         this.isPriming = true;
         // echoHashes are intentionally NOT cleared — they have their own 60s TTL
@@ -235,15 +293,21 @@ export class UserMessageDetector {
             const result = await this.cdpService.call('Runtime.evaluate', callParams);
             const info: UserMessageInfo | null = result?.result?.value ?? null;
 
-            // Clear priming flag even if DOM is empty (e.g., new/empty chat)
-            if (this.isPriming && (!info || !info.text)) {
-                this.isPriming = false;
-                logger.debug('[UserMessageDetector] Primed with empty DOM');
-                return;
-            }
-
             if (info && info.text) {
-                const hash = computeEchoHash(info.text);
+                const currentTitle = info.chatTitle || '';
+                if (this.lastChatTitle !== null && this.lastChatTitle !== currentTitle) {
+                    logger.debug(`[UserMessageDetector] Chat title changed from "${this.lastChatTitle}" to "${currentTitle}". Priming detector.`);
+                    this.isPriming = true;
+                }
+                this.lastChatTitle = currentTitle;
+
+                const echoHash = computeEchoHash(info.text);
+                const dbHash = computeDbHash(
+                    info.chatTitle || '',
+                    info.text,
+                    info.index ?? 0,
+                    info.timestamp || ''
+                );
                 const preview = info.text.slice(0, 40);
 
                 const wasPriming = this.isPriming;
@@ -251,11 +315,11 @@ export class UserMessageDetector {
                     this.isPriming = false;
                 }
 
-                // Check in DB
+                // Check in DB using the context-aware dbHash
                 let alreadySeenInDb = false;
                 if (this.db) {
                     try {
-                        const row = this.db.prepare('SELECT 1 FROM seen_user_messages WHERE message_hash = ?').get(hash);
+                        const row = this.db.prepare('SELECT 1 FROM seen_user_messages WHERE message_hash = ?').get(dbHash);
                         if (row) {
                             alreadySeenInDb = true;
                         }
@@ -265,8 +329,8 @@ export class UserMessageDetector {
                 }
 
                 if (alreadySeenInDb) {
-                    this.lastDetectedHash = hash;
-                    this.addToSeenHashes(hash);
+                    this.lastDetectedHash = dbHash;
+                    this.addToSeenHashes(dbHash);
                     if (wasPriming) {
                         logger.debug(`[UserMessageDetector] Primed with already seen message (in DB): "${preview}..."`);
                     }
@@ -292,13 +356,14 @@ export class UserMessageDetector {
                     }
 
                     if (dbEmpty || !isGenerating) {
-                        this.lastDetectedHash = hash;
-                        this.addToSeenHashes(hash);
+                        this.lastDetectedHash = dbHash;
+                        this.addToSeenHashes(dbHash);
                         if (this.db) {
                             try {
-                                this.db.prepare('INSERT OR IGNORE INTO seen_user_messages (message_hash) VALUES (?)').run(hash);
+                                this.db.prepare('INSERT OR IGNORE INTO seen_user_messages (message_hash) VALUES (?)').run(dbHash);
+                                this.db.prepare("DELETE FROM seen_user_messages WHERE created_at < datetime('now', '-24 hours')").run();
                             } catch (err) {
-                                logger.error('[UserMessageDetector] DB insert error:', err);
+                                logger.error('[UserMessageDetector] DB insert/cleanup error:', err);
                             }
                         }
                         logger.debug(`[UserMessageDetector] Primed (dbEmpty=${dbEmpty}, isGenerating=${isGenerating}) with existing message: "${preview}..."`);
@@ -309,25 +374,26 @@ export class UserMessageDetector {
                 }
 
                 // Skip if same as last detected message in memory
-                if (hash === this.lastDetectedHash) return;
+                if (dbHash === this.lastDetectedHash) return;
 
                 // Skip if already seen (defense-in-depth dedup)
-                if (this.seenHashes.has(hash)) {
+                if (this.seenHashes.has(dbHash)) {
                     logger.debug(`[UserMessageDetector] seenHash hit, skipping: "${preview}..."`);
-                    this.lastDetectedHash = hash;
+                    this.lastDetectedHash = dbHash;
                     return;
                 }
 
-                // Skip if this is an echo (sent by Remoat)
-                if (this.echoHashes.has(hash)) {
+                // Skip if this is an echo (sent by Remoat) — check using echoHash
+                if (this.echoHashes.has(echoHash)) {
                     logger.debug(`[UserMessageDetector] Echo hash match, skipping: "${preview}..."`);
-                    this.lastDetectedHash = hash;
-                    this.addToSeenHashes(hash);
+                    this.lastDetectedHash = dbHash;
+                    this.addToSeenHashes(dbHash);
                     if (this.db) {
                         try {
-                            this.db.prepare('INSERT OR IGNORE INTO seen_user_messages (message_hash) VALUES (?)').run(hash);
+                            this.db.prepare('INSERT OR IGNORE INTO seen_user_messages (message_hash) VALUES (?)').run(dbHash);
+                            this.db.prepare("DELETE FROM seen_user_messages WHERE created_at < datetime('now', '-24 hours')").run();
                         } catch (err) {
-                            logger.error('[UserMessageDetector] DB insert error:', err);
+                            logger.error('[UserMessageDetector] DB insert/cleanup error:', err);
                         }
                     }
                     return;
@@ -336,17 +402,34 @@ export class UserMessageDetector {
                 logger.debug(`[UserMessageDetector] New message detected: "${preview}..."`);
                 const accepted = this.onUserMessage(info);
                 if (accepted !== false) {
-                    this.lastDetectedHash = hash;
-                    this.addToSeenHashes(hash);
+                    this.lastDetectedHash = dbHash;
+                    this.addToSeenHashes(dbHash);
                     if (this.db) {
                         try {
-                            this.db.prepare('INSERT OR IGNORE INTO seen_user_messages (message_hash) VALUES (?)').run(hash);
+                            this.db.prepare('INSERT OR IGNORE INTO seen_user_messages (message_hash) VALUES (?)').run(dbHash);
+                            this.db.prepare("DELETE FROM seen_user_messages WHERE created_at < datetime('now', '-24 hours')").run();
                         } catch (err) {
-                            logger.error('[UserMessageDetector] DB insert error:', err);
+                            logger.error('[UserMessageDetector] DB insert/cleanup error:', err);
                         }
                     }
                 } else {
                     logger.debug(`[UserMessageDetector] Callback rejected message: "${preview}...", not updating lastDetectedHash`);
+                }
+            } else {
+                // No message, but we can still check if chatTitle changed
+                if (info) {
+                    const currentTitle = info.chatTitle || '';
+                    if (this.lastChatTitle !== null && this.lastChatTitle !== currentTitle) {
+                        logger.debug(`[UserMessageDetector] Chat title changed from "${this.lastChatTitle}" to "${currentTitle}". Priming detector.`);
+                        this.isPriming = true;
+                    }
+                    this.lastChatTitle = currentTitle;
+                }
+
+                // Clear priming flag even if DOM is empty (e.g., new/empty chat)
+                if (this.isPriming) {
+                    this.isPriming = false;
+                    logger.debug('[UserMessageDetector] Primed with empty DOM');
                 }
             }
         } catch (error) {
