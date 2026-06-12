@@ -614,29 +614,107 @@ export class CdpService extends EventEmitter {
             this.targetUrl = page.webSocketDebuggerUrl;
             await this.connect();
 
-            const result = await this.call('Runtime.evaluate', {
+            // 1. Get the document title
+            const titleResult = await this.call('Runtime.evaluate', {
                 expression: 'document.title',
                 returnByValue: true,
             });
-            const liveTitle = String(result?.result?.value || '');
+            const liveTitle = String(titleResult?.result?.value || '');
             const normalizedLiveTitle = liveTitle.toLowerCase();
-            const normalizedProject = projectName.toLowerCase();
 
-            // If it's untitled or loading or empty, we cannot confidently say it's different (could be loading the target workspace)
+            // 2. Query the workspace path using vscode context (just like queryWorkspacePath in bot/index.ts)
+            const evalExpr = `(async () => {
+                let workspacePath = null;
+                const vs = typeof vscode !== 'undefined' ? vscode : (typeof window !== 'undefined' && window.vscode ? window.vscode : null);
+                if (vs && vs.context) {
+                    try {
+                        const config = typeof vs.context.configuration === 'function' 
+                            ? vs.context.configuration()
+                            : (typeof vs.context.resolveConfiguration === 'function'
+                                ? await vs.context.resolveConfiguration()
+                                : null);
+                        if (config && config.workspace) {
+                            const cp = config.workspace.configPath;
+                            const uri = config.workspace.uri;
+                            const rawPath = cp?.fsPath || cp?._fsPath || cp?.path || uri?.fsPath || uri?._fsPath || uri?.path || null;
+                            if (rawPath) {
+                                let clean = rawPath.trim();
+                                if (clean.startsWith('file:')) {
+                                    clean = clean.replace(/^file:\\/\\/\\/?/, '');
+                                }
+                                clean = decodeURIComponent(clean);
+                                clean = clean.replace(/^\\/([a-zA-Z]):/, '$1:');
+                                clean = clean.replace(/\\//g, '\\\\');
+                                workspacePath = clean;
+                            }
+                        }
+                    } catch (e) {
+                        // ignore
+                    }
+                }
+                return workspacePath;
+            })()`;
+
+            const pathResult = await this.call('Runtime.evaluate', {
+                expression: evalExpr,
+                returnByValue: true,
+                awaitPromise: true,
+            });
+            const detectedPath = pathResult?.result?.value ? String(pathResult.result.value).trim() : null;
+
+            if (detectedPath) {
+                const normDetected = detectedPath.toLowerCase().replace(/\//g, '\\');
+                const normTarget = workspacePath.toLowerCase().replace(/\//g, '\\');
+
+                // If exact path match, it is definitely NOT different
+                if (normDetected === normTarget) {
+                    return false;
+                }
+
+                // If detected is a workspace.json config (Untitled/Multi-root Workspace), parse it
+                if (normDetected.endsWith('workspace.json')) {
+                    try {
+                        if (fs.existsSync(detectedPath)) {
+                            const content = fs.readFileSync(detectedPath, 'utf8');
+                            const parsed = JSON.parse(content);
+                            if (parsed.folders && Array.isArray(parsed.folders)) {
+                                const containsTarget = parsed.folders.some((f: any) => {
+                                    const p = f.path || f.uri || '';
+                                    let clean = p.trim();
+                                    if (clean.startsWith('file:')) {
+                                        clean = clean.replace(/^file:\/\/\/?/, '');
+                                    }
+                                    clean = decodeURIComponent(clean);
+                                    clean = clean.replace(/^\/([a-zA-Z]):/, '$1:');
+                                    const normFolder = clean.toLowerCase().replace(/\//g, '\\').trim();
+                                    return normFolder === normTarget;
+                                });
+                                // If the multi-root workspace contains our target path, it is NOT different
+                                if (containsTarget) {
+                                    return false;
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        logger.error(`[CdpService] Failed to parse workspace.json at ${detectedPath} in diff check:`, err);
+                    }
+                }
+
+                // The detected path is different and does not contain our target
+                return true;
+            }
+
+            // Fallback to title checking if path extraction failed
             if (!liveTitle || isUntitledTitle(liveTitle) || normalizedLiveTitle.includes('loading')) {
                 return false;
             }
 
-            // If it matches by title, it is NOT different
             if (isTitleMatch(liveTitle, projectName)) {
                 return false;
             }
 
-            // It has a stable title, and does not match the project name.
-            // So it is definitely a different workspace.
             return true;
         } catch {
-            // If we encounter an error, assume it is not different to keep the safe fallback
             return false;
         } finally {
             this.disconnectQuietly();
