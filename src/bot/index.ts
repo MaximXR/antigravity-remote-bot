@@ -733,6 +733,9 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                                             logger.error(`[scanActiveWindows] Failed to parse workspace.json at ${cdpInfo.workspacePath}:`, err);
                                         }
                                         projectName = tempProjectName || path.basename(workspacePath);
+                                    } else if (cdpInfo.workspacePath.startsWith('empty-workspace:')) {
+                                        workspacePath = cdpInfo.workspacePath;
+                                        projectName = (cleanParsedName && cleanParsedName !== 'Unknown') ? cleanParsedName : 'Antigravity';
                                     } else {
                                         workspacePath = cdpInfo.workspacePath;
                                         const normPath = workspacePath.toLowerCase().replace(/\//g, '\\').trim();
