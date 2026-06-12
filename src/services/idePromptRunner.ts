@@ -1,6 +1,6 @@
 import { logger } from '../utils/logger';
 import { CdpService, ExtractedResponseImage } from './cdpService';
-import { ResponseMonitor } from './responseMonitor';
+import { ResponseMonitor, PreCapturedBaselines } from './responseMonitor';
 import { PlanningDetector } from './planningDetector';
 import { classifyAssistantSegments, extractAssistantSegmentsPayloadScript } from './assistantDomExtractor';
 import { splitOutputAndLogs } from '../utils/telegramFormatter';
@@ -80,6 +80,13 @@ export class IdePromptRunner {
                 );
             }
 
+            // Capture baseline BEFORE injecting the message to avoid race conditions with fast models
+            const extractionMode = process.env.EXTRACTION_MODE === 'legacy' ? 'legacy' : 'structured';
+            const preCapturedBaselines = await ResponseMonitor.captureBaselines(cdp, extractionMode).catch((err) => {
+                logger.error('[IdePromptRunner] Failed to capture baselines before inject:', err);
+                return undefined;
+            });
+
             // Inject message
             let injectResult;
             if (inboundImagePaths.length > 0) {
@@ -95,7 +102,7 @@ export class IdePromptRunner {
                 return;
             }
 
-            await this.monitorResponseInternal(cdp, prompt, options, callbacks, false);
+            await this.monitorResponseInternal(cdp, prompt, options, callbacks, false, preCapturedBaselines);
         } catch (e: any) {
             logger.error('[IdePromptRunner] runPrompt failed:', e);
             if (callbacks.onError) {
@@ -121,7 +128,7 @@ export class IdePromptRunner {
         }
 
         try {
-            await this.monitorResponseInternal(cdp, userPrompt, options, callbacks, true);
+            await this.monitorResponseInternal(cdp, userPrompt, options, callbacks, true, undefined);
         } catch (e: any) {
             logger.error('[IdePromptRunner] monitorResponse failed:', e);
             if (callbacks.onError) {
@@ -135,7 +142,8 @@ export class IdePromptRunner {
         userPrompt: string,
         options: IdePromptOptions,
         callbacks: IdePromptCallbacks,
-        isMirrorMode: boolean
+        isMirrorMode: boolean,
+        preCapturedBaselines?: PreCapturedBaselines
     ): Promise<void> {
         const startTime = Date.now();
         const modelLabel = options.modelLabel;
@@ -226,6 +234,7 @@ export class IdePromptRunner {
             pollIntervalMs: 2000,
             maxDurationMs: 1800000,
             stopGoneConfirmCount: 5,
+            preCapturedBaselines,
             onPhaseChange: () => {},
             onProcessLog: (logText) => {
                 if (isFinalized) return;

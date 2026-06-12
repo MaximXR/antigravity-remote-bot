@@ -9,6 +9,14 @@ import { RESPONSE_SELECTORS } from '../utils/domSelectors';
 /** Response generation phases */
 export type ResponsePhase = 'waiting' | 'thinking' | 'generating' | 'complete' | 'timeout' | 'quotaReached';
 
+export interface PreCapturedBaselines {
+    baselineText: string | null;
+    seenProcessLogKeys: Set<string>;
+    seenThinkingLogKeys: Set<string>;
+    baselineNotifyCount: number;
+    baselineCardCount: number;
+}
+
 export interface ResponseMonitorOptions {
     /** CDP service instance */
     cdpService: CdpService;
@@ -20,6 +28,8 @@ export interface ResponseMonitorOptions {
     stopGoneConfirmCount?: number;
     /** Extraction mode: 'legacy' uses innerText, 'structured' uses DOM segment extraction */
     extractionMode?: ExtractionMode;
+    /** Optional pre-captured baseline data to avoid race conditions with fast models */
+    preCapturedBaselines?: PreCapturedBaselines;
     /** Text update callback */
     onProgress?: (text: string) => void;
     /** Generation complete callback. Meta.source indicates whether text is already Telegram HTML (structured) or plain (legacy). */
@@ -48,6 +58,7 @@ export class ResponseMonitor {
     private readonly maxDurationMs: number;
     private readonly stopGoneConfirmCount: number;
     private readonly extractionMode: ExtractionMode;
+    private readonly preCapturedBaselines?: PreCapturedBaselines;
     private readonly onProgress?: (text: string) => void;
     private readonly onComplete?: (finalText: string, meta?: { source: 'structured' | 'legacy'; choices?: string[] }) => void;
     private readonly onTimeout?: (lastText: string) => void;
@@ -85,6 +96,7 @@ export class ResponseMonitor {
         this.stopGoneConfirmCount = options.stopGoneConfirmCount ?? 3;
         this.extractionMode = options.extractionMode
             ?? (process.env.EXTRACTION_MODE === 'legacy' ? 'legacy' : 'structured');
+        this.preCapturedBaselines = options.preCapturedBaselines;
         this.onProgress = options.onProgress;
         this.onComplete = options.onComplete;
         this.onTimeout = options.onTimeout;
@@ -121,6 +133,94 @@ export class ResponseMonitor {
         return this.initMonitoring(true);
     }
 
+    /**
+     * Pre-capture baseline state from the DOM to avoid race conditions with fast models.
+     */
+    static async captureBaselines(cdp: CdpService, extractionMode: ExtractionMode): Promise<PreCapturedBaselines> {
+        const contextId = cdp.getPrimaryContextId();
+        const buildEvaluateParams = (expression: string) => {
+            const params: Record<string, unknown> = {
+                expression,
+                returnByValue: true,
+                awaitPromise: false,
+            };
+            if (contextId !== null && contextId !== undefined) {
+                params.contextId = contextId;
+            }
+            return params;
+        };
+
+        const promises = [
+            // 1. Artifacts (notify and card counts)
+            cdp.call('Runtime.evaluate', buildEvaluateParams(
+                `(() => ({ notifyCount: document.querySelectorAll('.notify-user-container').length, cardCount: document.querySelectorAll('div[class*="border"][class*="rounded-lg"]').length }))()`
+            )).catch(() => null),
+            // 2. Response text
+            cdp.call('Runtime.evaluate', buildEvaluateParams(RESPONSE_SELECTORS.RESPONSE_TEXT)).catch(() => null),
+            // 3. Process logs
+            cdp.call('Runtime.evaluate', buildEvaluateParams(RESPONSE_SELECTORS.PROCESS_LOGS)).catch(() => null),
+        ];
+
+        if (extractionMode === 'structured') {
+            promises.push(
+                cdp.call('Runtime.evaluate', buildEvaluateParams(RESPONSE_SELECTORS.RESPONSE_STRUCTURED)).catch(() => null)
+            );
+        }
+
+        const [artifactsRes, baseResult, logResult, structuredBaseline] = await Promise.all(promises);
+
+        let baselineNotifyCount = 0;
+        let baselineCardCount = 0;
+        const artifacts = artifactsRes?.result?.value;
+        if (artifacts) {
+            baselineNotifyCount = artifacts.notifyCount ?? 0;
+            baselineCardCount = artifacts.cardCount ?? 0;
+        }
+
+        let baselineText: string | null = null;
+        const rawValue = baseResult?.result?.value;
+        baselineText = typeof rawValue === 'string' ? rawValue.trim() || null : null;
+
+        let seenProcessLogKeys = new Set<string>();
+        const logEntries = logResult?.result?.value;
+        if (Array.isArray(logEntries)) {
+            seenProcessLogKeys = new Set(
+                logEntries
+                    .map((s: string) => (s || '').replace(/\r/g, '').trim())
+                    .filter((s: string) => s.length > 0)
+                    .map((s: string) => s.slice(0, 200)),
+            );
+        }
+
+        let seenThinkingLogKeys = new Set<string>();
+        if (structuredBaseline) {
+            try {
+                const baselineClassified = classifyAssistantSegments(structuredBaseline?.result?.value);
+                if (baselineClassified.diagnostics.source === 'dom-structured') {
+                    baselineText = baselineClassified.finalOutputText.trim() || null;
+                    for (const line of baselineClassified.activityLines) {
+                        const key = (line || '').replace(/\r/g, '').trim().slice(0, 200);
+                        if (key) seenProcessLogKeys.add(key);
+                    }
+                    for (const line of baselineClassified.thinkingLines) {
+                        const key = (line || '').replace(/\r/g, '').trim().slice(0, 200);
+                        if (key) seenThinkingLogKeys.add(key);
+                    }
+                }
+            } catch (e) {
+                logger.debug('[ResponseMonitor] Structured baseline classification failed (best-effort):', e);
+            }
+        }
+
+        return {
+            baselineText,
+            seenProcessLogKeys,
+            seenThinkingLogKeys,
+            baselineNotifyCount,
+            baselineCardCount
+        };
+    }
+
     /** Internal initialization shared between start() and startPassive() */
     private async initMonitoring(passive: boolean): Promise<void> {
         if (this.isRunning) return;
@@ -137,66 +237,75 @@ export class ResponseMonitor {
 
         this.onPhaseChange?.(this.currentPhase, null);
 
-        // Capture artifact baseline FIRST — count existing notify containers and cards
-        // so the planning-active check in COMBINED_POLL can skip old-session artifacts
-        try {
-            const baselineResult = await this.cdpService.call('Runtime.evaluate', this.buildEvaluateParams(
-                `(() => ({ notifyCount: document.querySelectorAll('.notify-user-container').length, cardCount: document.querySelectorAll('div[class*="border"][class*="rounded-lg"]').length }))()`
-            ));
-            const bl = baselineResult?.result?.value;
-            if (bl) {
-                this.baselineNotifyCount = bl.notifyCount ?? 0;
-                this.baselineCardCount = bl.cardCount ?? 0;
-            }
-            logger.debug(`[ResponseMonitor] Artifact baseline: ${this.baselineNotifyCount} notify, ${this.baselineCardCount} cards`);
-        } catch (e) {
-            logger.debug('[ResponseMonitor] Artifact baseline failed (best-effort):', e);
-        }
-
-        // Capture baselines in parallel (text + process logs + optional structured)
-        const baselinePromises: Promise<any>[] = [
-            this.cdpService.call('Runtime.evaluate', this.buildEvaluateParams(RESPONSE_SELECTORS.RESPONSE_TEXT)).catch(() => null),
-            this.cdpService.call('Runtime.evaluate', this.buildEvaluateParams(RESPONSE_SELECTORS.PROCESS_LOGS)).catch(() => null),
-        ];
-        if (this.extractionMode === 'structured') {
-            baselinePromises.push(
-                this.cdpService.call('Runtime.evaluate', this.buildEvaluateParams(RESPONSE_SELECTORS.RESPONSE_STRUCTURED)).catch(() => null),
-            );
-        }
-        const [baseResult, logResult, structuredBaseline] = await Promise.all(baselinePromises);
-
-        // Baseline text
-        const rawValue = baseResult?.result?.value;
-        this.baselineText = typeof rawValue === 'string' ? rawValue.trim() || null : null;
-
-        // Baseline process log keys
-        const logEntries = logResult?.result?.value;
-        if (Array.isArray(logEntries)) {
-            this.seenProcessLogKeys = new Set(
-                logEntries
-                    .map((s: string) => (s || '').replace(/\r/g, '').trim())
-                    .filter((s: string) => s.length > 0)
-                    .map((s: string) => s.slice(0, 200)),
-            );
-        }
-
-        // Structured baseline activity lines
-        if (structuredBaseline) {
+        if (this.preCapturedBaselines) {
+            this.baselineText = this.preCapturedBaselines.baselineText;
+            this.seenProcessLogKeys = new Set(this.preCapturedBaselines.seenProcessLogKeys);
+            this.seenThinkingLogKeys = new Set(this.preCapturedBaselines.seenThinkingLogKeys);
+            this.baselineNotifyCount = this.preCapturedBaselines.baselineNotifyCount;
+            this.baselineCardCount = this.preCapturedBaselines.baselineCardCount;
+            logger.debug(`[ResponseMonitor] Using pre-captured baselines: notify=${this.baselineNotifyCount}, cards=${this.baselineCardCount}, textLength=${this.baselineText?.length ?? 0}`);
+        } else {
+            // Capture artifact baseline FIRST — count existing notify containers and cards
+            // so the planning-active check in COMBINED_POLL can skip old-session artifacts
             try {
-                const baselineClassified = classifyAssistantSegments(structuredBaseline?.result?.value);
-                if (baselineClassified.diagnostics.source === 'dom-structured') {
-                    this.baselineText = baselineClassified.finalOutputText.trim() || null;
-                    for (const line of baselineClassified.activityLines) {
-                        const key = (line || '').replace(/\r/g, '').trim().slice(0, 200);
-                        if (key) this.seenProcessLogKeys.add(key);
-                    }
-                    for (const line of baselineClassified.thinkingLines) {
-                        const key = (line || '').replace(/\r/g, '').trim().slice(0, 200);
-                        if (key) this.seenThinkingLogKeys.add(key);
-                    }
+                const baselineResult = await this.cdpService.call('Runtime.evaluate', this.buildEvaluateParams(
+                    `(() => ({ notifyCount: document.querySelectorAll('.notify-user-container').length, cardCount: document.querySelectorAll('div[class*="border"][class*="rounded-lg"]').length }))()`
+                ));
+                const bl = baselineResult?.result?.value;
+                if (bl) {
+                    this.baselineNotifyCount = bl.notifyCount ?? 0;
+                    this.baselineCardCount = bl.cardCount ?? 0;
                 }
+                logger.debug(`[ResponseMonitor] Artifact baseline: ${this.baselineNotifyCount} notify, ${this.baselineCardCount} cards`);
             } catch (e) {
-                logger.debug('[ResponseMonitor] Structured baseline classification failed (best-effort):', e);
+                logger.debug('[ResponseMonitor] Artifact baseline failed (best-effort):', e);
+            }
+
+            // Capture baselines in parallel (text + process logs + optional structured)
+            const baselinePromises: Promise<any>[] = [
+                this.cdpService.call('Runtime.evaluate', this.buildEvaluateParams(RESPONSE_SELECTORS.RESPONSE_TEXT)).catch(() => null),
+                this.cdpService.call('Runtime.evaluate', this.buildEvaluateParams(RESPONSE_SELECTORS.PROCESS_LOGS)).catch(() => null),
+            ];
+            if (this.extractionMode === 'structured') {
+                baselinePromises.push(
+                    this.cdpService.call('Runtime.evaluate', this.buildEvaluateParams(RESPONSE_SELECTORS.RESPONSE_STRUCTURED)).catch(() => null),
+                );
+            }
+            const [baseResult, logResult, structuredBaseline] = await Promise.all(baselinePromises);
+
+            // Baseline text
+            const rawValue = baseResult?.result?.value;
+            this.baselineText = typeof rawValue === 'string' ? rawValue.trim() || null : null;
+
+            // Baseline process log keys
+            const logEntries = logResult?.result?.value;
+            if (Array.isArray(logEntries)) {
+                this.seenProcessLogKeys = new Set(
+                    logEntries
+                        .map((s: string) => (s || '').replace(/\r/g, '').trim())
+                        .filter((s: string) => s.length > 0)
+                        .map((s: string) => s.slice(0, 200)),
+                );
+            }
+
+            // Structured baseline activity lines
+            if (structuredBaseline) {
+                try {
+                    const baselineClassified = classifyAssistantSegments(structuredBaseline?.result?.value);
+                    if (baselineClassified.diagnostics.source === 'dom-structured') {
+                        this.baselineText = baselineClassified.finalOutputText.trim() || null;
+                        for (const line of baselineClassified.activityLines) {
+                            const key = (line || '').replace(/\r/g, '').trim().slice(0, 200);
+                            if (key) this.seenProcessLogKeys.add(key);
+                        }
+                        for (const line of baselineClassified.thinkingLines) {
+                            const key = (line || '').replace(/\r/g, '').trim().slice(0, 200);
+                            if (key) this.seenThinkingLogKeys.add(key);
+                        }
+                    }
+                } catch (e) {
+                    logger.debug('[ResponseMonitor] Structured baseline classification failed (best-effort):', e);
+                }
             }
         }
 
