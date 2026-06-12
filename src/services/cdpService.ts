@@ -713,45 +713,12 @@ export class CdpService extends EventEmitter {
                 const normDetected = detectedPath.toLowerCase().replace(/\//g, '\\');
                 const normTarget = workspacePath.toLowerCase().replace(/\//g, '\\');
 
-                // If exact path or subfolder/parent folder match, it is definitely NOT different
-                if (normDetected === normTarget || normDetected.startsWith(normTarget + '\\') || normTarget.startsWith(normDetected + '\\')) {
+                // Strict exact match only
+                if (normDetected === normTarget) {
                     return false;
                 }
 
-                // If detected is a workspace.json config (Untitled/Multi-root Workspace), parse it
-                if (normDetected.endsWith('workspace.json')) {
-                    try {
-                        if (fs.existsSync(detectedPath)) {
-                            const content = fs.readFileSync(detectedPath, 'utf8');
-                            const parsed = JSON.parse(content);
-                            if (parsed.folders && Array.isArray(parsed.folders)) {
-                                const baseDir = path.dirname(detectedPath);
-                                const containsTarget = parsed.folders.some((f: any) => {
-                                    const p = f.path || f.uri || '';
-                                    let clean = p.trim();
-                                    if (clean.startsWith('file:')) {
-                                        clean = clean.replace(/^file:\/\/\/?/, '');
-                                    }
-                                    clean = decodeURIComponent(clean);
-                                    clean = clean.replace(/^\/([a-zA-Z]):/, '$1:');
-                                    if (!path.isAbsolute(clean) && !/^[a-zA-Z]:/.test(clean)) {
-                                        clean = path.resolve(baseDir, clean);
-                                    }
-                                    const normFolder = clean.toLowerCase().replace(/\//g, '\\').trim();
-                                    return normFolder === normTarget;
-                                });
-                                // If the multi-root workspace contains our target path, it is NOT different
-                                if (containsTarget) {
-                                    return false;
-                                }
-                            }
-                        }
-                    } catch (err) {
-                        logger.error(`[CdpService] Failed to parse workspace.json at ${detectedPath} in diff check:`, err);
-                    }
-                }
-
-                // The detected path is different and does not contain our target
+                // Any mismatch (including parent/child folders or multi-root inclusion) is different
                 return true;
             }
 
@@ -971,35 +938,17 @@ export class CdpService extends EventEmitter {
 
                 if (configVal.type === 'folder' && configVal.path) {
                     const folderPath = normalize(configVal.path);
-                    if (folderPath === targetNorm || folderPath.startsWith(targetNorm + '\\') || targetNorm.startsWith(folderPath + '\\')) {
+                    if (folderPath === targetNorm) {
                         this.currentWorkspaceName = projectName;
                         logger.debug(`[CdpService] Confirmed folder workspace match via configuration: "${workspacePath}"`);
                         return true;
                     }
                 } else if (configVal.type === 'workspace' && configVal.path) {
                     const wsJsonPath = normalize(configVal.path);
-                    if (wsJsonPath === targetNorm || wsJsonPath.startsWith(targetNorm + '\\') || targetNorm.startsWith(wsJsonPath + '\\')) {
+                    if (wsJsonPath === targetNorm) {
                         this.currentWorkspaceName = projectName;
                         logger.debug(`[CdpService] Confirmed workspace file match via configuration: "${workspacePath}"`);
                         return true;
-                    }
-                    if (fs.existsSync(wsJsonPath)) {
-                        const content = fs.readFileSync(wsJsonPath, 'utf8');
-                        const parsed = JSON.parse(content);
-                        if (parsed.folders && Array.isArray(parsed.folders)) {
-                            const baseDir = path.dirname(wsJsonPath);
-                            for (const folder of parsed.folders) {
-                                const folderPath = folder.path || folder.uri;
-                                if (folderPath) {
-                                    const folderPathNorm = normalize(folderPath, baseDir);
-                                    if (folderPathNorm === targetNorm || folderPathNorm.startsWith(targetNorm + '\\') || targetNorm.startsWith(folderPathNorm + '\\')) {
-                                        this.currentWorkspaceName = projectName;
-                                        logger.debug(`[CdpService] Confirmed multi-folder workspace match via configuration: "${workspacePath}"`);
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
             }
