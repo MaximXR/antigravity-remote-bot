@@ -1148,7 +1148,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }
     };
 
-    // Run background scanner every 10s
+    // Run background scanner immediately on start and then every 10s
+    scanAndConnectNewWindows().catch(err => logger.error('[background] Initial scanAndConnectNewWindows failed:', err));
     setInterval(scanAndConnectNewWindows, 10000);
 
     logger.info('Starting Remoat Telegram bot...');
