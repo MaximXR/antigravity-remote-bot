@@ -490,6 +490,24 @@ describe('ApprovalDetector - approval button detection and remote execution', ()
         expect(classifyApproval(info)).toBe('url_access');
     });
 
+    it('classifyApproval correctly identifies file changes/reviews as file_edits', () => {
+        const info: ApprovalInfo = {
+            approveText: 'Accept Changes',
+            denyText: 'Reject',
+            description: 'Review file changes in src/index.ts',
+        };
+        expect(classifyApproval(info)).toBe('file_edits');
+    });
+
+    it('classifyApproval correctly identifies multi_replace_file_content as file_edits', () => {
+        const info: ApprovalInfo = {
+            approveText: 'Accept',
+            denyText: 'Reject',
+            description: 'Agent requested multi_replace_file_content for e:/Desktop/Remoat/src/bot/index.ts',
+        };
+        expect(classifyApproval(info)).toBe('file_edits');
+    });
+
     // ──────────────────────────────────────────────────────
     // Test 16: detect approval with fallback to Always Allow when no primary Allow button exists
     // ──────────────────────────────────────────────────────

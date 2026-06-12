@@ -58,9 +58,10 @@ function buildCustomIdWithLimit(
     return channelPart ? `${prefix}:${safeProjectName}${channelPart}` : `${prefix}:${safeProjectName}`;
 }
 
-function cleanLabel(label: string): string {
+export function cleanLabel(label: string): string {
     if (!label) return '';
-    let cleaned = label.replace(/[⌃⌥⇧⏎⌘\u2318\u2325\u21B5]+/g, '').trim();
+    let cleaned = label.replace(/[⌃⌥⇧⏎⌘⌫\u2318\u2325\u21B5\u232b]+/g, '').trim();
+    cleaned = cleaned.replace(/(?:ctrl|alt|shift|cmd|meta)\s*\+?\s*\S*$/i, '').trim();
     cleaned = cleaned.replace(/^\s*\d+[\s.)]*/, '').trim();
     return cleaned;
 }
@@ -391,7 +392,13 @@ export function ensureApprovalDetector(
                 }
             }
 
-            if (!msgId || !chatId || !bridge.messenger) return;
+            if (!msgId || !chatId || !bridge.messenger) {
+                if (!cdp.isCurrentlyGenerating()) {
+                    logger.debug(`[ApprovalDetector:${projectName}] Stopping detector in onResolved (no msg) because generation is not active`);
+                    await detector.stop();
+                }
+                return;
+            }
             
             lastMessageId = null;
             lastMessageChatId = null;
@@ -402,6 +409,11 @@ export function ensureApprovalDetector(
                 } catch (err) {
                     logger.debug('[ApprovalDetector] cleanMessageButtons failed:', err);
                 }
+            }
+
+            if (!cdp.isCurrentlyGenerating()) {
+                logger.debug(`[ApprovalDetector:${projectName}] Stopping detector in onResolved because generation is not active`);
+                await detector.stop();
             }
         },
         onApprovalRequired: async (info: ApprovalInfo) => {
@@ -549,9 +561,16 @@ export function ensureApprovalDetector(
         cdp.removeListener('response-monitor:stop', (cdp as any)._approvalStopListener);
     }
     const stopHandler = async () => {
-        logger.debug(`[ApprovalDetector:${projectName}] Stopping detector due to response-monitor:stop`);
-        await detector.stop();
-        await flushDeferredApproval(bridge, projectName, cdp);
+        logger.debug(`[ApprovalDetector:${projectName}] stopHandler triggered (response-monitor:stop)`);
+        const info = await detector.checkOnce().catch(() => null);
+        if (info) {
+            logger.debug(`[ApprovalDetector:${projectName}] Keeping detector running due to active approval dialog: ${JSON.stringify(info)}`);
+            await flushDeferredApproval(bridge, projectName, cdp);
+        } else {
+            logger.debug(`[ApprovalDetector:${projectName}] No active approval on stop. Stopping detector.`);
+            await detector.stop();
+            await flushDeferredApproval(bridge, projectName, cdp);
+        }
     };
     (cdp as any)._approvalStopListener = stopHandler;
     cdp.on('response-monitor:stop', stopHandler);

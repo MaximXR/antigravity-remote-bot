@@ -553,7 +553,7 @@ export const APPROVAL_SELECTORS = {
                 }
             }
 
-            const allClickables = Array.from(scope.querySelectorAll('button, [role="button"], a.monaco-button'))
+            const allClickables = Array.from(scope.querySelectorAll('button, [role="button"], a.monaco-button, .cursor-pointer'))
                 .filter(el => {
                     const text = (el.textContent || '').trim();
                     if (text.length === 0 || text.length > 50) return false;
@@ -592,7 +592,7 @@ export const APPROVAL_SELECTORS = {
             if (!container) {
                 let el = approveBtn.parentElement;
                 for (let i = 0; i < 6 && el && el !== document.body; i++) {
-                    const clickables = Array.from(el.querySelectorAll('button, [role="button"], a.monaco-button')).filter(b => {
+                    const clickables = Array.from(el.querySelectorAll('button, [role="button"], a.monaco-button, .cursor-pointer')).filter(b => {
                         const rect = b.getBoundingClientRect();
                         return rect.width > 0 && rect.height > 0;
                     });
@@ -605,7 +605,7 @@ export const APPROVAL_SELECTORS = {
             }
             if (!container) container = scope;
 
-            const containerClickables = Array.from(container.querySelectorAll('button, [role="button"], a.monaco-button'))
+            const containerClickables = Array.from(container.querySelectorAll('button, [role="button"], a.monaco-button, .cursor-pointer'))
                 .filter(btn => {
                     const rect = btn.getBoundingClientRect();
                     return rect.width > 0 && rect.height > 0;

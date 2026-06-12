@@ -30,7 +30,7 @@ import { ChatSessionService } from '../services/chatSessionService';
 import { ResponseMonitor } from '../services/responseMonitor';
 import { buildClickScript, RESPONSE_SELECTORS } from '../utils/domSelectors';
 import { ensureAntigravityRunning } from '../services/antigravityLauncher';
-import { getAntigravityCdpHint, isTitleMatch, getWorkspaceDisplayPath } from '../utils/pathUtils';
+import { getAntigravityCdpHint, isTitleMatch, isUntitledTitle, getWorkspaceDisplayPath } from '../utils/pathUtils';
 import { CDP_PORTS } from '../utils/cdpPorts';
 import { AutoAcceptService, AutoAcceptSettings } from '../services/autoAcceptService';
 import { PromptDispatcher } from '../services/promptDispatcher';
@@ -652,82 +652,92 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             cdpInfo = await queryWorkspacePath(page.webSocketDebuggerUrl);
                             sessionInfo = cdpInfo?.sessionInfo || null;
                         }
-                        let tempProjectName = '';
-                        if (cdpInfo && cdpInfo.workspacePath) {
-                            if (cdpInfo.workspacePath.endsWith('workspace.json')) {
-                                workspacePath = cdpInfo.workspacePath;
-                                try {
-                                    if (fs.existsSync(cdpInfo.workspacePath)) {
-                                        const content = fs.readFileSync(cdpInfo.workspacePath, 'utf8');
-                                        const parsed = JSON.parse(content);
-                                        if (parsed.folders && Array.isArray(parsed.folders) && parsed.folders.length > 0) {
-                                            const folderNames = parsed.folders.map((f: any) => {
-                                                const p = f.path || f.uri || '';
-                                                let clean = p.trim();
-                                                if (clean.startsWith('file:')) {
-                                                    clean = clean.replace(/^file:\/\/\/?/, '');
-                                                }
-                                                clean = decodeURIComponent(clean);
-                                                clean = clean.replace(/^\/([a-zA-Z]):/, '$1:');
-                                                return path.basename(clean.replace(/\//g, '\\'));
-                                            }).filter(Boolean);
-
-                                            if (folderNames.length > 1) {
-                                                tempProjectName = `🗂️ ${folderNames.join(' + ')}`;
-                                            } else if (folderNames.length === 1) {
-                                                tempProjectName = folderNames[0];
-                                            }
-                                        }
-                                    }
-                                } catch (err) {
-                                    logger.error(`[scanActiveWindows] Failed to parse workspace.json at ${cdpInfo.workspacePath}:`, err);
-                                }
-                            } else {
-                                workspacePath = cdpInfo.workspacePath;
-                                const normPath = workspacePath!.toLowerCase().replace(/\//g, '\\').trim();
-                                matchedWorkspace = recentWorkspaces.find(w => {
-                                    const normWPath = w.path.toLowerCase().replace(/\//g, '\\').trim();
-                                    return normWPath === normPath;
-                                }) || null;
-                            }
-                        }
+                        // 1. Parse project name from title first
+                        const titleParts = title.split(/\s[—–-]\s/);
+                        const parsedProjectName = titleParts.length >= 2 ? titleParts[titleParts.length - 2] : (titleParts[0] || 'Unknown');
+                        const cleanParsedName = parsedProjectName.replace(/\s*\([^)]+\)$/, '').replace(/\.code-workspace$/i, '').trim();
 
                         let projectName = '';
-                        if (matchedWorkspace) {
-                            projectName = matchedWorkspace.name;
-                        } else if (workspacePath && !workspacePath.startsWith('empty-workspace:')) {
-                            if (workspacePath.endsWith('workspace.json') && tempProjectName) {
-                                projectName = tempProjectName;
-                            } else {
-                                projectName = path.basename(workspacePath);
-                            }
+
+                        if (isUntitledTitle(title)) {
+                            // If title indicates an empty/untitled workspace, treat as empty (no folder)
+                            projectName = cleanParsedName;
+                            workspacePath = null;
                         } else {
-                            // Fallback to title matching
-                            for (const w of recentWorkspaces) {
-                                const cleanName = w.name.replace(/\.code-workspace$/i, '');
-                                if (isTitleMatch(title, cleanName)) {
-                                    matchedWorkspace = w;
-                                    break;
-                                }
-                            }
-
-                            // Parse project name from title as fallback
-                            const titleParts = title.split(/\s[—–-]\s/);
-                            const parsedProjectName = titleParts.length >= 2 ? titleParts[titleParts.length - 2] : (titleParts[0] || 'Unknown');
-                            const cleanParsedName = parsedProjectName.replace(/\s*\([^)]+\)$/, '').replace(/\.code-workspace$/i, '').trim();
-
-                            // Fallback matching by project name equality
-                            if (!matchedWorkspace && cleanParsedName !== 'Unknown') {
+                            // Try to match title-based project name against recent workspaces list first
+                            let matchedWorkspaceByTitle: RecentWorkspace | null = null;
+                            if (cleanParsedName !== 'Unknown') {
                                 const normParsed = cleanParsedName.toLowerCase();
-                                matchedWorkspace = recentWorkspaces.find(w => {
+                                matchedWorkspaceByTitle = recentWorkspaces.find(w => {
                                     const cleanWName = w.name.replace(/\.code-workspace$/i, '').toLowerCase().trim();
                                     return cleanWName === normParsed;
                                 }) || null;
                             }
 
-                            projectName = matchedWorkspace ? matchedWorkspace.name : cleanParsedName;
-                            const isEmp = workspacePath && workspacePath.startsWith('empty-workspace:');
-                            workspacePath = matchedWorkspace ? matchedWorkspace.path : (isEmp ? workspacePath : null);
+                            if (matchedWorkspaceByTitle) {
+                                projectName = matchedWorkspaceByTitle.name;
+                                workspacePath = matchedWorkspaceByTitle.path;
+                            } else {
+                                // Fallback: check cdpInfo resolved path
+                                if (cdpInfo && cdpInfo.workspacePath) {
+                                    if (cdpInfo.workspacePath.endsWith('workspace.json')) {
+                                        workspacePath = cdpInfo.workspacePath;
+                                        let tempProjectName = '';
+                                        try {
+                                            if (fs.existsSync(cdpInfo.workspacePath)) {
+                                                const content = fs.readFileSync(cdpInfo.workspacePath, 'utf8');
+                                                const parsed = JSON.parse(content);
+                                                if (parsed.folders && Array.isArray(parsed.folders) && parsed.folders.length > 0) {
+                                                    const folderNames = parsed.folders.map((f: any) => {
+                                                        const p = f.path || f.uri || '';
+                                                        let clean = p.trim();
+                                                        if (clean.startsWith('file:')) {
+                                                            clean = clean.replace(/^file:\/\/\/?/, '');
+                                                        }
+                                                        clean = decodeURIComponent(clean);
+                                                        clean = clean.replace(/^\/([a-zA-Z]):/, '$1:');
+                                                        return path.basename(clean.replace(/\//g, '\\'));
+                                                    }).filter(Boolean);
+
+                                                    if (folderNames.length > 1) {
+                                                        tempProjectName = `🗂️ ${folderNames.join(' + ')}`;
+                                                    } else if (folderNames.length === 1) {
+                                                        tempProjectName = folderNames[0];
+                                                    }
+                                                }
+                                            }
+                                        } catch (err) {
+                                            logger.error(`[scanActiveWindows] Failed to parse workspace.json at ${cdpInfo.workspacePath}:`, err);
+                                        }
+                                        projectName = tempProjectName || path.basename(workspacePath);
+                                    } else {
+                                        workspacePath = cdpInfo.workspacePath;
+                                        const normPath = workspacePath.toLowerCase().replace(/\//g, '\\').trim();
+                                        const matchedByPath = recentWorkspaces.find(w => {
+                                            const normWPath = w.path.toLowerCase().replace(/\//g, '\\').trim();
+                                            return normWPath === normPath;
+                                        });
+                                        projectName = matchedByPath ? matchedByPath.name : path.basename(workspacePath);
+                                    }
+                                } else {
+                                    // Fallback to title matching over all recent workspaces (legacy check)
+                                    let matchedWorkspaceLegacy: RecentWorkspace | null = null;
+                                    for (const w of recentWorkspaces) {
+                                        const cleanName = w.name.replace(/\.code-workspace$/i, '');
+                                        if (isTitleMatch(title, cleanName)) {
+                                            matchedWorkspaceLegacy = w;
+                                            break;
+                                        }
+                                    }
+                                    if (matchedWorkspaceLegacy) {
+                                        projectName = matchedWorkspaceLegacy.name;
+                                        workspacePath = matchedWorkspaceLegacy.path;
+                                    } else {
+                                        projectName = cleanParsedName;
+                                        workspacePath = null;
+                                    }
+                                }
+                            }
                         }
 
                         if (!workspacePath) {
@@ -756,7 +766,22 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             }
         }));
 
-        return activeWindows;
+        // Deduplicate activeWindows by normalized workspacePath
+        const uniqueWindows: typeof activeWindows = [];
+        const seenPaths = new Set<string>();
+        for (const win of activeWindows) {
+            if (win.workspacePath) {
+                const normPath = win.workspacePath.toLowerCase().replace(/\//g, '\\').trim();
+                if (seenPaths.has(normPath)) {
+                    logger.debug(`[scanActiveWindows] Skipping duplicate window for path: ${win.workspacePath} (title: "${win.title}")`);
+                    continue;
+                }
+                seenPaths.add(normPath);
+            }
+            uniqueWindows.push(win);
+        }
+
+        return uniqueWindows;
     };
 
     const switchWorkspaceInternal = async (

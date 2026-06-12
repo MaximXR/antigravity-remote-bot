@@ -10,6 +10,7 @@ import {
     registerApprovalWorkspaceChannel,
     registerApprovalWorkspaceChannel as _registerChannel,
     resolveApprovalChannelForCurrentChat,
+    cleanLabel,
 } from '../../src/services/cdpBridgeManager';
 import { ApprovalDetector } from '../../src/services/approvalDetector';
 import { CdpService } from '../../src/services/cdpService';
@@ -233,3 +234,14 @@ describe('ensureApprovalDetector', () => {
         ).resolves.toBeUndefined();
     });
 });
+
+describe('cdpBridgeManager - cleanLabel', () => {
+    it('removes keyboard shortcut glyphs and modifier hotkeys', () => {
+        expect(cleanLabel('Accept ChangesCTRL+⏎')).toBe('Accept Changes');
+        expect(cleanLabel('RejectCTRL+⌫')).toBe('Reject');
+        expect(cleanLabel('1. Allow')).toBe('Allow');
+        expect(cleanLabel('Always Allow')).toBe('Always Allow');
+        expect(cleanLabel('Deny')).toBe('Deny');
+    });
+});
+
