@@ -418,14 +418,22 @@ export class ResponseMonitor {
         }
     }
 
+    private getNextPollInterval(): number {
+        if (this.generationStarted && this.stopGoneCount > 0) {
+            return 500; // Poll faster to quickly confirm completion
+        }
+        return this.pollIntervalMs;
+    }
+
     private schedulePoll(): void {
         if (!this.isRunning) return;
+        const interval = this.getNextPollInterval();
         this.pollTimer = setTimeout(async () => {
             await this.poll();
             if (this.isRunning) {
                 this.schedulePoll();
             }
-        }, this.pollIntervalMs);
+        }, interval);
     }
 
     private buildEvaluateParams(expression: string): Record<string, unknown> {

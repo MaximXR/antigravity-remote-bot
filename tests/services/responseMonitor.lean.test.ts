@@ -195,12 +195,12 @@ describe('Lean ResponseMonitor (new API)', () => {
 
         // Poll 3: stop=false (gone count 2)
         cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: false, responseText: 'response' }));
-        await jest.advanceTimersByTimeAsync(2000);
+        await jest.advanceTimersByTimeAsync(500);
         expect(completedText).toBeNull();
 
         // Poll 4: stop=false (gone count 3) -> complete
         cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: false, responseText: 'response' }));
-        await jest.advanceTimersByTimeAsync(2000);
+        await jest.advanceTimersByTimeAsync(500);
         expect(completedText).toBe('response');
     });
 
@@ -229,11 +229,11 @@ describe('Lean ResponseMonitor (new API)', () => {
 
         // Poll 3: stop=false (gone 2)
         cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: false, responseText: 'resp' }));
-        await jest.advanceTimersByTimeAsync(2000);
+        await jest.advanceTimersByTimeAsync(500);
 
         // Poll 4: stop=TRUE again -> resets counter
         cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: true, responseText: 'resp' }));
-        await jest.advanceTimersByTimeAsync(2000);
+        await jest.advanceTimersByTimeAsync(500);
 
         // Poll 5: stop=false (gone 1 again)
         cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: false, responseText: 'resp' }));
@@ -270,11 +270,11 @@ describe('Lean ResponseMonitor (new API)', () => {
 
         // Poll 3: stop=false (gone 2), text changed — counter must NOT reset
         cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: false, responseText: 'first updated' }));
-        await jest.advanceTimersByTimeAsync(2000);
+        await jest.advanceTimersByTimeAsync(500);
 
         // Poll 4: stop=false (gone 3) — should complete despite text change in poll 3
         cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: false, responseText: 'first updated' }));
-        await jest.advanceTimersByTimeAsync(2000);
+        await jest.advanceTimersByTimeAsync(500);
 
         expect(completedText).toBe('first updated');
     });
@@ -303,10 +303,10 @@ describe('Lean ResponseMonitor (new API)', () => {
         await jest.advanceTimersByTimeAsync(2000);
 
         cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: false, responseText: 'token1 token2 token3' }));
-        await jest.advanceTimersByTimeAsync(2000);
+        await jest.advanceTimersByTimeAsync(500);
 
         cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: false, responseText: 'token1 token2 token3 final' }));
-        await jest.advanceTimersByTimeAsync(2000);
+        await jest.advanceTimersByTimeAsync(500);
 
         // Should be complete after 3 consecutive stop-gone, despite text changing each time
         expect(completedText).toBe('token1 token2 token3 final');
@@ -360,10 +360,14 @@ describe('Lean ResponseMonitor (new API)', () => {
         expect(completedText).toBeNull();
 
         // Poll 2-4: stop disappears 3 times, text remains baseline
-        for (let i = 0; i < 3; i++) {
-            cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: false, responseText: 'old response' }));
-            await jest.advanceTimersByTimeAsync(2000);
-        }
+        cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: false, responseText: 'old response' }));
+        await jest.advanceTimersByTimeAsync(2000);
+
+        cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: false, responseText: 'old response' }));
+        await jest.advanceTimersByTimeAsync(500);
+
+        cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: false, responseText: 'old response' }));
+        await jest.advanceTimersByTimeAsync(500);
 
         // Even with no new text, monitor must complete instead of hanging in thinking
         expect(completedText).toBe('');
@@ -533,6 +537,65 @@ describe('Lean ResponseMonitor (new API)', () => {
         await jest.advanceTimersByTimeAsync(2000);
 
         expect(cdpService.call.mock.calls.length - callsBefore).toBe(1);
+
+        await monitor.stop();
+    });
+
+    // ---------------------------------------------------------------
+    // Test 14: Dynamic poll interval (2000ms -> 500ms -> 2000ms)
+    // ---------------------------------------------------------------
+    it('adapts poll interval dynamically based on whether stop button is visible', async () => {
+        const monitor = createMonitor({ pollIntervalMs: 2000 });
+
+        cdpService.call
+            .mockResolvedValueOnce(cdpResult({ notifyCount: 0, cardCount: 0 }))
+            .mockResolvedValueOnce(cdpResult(null))
+            .mockResolvedValueOnce(cdpResult(null));
+        await monitor.start();
+
+        const getCallsCount = () => cdpService.call.mock.calls.length;
+
+        // Poll 1: stop is visible (isGenerating = true). Next poll should be in 2000ms.
+        cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: true }));
+        const c1 = getCallsCount();
+        await jest.advanceTimersByTimeAsync(1000);
+        // At 1000ms, no new poll should have fired
+        expect(getCallsCount()).toBe(c1);
+
+        await jest.advanceTimersByTimeAsync(1000);
+        // At 2000ms total, Poll 1 fired. Next poll (Poll 2) scheduled in 2000ms.
+        expect(getCallsCount()).toBe(c1 + 1);
+
+        // Poll 2: stop disappears (isGenerating = false). stopGoneCount becomes 1.
+        cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: false }));
+        const c2 = getCallsCount();
+        await jest.advanceTimersByTimeAsync(2000);
+        // Poll 2 executes.
+        expect(getCallsCount()).toBe(c2 + 1);
+
+        // Poll 2 has executed, and since stopGoneCount became 1, Poll 3 is scheduled in 500ms!
+        cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: true })); // stop button reappears
+        const c3 = getCallsCount();
+        
+        await jest.advanceTimersByTimeAsync(300);
+        // At 300ms, Poll 3 has not fired yet.
+        expect(getCallsCount()).toBe(c3);
+
+        await jest.advanceTimersByTimeAsync(200);
+        // At 500ms total, Poll 3 fires.
+        expect(getCallsCount()).toBe(c3 + 1);
+
+        // Poll 3 has executed, stop button was visible, stopGoneCount reset to 0. Next poll (Poll 4) is scheduled in 2000ms!
+        cdpService.call.mockResolvedValueOnce(combinedResult({ isGenerating: false }));
+        const c4 = getCallsCount();
+
+        await jest.advanceTimersByTimeAsync(500);
+        // At 500ms, Poll 4 has NOT fired.
+        expect(getCallsCount()).toBe(c4);
+
+        await jest.advanceTimersByTimeAsync(1500);
+        // At 2000ms total, Poll 4 fires.
+        expect(getCallsCount()).toBe(c4 + 1);
 
         await monitor.stop();
     });
