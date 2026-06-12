@@ -1128,8 +1128,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }
     };
 
-    // Run background scanner every 15s
-    setInterval(scanAndConnectNewWindows, 15000);
+    // Run background scanner every 10s
+    setInterval(scanAndConnectNewWindows, 10000);
 
     logger.info('Starting Remoat Telegram bot...');
 
