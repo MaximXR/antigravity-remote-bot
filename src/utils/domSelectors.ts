@@ -45,8 +45,11 @@ export const buildClickScript = (buttonText: string): string => {
             }
             return text.includes(pattern);
         };
-        const buttons = Array.from(document.querySelectorAll('button, [role="button"], a.monaco-button, label, .cursor-pointer'))
+        const preferred = Array.from(document.querySelectorAll('button, [role="button"], a.monaco-button'))
             .filter(btn => btn.offsetParent !== null);
+        const fallbacks = Array.from(document.querySelectorAll('label, .cursor-pointer'))
+            .filter(btn => btn.offsetParent !== null);
+        const buttons = [...preferred, ...fallbacks];
         
         for (const btn of buttons) {
             const text = normalize(btn.textContent || '');
