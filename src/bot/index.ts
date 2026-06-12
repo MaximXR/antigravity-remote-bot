@@ -1092,13 +1092,6 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     };
                 } else if (bridge.lastActiveChannel) {
                     targetChannel = bridge.lastActiveChannel;
-                } else if (bindings.length > 0) {
-                    // Fallback to the first workspace binding channel if no active channel is set yet (e.g. after restart)
-                    const first = bindings[0];
-                    targetChannel = {
-                        chatId: first.channelId.includes(':') ? Number(first.channelId.split(':')[0]) : Number(first.channelId),
-                        threadId: first.channelId.includes(':') ? Number(first.channelId.split(':')[1]) : undefined,
-                    };
                 }
 
                 if (targetChannel) {
