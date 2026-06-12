@@ -897,6 +897,22 @@ export const RESPONSE_SELECTORS = {
             'accept all', 'reject all', 'allow once', 'always allow', 'allow this conversation', 'allow this chat'
         ];
 
+        const getElementText = (node) => {
+            if (node.nodeType === 3) {
+                return node.nodeValue || '';
+            }
+            if (node.nodeType === 1) {
+                const style = window.getComputedStyle(node);
+                if (style.display === 'none' || style.visibility === 'hidden') return '';
+                return Array.from(node.childNodes)
+                    .map(getElementText)
+                    .filter(Boolean)
+                    .join(' ')
+                    .replace(/\s+/g, ' ');
+            }
+            return '';
+        };
+
         const isSystemOrActivityButton = (el, text) => {
             if (el.getAttribute('data-tooltip-id') === 'input-send-button-cancel-tooltip') return true;
             if (el.closest('.notify-user-container') || el.closest('[class*="notify-user"]')) return true;
@@ -904,12 +920,16 @@ export const RESPONSE_SELECTORS = {
             if (el.closest('[class*="feedback"]') || el.closest('footer')) return true;
             if (el.closest('[class*="metadata"]') || el.closest('[class*="metrics"]')) return true;
             
-            const normalized = text.toLowerCase().trim();
-            if (/^(?:explored|explore|thought|thinking|run|running|ran|npm|npx|git|python|tsc|test|testing|search|searching|artifact|task|tasks|status|scan|scanning|inspect|inspecting|read|reading|write|writing|resolve|resolving|execute|executing|analyze|analyzing|install|installing|build|building|compile|compiling)\b/i.test(normalized)) return true;
-            if (/\\b(?:seconds|credits|worked for|gemini|claude)\\b/i.test(normalized)) return true;
+            const normalized = text.toLowerCase().trim()
+                .replace(/([a-z])(\d)/g, '$1 $2')
+                .replace(/(\d)([a-z])/g, '$1 $2')
+                .replace(/\s+/g, ' ');
+
+            if (/^(?:explored|explore|exploring|thought|thinking|run|running|ran|npm|npx|git|python|tsc|test|testing|search|searching|artifact|task|tasks|status|scan|scanning|inspect|inspecting|read|reading|write|writing|resolve|resolving|execute|executing|analyze|analyzing|install|installing|build|building|compile|compiling)\b/i.test(normalized)) return true;
+            if (/\b(?:seconds|credits|worked for|gemini|claude)\b/i.test(normalized)) return true;
             if (normalized === 'отменить' || normalized === 'остановить' || normalized === 'cancel') return true;
-            if (/^[+-]\\d+\\s+[+-]\\d+$/.test(normalized)) return true;
-            if (/\\.[a-z0-9]{1,4}$/i.test(normalized)) return true;
+            if (/^[+-]\d+\s+[+-]\d+$/.test(normalized)) return true;
+            if (/\.[a-z0-9]{1,4}$/i.test(normalized)) return true;
             
             return false;
         };
@@ -919,11 +939,12 @@ export const RESPONSE_SELECTORS = {
                 const rect = el.getBoundingClientRect();
                 if (rect.width === 0 || rect.height === 0) return false;
                 
-                const text = (el.textContent || '').trim().toLowerCase();
+                const text = getElementText(el).trim();
                 if (!text || text.length > 80) return false;
 
-                if (SYSTEM_BUTTON_TEXTS.some(p => text === p || text.startsWith(p) || text.endsWith(p))) return false;
-                if (text.includes('worked for') || text.includes('seconds') || text.includes('credits') || text.includes('gemini') || text.includes('claude')) return false;
+                const ltext = text.toLowerCase();
+                if (SYSTEM_BUTTON_TEXTS.some(p => ltext === p || ltext.startsWith(p) || ltext.endsWith(p))) return false;
+                if (ltext.includes('worked for') || ltext.includes('seconds') || ltext.includes('credits') || ltext.includes('gemini') || ltext.includes('claude')) return false;
                 if (el.closest('pre') || el.closest('code') || el.closest('details')) return false;
                 if (isSystemOrActivityButton(el, text)) return false;
 
@@ -932,7 +953,7 @@ export const RESPONSE_SELECTORS = {
 
         if (buttons.length === 0) return null;
 
-        return buttons.map(btn => (btn.textContent || '').trim());
+        return buttons.map(btn => getElementText(btn).trim());
     })()`,
 
     CLICK_STOP_BUTTON: `(() => {
