@@ -133,6 +133,8 @@ export class ApprovalDetector {
     private lastDetectedKey: string | null = null;
     /** Full ApprovalInfo from the last detection (used for clicking) */
     private lastDetectedInfo: ApprovalInfo | null = null;
+    /** Counter of consecutive polls returning null (used for resolution debouncing) */
+    private consecutiveNullsCount: number = 0;
 
     constructor(options: ApprovalDetectorOptions) {
         this.cdpService = options.cdpService;
@@ -149,6 +151,7 @@ export class ApprovalDetector {
         this.isRunning = true;
         this.lastDetectedKey = null;
         this.lastDetectedInfo = null;
+        this.consecutiveNullsCount = 0;
         this.schedulePoll();
     }
 
@@ -210,6 +213,7 @@ export class ApprovalDetector {
             }
 
             if (info) {
+                this.consecutiveNullsCount = 0;
                 // Duplicate prevention: use approveText + description combination as key
                 const key = `${info.approveText}::${info.description}`;
                 logger.debug(`[ApprovalDetector:${this.cdpService.getCurrentWorkspaceName()}] Detected info, key=${key}, lastKey=${this.lastDetectedKey}`);
@@ -221,12 +225,16 @@ export class ApprovalDetector {
                     });
                 }
             } else {
-                // Reset when buttons disappear (prepare for next approval detection)
-                const wasDetected = this.lastDetectedKey !== null;
-                this.lastDetectedKey = null;
-                this.lastDetectedInfo = null;
-                if (wasDetected && this.onResolved) {
-                    this.onResolved();
+                this.consecutiveNullsCount++;
+                if (this.consecutiveNullsCount >= 3) {
+                    // Reset when buttons disappear (prepare for next approval detection)
+                    const wasDetected = this.lastDetectedKey !== null;
+                    this.lastDetectedKey = null;
+                    this.lastDetectedInfo = null;
+                    this.consecutiveNullsCount = 0;
+                    if (wasDetected && this.onResolved) {
+                        this.onResolved();
+                    }
                 }
             }
         } catch (error) {

@@ -58,6 +58,13 @@ function buildCustomIdWithLimit(
     return channelPart ? `${prefix}:${safeProjectName}${channelPart}` : `${prefix}:${safeProjectName}`;
 }
 
+function cleanLabel(label: string): string {
+    if (!label) return '';
+    let cleaned = label.replace(/[⌃⌥⇧⏎⌘\u2318\u2325\u21B5]+/g, '').trim();
+    cleaned = cleaned.replace(/^\s*\d+[\s.)]*/, '').trim();
+    return cleaned;
+}
+
 function normalizeSessionTitle(title: string): string {
     return title.trim().toLowerCase();
 }
@@ -302,14 +309,15 @@ export async function flushDeferredApproval(
         text += `<b>Deny:</b> ${escapeHtml(info.denyText || '(None)')}\n`;
         text += `<b>Workspace:</b> ${escapeHtml(projectName)}`;
 
-        const approveLabel = info.approveText.replace(/[⌃⌥⇧⏎⌘\u2318\u2325\u21B5]+/g, '').trim() || 'Allow';
-        const denyLabel = info.denyText || 'Deny';
+        const approveLabel = cleanLabel(info.approveText) || 'Allow';
+        const denyLabel = cleanLabel(info.denyText) || 'Deny';
 
         const buttons: AbstractButton[] = [
             { text: `✅ ${approveLabel}`, action: buildApprovalCustomId('approve', projectName, targetChannelStr) }
         ];
         if (info.alwaysAllowText) {
-            buttons.push({ text: '✅ Allow Chat', action: buildApprovalCustomId('always_allow', projectName, targetChannelStr) });
+            const alwaysAllowLabel = cleanLabel(info.alwaysAllowText) || 'Always Allow';
+            buttons.push({ text: `✅ ${alwaysAllowLabel}`, action: buildApprovalCustomId('always_allow', projectName, targetChannelStr) });
         }
         buttons.push({ text: `❌ ${denyLabel}`, action: buildApprovalCustomId('deny', projectName, targetChannelStr) });
 
@@ -490,14 +498,15 @@ export function ensureApprovalDetector(
             text += `<b>Workspace:</b> ${escapeHtml(projectName)}`;
 
             // Use actual button labels from the UI
-            const approveLabel = info.approveText.replace(/[⌃⌥⇧⏎⌘\u2318\u2325\u21B5]+/g, '').trim() || 'Allow';
-            const denyLabel = info.denyText || 'Deny';
+            const approveLabel = cleanLabel(info.approveText) || 'Allow';
+            const denyLabel = cleanLabel(info.denyText) || 'Deny';
 
             const buttons: AbstractButton[] = [
                 { text: `✅ ${approveLabel}`, action: buildApprovalCustomId('approve', projectName, targetChannelStr) }
             ];
             if (info.alwaysAllowText) {
-                buttons.push({ text: '✅ Allow Chat', action: buildApprovalCustomId('always_allow', projectName, targetChannelStr) });
+                const alwaysAllowLabel = cleanLabel(info.alwaysAllowText) || 'Always Allow';
+                buttons.push({ text: `✅ ${alwaysAllowLabel}`, action: buildApprovalCustomId('always_allow', projectName, targetChannelStr) });
             }
             buttons.push({ text: `❌ ${denyLabel}`, action: buildApprovalCustomId('deny', projectName, targetChannelStr) });
 
