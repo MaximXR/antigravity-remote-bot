@@ -580,4 +580,45 @@ describe('PlanningDetector - planning button detection and remote execution', ()
 
         expect(onResolved).not.toHaveBeenCalled();
     });
+
+    // ──────────────────────────────────────────────────────
+    // triggerPostGenerationCheck() tests
+    // ──────────────────────────────────────────────────────
+    it('triggerPostGenerationCheck() unpauses, polls immediately, and pauses after 10s', async () => {
+        const onPlanningRequired = jest.fn();
+        const mockInfo = makePlanningInfo();
+
+        mockCdpService.call
+            .mockResolvedValueOnce(BASELINE_RESP) // start() baseline
+            .mockResolvedValueOnce({ result: { value: mockInfo } }); // triggerPostGenerationCheck() immediate poll
+
+        detector = new PlanningDetector({
+            cdpService: mockCdpService,
+            pollIntervalMs: 2000,
+            onPlanningRequired,
+        });
+
+        detector.start();
+        detector.pause(); // Initially pause it
+
+        expect(onPlanningRequired).not.toHaveBeenCalled();
+
+        // Trigger the post-generation check
+        detector.triggerPostGenerationCheck();
+
+        // It should have executed the immediate poll
+        await Promise.resolve(); // flush microtasks
+        expect(onPlanningRequired).toHaveBeenCalledTimes(1);
+
+        // Advance timers by 8 seconds
+        await jest.advanceTimersByTimeAsync(8000);
+        
+        // Advance timers past 10 seconds (total 10000ms from trigger)
+        await jest.advanceTimersByTimeAsync(2000);
+        
+        // Now it should be paused again. Let's verify by clear mocks and advancing time
+        mockCdpService.call.mockClear();
+        await jest.advanceTimersByTimeAsync(4000);
+        expect(mockCdpService.call).not.toHaveBeenCalled();
+    });
 });

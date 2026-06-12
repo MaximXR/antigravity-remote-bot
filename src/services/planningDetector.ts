@@ -88,6 +88,7 @@ export class PlanningDetector {
     /** Set of already auto-opened artifact texts to prevent infinite loops */
     private autoOpenedChips = new Set<string>();
     private isPaused: boolean = false;
+    private burstTimer: NodeJS.Timeout | null = null;
 
     /**
      * Baseline artifact counts captured when monitoring starts.
@@ -120,10 +121,16 @@ export class PlanningDetector {
         this.lastNotifiedAt = 0;
         this.lastClickedChip = null;
         this.autoOpenedChips.clear();
+        if (this.burstTimer) {
+            clearTimeout(this.burstTimer);
+            this.burstTimer = null;
+        }
         // Capture baseline before the first poll — runs async but schedules
         // the first poll only after the baseline is safely captured.
         this.resetBaseline().finally(() => {
-            if (this.isRunning) this.schedulePoll();
+            if (this.isRunning && !this.isPaused) {
+                this.schedulePoll();
+            }
         });
     }
 
@@ -171,6 +178,10 @@ export class PlanningDetector {
             clearTimeout(this.pollTimer);
             this.pollTimer = null;
         }
+        if (this.burstTimer) {
+            clearTimeout(this.burstTimer);
+            this.burstTimer = null;
+        }
     }
 
     /** Return the last detected planning info. Returns null if nothing has been detected. */
@@ -185,18 +196,49 @@ export class PlanningDetector {
 
     pause(): void {
         this.isPaused = true;
+        if (this.pollTimer) {
+            clearTimeout(this.pollTimer);
+            this.pollTimer = null;
+        }
     }
 
     resume(): void {
-        if (!this.isPaused) return;
         this.isPaused = false;
         if (this.isRunning) {
             if (this.pollTimer) {
                 clearTimeout(this.pollTimer);
                 this.pollTimer = null;
             }
-            this.poll();
+            this.poll().then(() => {
+                this.schedulePoll();
+            }).catch(err => {
+                logger.error('[PlanningDetector] Error in resume poll:', err);
+                this.schedulePoll();
+            });
         }
+    }
+
+    /**
+     * Triggers a short burst of polling right after generation stops.
+     * Polls for 10 seconds, then pauses again.
+     */
+    triggerPostGenerationCheck(): void {
+        logger.debug('[PlanningDetector] Triggering post-generation check burst...');
+        
+        if (this.burstTimer) {
+            clearTimeout(this.burstTimer);
+            this.burstTimer = null;
+        }
+
+        // Unpause and start polling
+        this.resume();
+
+        // Schedule to pause after 10 seconds
+        this.burstTimer = setTimeout(() => {
+            logger.debug('[PlanningDetector] Post-generation check burst completed. Pausing detector.');
+            this.pause();
+            this.burstTimer = null;
+        }, 10000);
     }
 
     /**
@@ -211,10 +253,15 @@ export class PlanningDetector {
             const script = `(() => {
                 const title = ${JSON.stringify(planTitle)};
                 const normalizedTitle = title.toLowerCase().trim();
-                const cards = Array.from(document.querySelectorAll('div.artifact-card, div[class*="artifact-card"]'));
+                const cards = Array.from(document.querySelectorAll('div.artifact-card, div[class*="artifact-card"], div[class*="border-gray-500"][class*="select-none"]'));
                 const targetCard = cards.find(card => (card.textContent || '').toLowerCase().includes(normalizedTitle));
                 if (targetCard) {
-                    targetCard.click();
+                    const innerChip = targetCard.querySelector('span[class*="inline-flex"][class*="cursor-pointer"], .cursor-pointer');
+                    if (innerChip && typeof innerChip.click === 'function') {
+                        innerChip.click();
+                    } else if (typeof targetCard.click === 'function') {
+                        targetCard.click();
+                    }
                     return { ok: true };
                 }
                 return { ok: false, error: 'Artifact card not found for title: ' + title };
@@ -237,6 +284,14 @@ export class PlanningDetector {
      * @returns true if click succeeded
      */
     async clickProceedButton(buttonText?: string): Promise<boolean> {
+        if (this.lastDetectedInfo?.openOnCard) {
+            logger.info('[PlanningDetector] Plan card is collapsed. Expanding it first before clicking Proceed...');
+            const expanded = await this.clickOpenButton();
+            if (expanded) {
+                // Wait for the DOM to render the Proceed button inside the expanded card
+                await new Promise(r => setTimeout(r, 1000));
+            }
+        }
         const text = buttonText ?? this.lastDetectedInfo?.proceedText ?? 'Proceed';
         return this.clickButton(text);
     }
@@ -344,12 +399,14 @@ export class PlanningDetector {
 
     /** Schedule the next poll. */
     private schedulePoll(): void {
-        if (!this.isRunning) return;
+        if (!this.isRunning || this.isPaused) return;
+        if (this.pollTimer) {
+            clearTimeout(this.pollTimer);
+        }
         this.pollTimer = setTimeout(async () => {
+            if (!this.isRunning || this.isPaused) return;
             await this.poll();
-            if (this.isRunning) {
-                this.schedulePoll();
-            }
+            this.schedulePoll();
         }, this.pollIntervalMs);
     }
 
@@ -385,30 +442,7 @@ export class PlanningDetector {
 
             const result = await this.cdpService.call('Runtime.evaluate', callParams);
             
-            // Expected shape: PlanningInfo | PlanningInfo+fileRefMode | { collapsed: true, chipText } | { autoOpened: true, chipText } | null
             const payload = result?.result?.value ?? null;
-            
-            if (payload && payload.collapsed) {
-                // We just initiated an auto-click on a collapsed chip
-                this.lastClickedChip = { text: payload.chipText, at: Date.now() };
-                logger.debug(`[PlanningDetector] Auto-clicked collapsed artifact chip: "${payload.chipText}"`);
-                return; // Wait for the next poll cycle to detect the expanded buttons
-            }
-
-            if (payload && payload.autoOpened) {
-                // Read-only artifact (Walkthrough, Task) was auto-opened — send lightweight notification
-                this.lastClickedChip = null;
-                const chipText = payload.chipText;
-                this.autoOpenedChips.add(chipText);
-                logger.info(`[PlanningDetector] Auto-opened read-only artifact: "${chipText}"`);
-                if (this.onAutoOpened) {
-                    Promise.resolve(this.onAutoOpened(chipText)).catch((err) => {
-                        logger.error('[PlanningDetector] onAutoOpened callback failed:', err);
-                    });
-                }
-                return;
-            }
-
             const info: PlanningInfo | null = payload;
 
             if (info) {
@@ -416,7 +450,10 @@ export class PlanningDetector {
                 this.lastClickedChip = null;
                 
                 // Duplicate prevention: use button text + content preview as key (stable across DOM redraws, unique per plan)
-                const uniquePreview = `${info.planTitle}::${info.planSummary.slice(0, 50)}::${info.description.slice(0, 50)}`;
+                const planTitle = info.planTitle || '';
+                const planSummary = info.planSummary || '';
+                const description = info.description || '';
+                const uniquePreview = `${planTitle}::${planSummary.slice(0, 50)}::${description.slice(0, 50)}`;
                 const key = `${info.openText}::${info.proceedText}::${uniquePreview}`;
                 const now = Date.now();
                 const withinCooldown = (now - this.lastNotifiedAt) < PlanningDetector.COOLDOWN_MS;

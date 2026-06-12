@@ -659,6 +659,31 @@ export function ensurePlanningDetector(
     });
 
     detector.start();
+
+    if ((cdp as any)._planningStartListener) {
+        cdp.removeListener('response-monitor:start', (cdp as any)._planningStartListener);
+    }
+    const startHandler = () => {
+        logger.debug(`[PlanningDetector:${projectName}] Pausing detector due to response-monitor:start`);
+        detector.pause();
+    };
+    (cdp as any)._planningStartListener = startHandler;
+    cdp.on('response-monitor:start', startHandler);
+
+    if ((cdp as any)._planningStopListener) {
+        cdp.removeListener('response-monitor:stop', (cdp as any)._planningStopListener);
+    }
+    const stopHandler = () => {
+        logger.debug(`[PlanningDetector:${projectName}] Triggering post-generation check burst due to response-monitor:stop`);
+        detector.triggerPostGenerationCheck();
+    };
+    (cdp as any)._planningStopListener = stopHandler;
+    cdp.on('response-monitor:stop', stopHandler);
+
+    // Start the detector in a paused state by default to prevent periodic background polling when idle.
+    // It will be resumed automatically for a brief 10-second check when generation is finished.
+    detector.pause();
+
     bridge.pool.registerPlanningDetector(projectName, detector);
     logger.debug(`[PlanningDetector:${projectName}] Started`);
 }

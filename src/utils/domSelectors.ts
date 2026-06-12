@@ -121,220 +121,196 @@ export const PLANNING_SELECTORS = {
         baselineCardCount: number,
         baselineIconCount: number,
     ) => `(() => {
-        const OPEN_PATTERNS = ['open', 'view'];
-        const PROCEED_PATTERNS = ['proceed', 'accept', 'approve', 'continue'];
-        const PLAN_TYPE_KEYWORDS = ['implementation plan', 'implementation_plan', 'plan', 'walkthrough', 'task'];
-        const lastClickedText = ${lastClickedText ? JSON.stringify(lastClickedText) : 'null'};
-        const AUTO_OPENED_CHIPS = ${JSON.stringify(autoOpenedChips)};
-        const BASELINE_NOTIFY = ${baselineNotifyCount};
-        const BASELINE_CARD = ${baselineCardCount};
-        const BASELINE_ICON = ${baselineIconCount};
+        try {
+            const OPEN_PATTERNS = ['open', 'view'];
+            const PROCEED_PATTERNS = ['proceed', 'accept', 'approve', 'continue'];
+            const PLAN_TYPE_KEYWORDS = ['implementation plan', 'implementation_plan', 'plan', 'walkthrough', 'task'];
+            const lastClickedText = ${lastClickedText ? JSON.stringify(lastClickedText) : 'null'};
+            const AUTO_OPENED_CHIPS = ${JSON.stringify(autoOpenedChips)};
+            const BASELINE_NOTIFY = ${baselineNotifyCount};
+            const BASELINE_CARD = ${baselineCardCount};
+            const BASELINE_ICON = ${baselineIconCount};
 
-        const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+            const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
 
-        const allContainers = Array.from(document.querySelectorAll('.notify-user-container'))
-            .filter(el => !el.closest('[aria-label="Message history"]'));
-        const newContainers = allContainers.slice(BASELINE_NOTIFY);
-        let container = newContainers.length > 0 ? newContainers[newContainers.length - 1] : null;
-        let openBtn = null;
-        let proceedBtn = null;
-        let openOnCard = false;
+            const allContainers = Array.from(document.querySelectorAll('.notify-user-container'))
+                .filter(el => !el.closest('[aria-label="Message history"]'));
+            const newContainers = allContainers.slice(BASELINE_NOTIFY);
+            let container = newContainers.length > 0 ? newContainers[newContainers.length - 1] : null;
+            let openBtn = null;
+            let proceedBtn = null;
+            let openOnCard = false;
 
-        if (container) {
-            const allButtons = Array.from(container.querySelectorAll('button')).filter(btn => btn.offsetParent !== null);
-            openBtn = allButtons.find(btn => { const t = normalize(btn.textContent); return OPEN_PATTERNS.some(p => t === p || t.includes(p)); });
-            proceedBtn = allButtons.find(btn => { const t = normalize(btn.textContent); return PROCEED_PATTERNS.some(p => t === p || t.includes(p)); });
-        }
-
-        if (!openBtn && newContainers.length > 0) {
-            for (let ci = newContainers.length - 1; ci >= 0; ci--) {
-                const c = newContainers[ci];
-                const btns = Array.from(c.querySelectorAll('button')).filter(btn => btn.offsetParent !== null);
-                const ob = btns.find(btn => { const t = normalize(btn.textContent); return OPEN_PATTERNS.some(p => t === p || t.includes(p)); });
-                if (ob) {
-                    openBtn = ob;
-                    container = c;
-                    proceedBtn = btns.find(btn => { const t = normalize(btn.textContent); return PROCEED_PATTERNS.some(p => t === p || t.includes(p)); });
-                    break;
-                }
+            if (container) {
+                const allButtons = Array.from(container.querySelectorAll('button')).filter(btn => btn.offsetParent !== null);
+                openBtn = allButtons.find(btn => { const t = normalize(btn.textContent); return OPEN_PATTERNS.some(p => t === p || t.includes(p)); });
+                proceedBtn = allButtons.find(btn => { const t = normalize(btn.textContent); return PROCEED_PATTERNS.some(p => t === p || t.includes(p)); });
             }
-        }
 
-        if (!openBtn || !container) {
-            const chipSelector = 'div.artifact-card, div[class*="artifact-card"], div[class*="border-gray-500"][class*="select-none"]';
-            const allCards = Array.from(document.body.querySelectorAll(chipSelector))
-                .filter(el => el.offsetParent !== null && !el.closest('[aria-label="Message history"]'));
-            const newCards = allCards.slice(BASELINE_CARD);
-
-            for (let i = newCards.length - 1; i >= 0; i--) {
-                const card = newCards[i];
-                const cardText = (card.textContent || '').trim();
-                if (!cardText || cardText.length > 500) continue;
-
-                const parent = card.parentElement || card;
-                const buttons = Array.from(parent.querySelectorAll('button'))
-                    .filter(btn => btn.offsetParent !== null);
-                let ob = buttons.find(btn => {
-                    const t = normalize(btn.textContent);
-                    return OPEN_PATTERNS.some(p => t === p || t.includes(p));
-                });
-                const pb = buttons.find(btn => {
-                    const t = normalize(btn.textContent);
-                    return PROCEED_PATTERNS.some(p => t === p || t.includes(p));
-                });
-
-                if (!ob && (card.classList.contains('artifact-card') || card.querySelector('.artifact-card') || card.getAttribute('class')?.includes('artifact-card'))) {
-                    ob = card;
-                    openOnCard = true;
-                }
-
-                if (ob) {
-                    if (!pb) {
-                        const cardNorm = normalize(card.textContent);
-                        const isPlanType = PLAN_TYPE_KEYWORDS.some(k => cardNorm.includes(k))
-                            || !!card.querySelector('[class*="implementation-plan-icon"]')
-                            || !!card.querySelector('[class*="walkthrough-icon"]')
-                            || !!card.querySelector('[class*="task-icon"]');
-
-                        if (isPlanType) {
-                            openBtn = ob;
-                            proceedBtn = null;
-                            container = card;
-                            break;
-                        }
-
-                        const nameSpans = Array.from(card.querySelectorAll('span'))
-                            .map(s => (s.textContent || '').trim())
-                            .filter(t => t.length > 0 && t.length < 60
-                                && !OPEN_PATTERNS.some(p => normalize(t) === p || normalize(t).includes(p)));
-                        
-                        const chipText = nameSpans[0] || 'Artifact';
-                        if (AUTO_OPENED_CHIPS.includes(chipText)) {
-                            continue;
-                        }
-                        
-                        if (openOnCard) {
-                            card.click();
-                        } else {
-                            ob.click();
-                        }
-                        return { autoOpened: true, chipText };
-                    }
-                    openBtn = ob;
-                    proceedBtn = pb;
-                    container = card;
-                    break;
-                }
-
-                const hasPlanIcon = !!card.querySelector('[class*="implementation-plan-icon"]')
-                    || !!card.querySelector('[class*="walkthrough-icon"]')
-                    || !!card.querySelector('[class*="task-icon"]');
-                const cardTextNorm = normalize(card.textContent);
-                const looksLikePlan = hasPlanIcon || PLAN_TYPE_KEYWORDS.some(k => cardTextNorm.includes(k));
-
-                if (looksLikePlan) {
-                    const innerChip = card.querySelector('span[class*="inline-flex"][class*="cursor-pointer"]');
-                    const clickTarget = innerChip || (card.classList.contains('cursor-pointer') ? card : null);
-                    if (clickTarget) {
-                        const chipText = (clickTarget.textContent || '').trim();
-                        if (chipText && chipText !== lastClickedText && chipText.length < 100) {
-                            clickTarget.click();
-                            return { collapsed: true, chipText };
-                        }
+            if (!openBtn && newContainers.length > 0) {
+                for (let ci = newContainers.length - 1; ci >= 0; ci--) {
+                    const c = newContainers[ci];
+                    const btns = Array.from(c.querySelectorAll('button')).filter(btn => btn.offsetParent !== null);
+                    const ob = btns.find(btn => { const t = normalize(btn.textContent); return OPEN_PATTERNS.some(p => t === p || t.includes(p)); });
+                    if (ob) {
+                        openBtn = ob;
+                        container = c;
+                        proceedBtn = btns.find(btn => { const t = normalize(btn.textContent); return PROCEED_PATTERNS.some(p => t === p || t.includes(p)); });
+                        break;
                     }
                 }
             }
 
-            if (!openBtn) {
-                const allIconEls = Array.from(document.querySelectorAll('[class*="implementation-plan-icon"]'))
+            if (!openBtn || !container) {
+                const chipSelector = 'div.artifact-card, div[class*="artifact-card"], div[class*="border-gray-500"][class*="select-none"]';
+                const allCards = Array.from(document.body.querySelectorAll(chipSelector))
                     .filter(el => el.offsetParent !== null && !el.closest('[aria-label="Message history"]'));
-                const newIconEls = allIconEls.slice(BASELINE_ICON);
+                const newCards = allCards.slice(BASELINE_CARD);
 
-                for (let k = newIconEls.length - 1; k >= 0; k--) {
-                    const iconEl = newIconEls[k];
-                    let refEl = iconEl.parentElement;
-                    for (let up = 0; up < 5 && refEl; up++) {
-                        if (refEl.classList.contains('cursor-pointer') || refEl.getAttribute('role') === 'button') break;
-                        refEl = refEl.parentElement;
+                for (let i = newCards.length - 1; i >= 0; i--) {
+                    const card = newCards[i];
+                    const cardText = (card.textContent || '').trim();
+                    if (!cardText || cardText.length > 500) continue;
+
+                    const parent = card.parentElement || card;
+                    const buttons = Array.from(parent.querySelectorAll('button'))
+                        .filter(btn => btn.offsetParent !== null);
+                    let ob = buttons.find(btn => {
+                        const t = normalize(btn.textContent);
+                        return OPEN_PATTERNS.some(p => t === p || t.includes(p));
+                    });
+                    const pb = buttons.find(btn => {
+                        const t = normalize(btn.textContent);
+                        return PROCEED_PATTERNS.some(p => t === p || t.includes(p));
+                    });
+
+                    if (!ob && (card.classList.contains('artifact-card') || card.querySelector('.artifact-card') || card.getAttribute('class')?.includes('artifact-card'))) {
+                        ob = card;
+                        openOnCard = true;
                     }
 
-                    const titleNode = iconEl.closest('[class*="monaco-icon-label"]') ||
-                        iconEl.parentElement;
-                    const rawTitle = (titleNode?.textContent || '').trim();
-                    const PLAN_PREFIX_RE = /^(implementation plan|implementation_plan|walkthrough|task)\s*/i;
-                    const planTitle = rawTitle.replace(PLAN_PREFIX_RE, '').trim() || rawTitle || 'Implementation Plan';
+                    if (ob) {
+                        openBtn = ob;
+                        proceedBtn = pb || null;
+                        container = card;
+                        break;
+                    }
 
-                    return {
-                        openText: 'Open',
-                        proceedText: null,
-                        planTitle,
-                        planSummary: '',
-                        description: '',
-                        fileRefMode: true,
-                    };
+                    const hasPlanIcon = !!card.querySelector('[class*="implementation-plan-icon"]')
+                        || !!card.querySelector('[class*="walkthrough-icon"]')
+                        || !!card.querySelector('[class*="task-icon"]');
+                    const cardTextNorm = normalize(card.textContent);
+                    const looksLikePlan = hasPlanIcon || PLAN_TYPE_KEYWORDS.some(k => cardTextNorm.includes(k));
+
+                    if (looksLikePlan) {
+                        const innerChip = card.querySelector('span[class*="inline-flex"][class*="cursor-pointer"]');
+                        const clickTarget = innerChip || (card.classList.contains('cursor-pointer') ? card : null);
+                        if (clickTarget) {
+                            const chipText = (clickTarget.textContent || '').trim();
+                            if (chipText && chipText.length < 100) {
+                                openBtn = clickTarget;
+                                openOnCard = true;
+                                proceedBtn = null;
+                                container = card;
+                                break;
+                            }
+                        }
+                    }
                 }
 
-                return null;
-            }
-        }
+                if (!openBtn) {
+                    const allIconEls = Array.from(document.querySelectorAll('[class*="implementation-plan-icon"]'))
+                        .filter(el => el.offsetParent !== null && !el.closest('[aria-label="Message history"]'));
+                    const newIconEls = allIconEls.slice(BASELINE_ICON);
 
-        const openText = openOnCard ? 'Open' : (openBtn.textContent || '').trim();
-        const proceedText = proceedBtn ? (proceedBtn.textContent || '').trim() : null;
+                    for (let k = newIconEls.length - 1; k >= 0; k--) {
+                        const iconEl = newIconEls[k];
+                        let refEl = iconEl.parentElement;
+                        for (let up = 0; up < 5 && refEl; up++) {
+                            if (refEl.classList.contains('cursor-pointer') || refEl.getAttribute('role') === 'button') break;
+                            refEl = refEl.parentElement;
+                        }
 
-        const titleEl = container.querySelector('span.inline-flex.break-all, .inline-flex.break-all, span.break-all, span.select-text.break-all, .font-mono.text-sm.truncate, .font-mono.truncate');
-        let planTitle = titleEl ? (titleEl.textContent || '').trim() : '';
+                        const titleNode = iconEl.closest('[class*="monaco-icon-label"]') ||
+                            iconEl.parentElement;
+                        const rawTitle = (titleNode?.textContent || '').trim();
+                        const PLAN_PREFIX_RE = /^(implementation plan|implementation_plan|walkthrough|task)\s*/i;
+                        const planTitle = rawTitle.replace(PLAN_PREFIX_RE, '').trim() || rawTitle || 'Implementation Plan';
 
-        if (!planTitle && openText) {
-            const match = openText.match(/open\\s+(.*)/i);
-            if (match) planTitle = match[1].trim();
-        }
+                        return {
+                            openText: 'Open',
+                            proceedText: null,
+                            planTitle,
+                            planSummary: '',
+                            description: '',
+                            fileRefMode: true,
+                        };
+                    }
 
-        if (!planTitle) {
-            const possibleTitleEl = container.querySelector('[class*="title"], [class*="name"], span');
-            if (possibleTitleEl) {
-                planTitle = (possibleTitleEl.textContent || '').trim();
-            }
-        }
-
-        if (!planTitle) {
-            planTitle = (container.textContent || '').split('\\n')[0].trim().slice(0, 60);
-        }
-
-        if (planTitle.length > 100) {
-            planTitle = planTitle.slice(0, 100) + '...';
-        }
-
-        const summaryEls = Array.from(container.querySelectorAll('span.text-sm'));
-        const planSummary = summaryEls
-            .map(el => (el.textContent || '').trim())
-            .filter(text => text.length > 0 && text !== openText && text !== proceedText && text !== planTitle)
-            .join(' ');
-
-        const descEl = container.querySelector('.leading-relaxed.select-text');
-        let description = '';
-        const SKIP_TAGS = new Set(['PRE', 'CODE', 'STYLE', 'SCRIPT', 'BUTTON']);
-        const walkToText = (el) => {
-            const parts = [];
-            const walk = (node) => {
-                if (node.nodeType === 3) {
-                    const t = node.textContent || '';
-                    if (t.trim()) parts.push(t.trim());
-                } else if (node.nodeType === 1 && !SKIP_TAGS.has(node.tagName)) {
-                    for (const child of node.childNodes) walk(child);
+                    return null;
                 }
+            }
+
+            const openText = openOnCard ? 'Open' : (openBtn.textContent || '').trim();
+            const proceedText = proceedBtn ? (proceedBtn.textContent || '').trim() : null;
+
+            const titleEl = container.querySelector('span.inline-flex.break-all, .inline-flex.break-all, span.break-all, span.select-text.break-all, .font-mono.text-sm.truncate, .font-mono.truncate');
+            let planTitle = titleEl ? (titleEl.textContent || '').trim() : '';
+
+            if (!planTitle && openText) {
+                const match = openText.match(/open\\s+(.*)/i);
+                if (match) planTitle = match[1].trim();
+            }
+
+            if (!planTitle) {
+                const possibleTitleEl = container.querySelector('[class*="title"], [class*="name"], span');
+                if (possibleTitleEl) {
+                    planTitle = (possibleTitleEl.textContent || '').trim();
+                }
+            }
+
+            if (!planTitle) {
+                planTitle = (container.textContent || '').split('\\n')[0].trim().slice(0, 60);
+            }
+
+            if (planTitle.length > 100) {
+                planTitle = planTitle.slice(0, 100) + '...';
+            }
+
+            const summaryEls = Array.from(container.querySelectorAll('span.text-sm'));
+            const planSummary = summaryEls
+                .map(el => (el.textContent || '').trim())
+                .filter(text => text.length > 0 && text !== openText && text !== proceedText && text !== planTitle)
+                .join(' ');
+
+            const descEl = container.querySelector('.leading-relaxed.select-text');
+            let description = '';
+            const SKIP_TAGS = new Set(['PRE', 'CODE', 'STYLE', 'SCRIPT', 'BUTTON']);
+            const walkToText = (el) => {
+                const parts = [];
+                const walk = (node) => {
+                    if (node.nodeType === 3) {
+                        const t = node.textContent || '';
+                        if (t.trim()) parts.push(t.trim());
+                    } else if (node.nodeType === 1 && !SKIP_TAGS.has(node.tagName)) {
+                        for (const child of node.childNodes) walk(child);
+                    }
+                };
+                walk(el);
+                return parts.join(' ').slice(0, 500);
             };
-            walk(el);
-            return parts.join(' ').slice(0, 500);
-        };
-        if (descEl) {
-            description = walkToText(descEl);
-        } else {
-            const fullText = walkToText(container);
-            const strippedParts = [planTitle, openText, proceedText, planSummary].filter(Boolean);
-            description = strippedParts.reduce((t, s) => t.replace(s, ''), fullText).replace(/\\s+/g, ' ').trim();
-        }
+            if (descEl) {
+                description = walkToText(descEl);
+            } else {
+                const fullText = walkToText(container);
+                const strippedParts = [planTitle, openText, proceedText, planSummary].filter(Boolean);
+                description = strippedParts.reduce((t, s) => t.replace(s, ''), fullText).replace(/\\s+/g, ' ').trim();
+            }
 
-        return { openText, proceedText, planTitle, planSummary, description, openOnCard };
+            return { openText, proceedText, planTitle, planSummary, description, openOnCard };
+        } catch (e) {
+            return null;
+        }
     })()`,
 
     buildExtractPlanContentScript: (
