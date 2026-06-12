@@ -28,8 +28,19 @@ jest.mock('../../src/utils/logger', () => ({
 import { downloadTelegramVoice, transcribeVoice } from '../../src/utils/voiceHandler';
 
 describe('voiceHandler', () => {
+    let originalFallbackIps: string | undefined;
+
+    beforeAll(() => {
+        originalFallbackIps = process.env.TELEGRAM_FALLBACK_IPS;
+    });
+
     beforeEach(() => {
         jest.clearAllMocks();
+        delete process.env.TELEGRAM_FALLBACK_IPS;
+    });
+
+    afterAll(() => {
+        process.env.TELEGRAM_FALLBACK_IPS = originalFallbackIps;
     });
 
     describe('downloadTelegramVoice', () => {
