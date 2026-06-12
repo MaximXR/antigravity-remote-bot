@@ -139,11 +139,8 @@ function computeEchoHash(text: string): string {
     return createHash('sha256').update(normalizeForHash(text)).digest('hex').slice(0, 16);
 }
 
-/**
- * Compute a short hash for database seen messages, including metadata context.
- */
-function computeDbHash(chatTitle: string, text: string, index: number, timestamp: string): string {
-    const combined = `${chatTitle || ''}_${normalizeForHash(text)}_${index}_${timestamp || ''}`;
+function computeDbHash(chatTitle: string, text: string, index: number): string {
+    const combined = `${chatTitle || ''}_${normalizeForHash(text)}_${index}`;
     return createHash('sha256').update(combined).digest('hex').slice(0, 16);
 }
 
@@ -308,8 +305,7 @@ export class UserMessageDetector {
                 const dbHash = computeDbHash(
                     info.chatTitle || '',
                     info.text,
-                    info.index ?? 0,
-                    info.timestamp || ''
+                    info.index ?? 0
                 );
                 const preview = info.text.slice(0, 40);
 
@@ -326,6 +322,7 @@ export class UserMessageDetector {
                     logger.debug(`[UserMessageDetector] Detected revert/undo (index decreased from ${this.lastDetectedIndex} to ${currentIndex}). Priming state.`);
                     this.lastDetectedHash = dbHash;
                     this.lastDetectedIndex = currentIndex;
+                    this.seenHashes.clear();
                     this.addToSeenHashes(dbHash);
                     return;
                 }
