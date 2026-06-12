@@ -60,17 +60,21 @@ export async function handleApprovals(
 
         const cdp = (projectName ? bridge.pool.getConnected(projectName) : null) ?? getCurrentCdp(bridge);
         if (cdp && !promptDispatcher.isBusy(ch, cdp)) {
-            logger.info(`[ApprovalCallback] Starting passive monitoring for workspace ${projectName}`);
-            const mirrorPromise = mirrorResponseToTelegram(bridge, ch, cdp, `${actionLabel} action`, {
-                chatSessionService,
-                chatSessionRepo,
-                topicManager,
-                titleGenerator,
-                modelService,
-                modeService,
-                workspaceBindingRepo
-            });
-            promptDispatcher.acquireLock(ch, cdp, mirrorPromise);
+            if (await cdp.queryIsGenerating()) {
+                logger.info(`[ApprovalCallback] Starting passive monitoring for workspace ${projectName}`);
+                const mirrorPromise = mirrorResponseToTelegram(bridge, ch, cdp, `${actionLabel} action`, {
+                    chatSessionService,
+                    chatSessionRepo,
+                    topicManager,
+                    titleGenerator,
+                    modelService,
+                    modeService,
+                    workspaceBindingRepo
+                });
+                promptDispatcher.acquireLock(ch, cdp, mirrorPromise);
+            } else {
+                logger.info(`[ApprovalCallback] IDE is not generating, skipping passive monitoring`);
+            }
         }
     } else {
         await ctx.answerCallbackQuery({ text: 'Button not found in IDE. Use /allow or /deny to retry.' });

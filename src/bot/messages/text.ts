@@ -96,17 +96,21 @@ export async function handleTextMessage(
             
             const cdp = (projectName ? bridge.pool.getConnected(projectName) : null) ?? getCurrentCdp(bridge);
             if (cdp && !promptDispatcher.isBusy(ch, cdp)) {
-                logger.info(`[QuestionTextInput] Starting passive monitoring for workspace ${projectName}`);
-                const mirrorPromise = mirrorResponseToTelegram(bridge, ch, cdp, `Custom answer text submission`, {
-                    chatSessionService,
-                    chatSessionRepo,
-                    topicManager,
-                    titleGenerator,
-                    modelService,
-                    modeService,
-                    workspaceBindingRepo
-                });
-                promptDispatcher.acquireLock(ch, cdp, mirrorPromise);
+                if (await cdp.queryIsGenerating()) {
+                    logger.info(`[QuestionTextInput] Starting passive monitoring for workspace ${projectName}`);
+                    const mirrorPromise = mirrorResponseToTelegram(bridge, ch, cdp, `Custom answer text submission`, {
+                        chatSessionService,
+                        chatSessionRepo,
+                        topicManager,
+                        titleGenerator,
+                        modelService,
+                        modeService,
+                        workspaceBindingRepo
+                    });
+                    promptDispatcher.acquireLock(ch, cdp, mirrorPromise);
+                } else {
+                    logger.info(`[QuestionTextInput] IDE is not generating, skipping passive monitoring`);
+                }
             }
         } else {
             await ctx.reply('Не удалось отправить ответ. Пожалуйста, проверьте IDE.');

@@ -52,17 +52,21 @@ export async function handleQuestions(
 
             const cdp = (projectName ? bridge.pool.getConnected(projectName) : null) ?? getCurrentCdp(bridge);
             if (cdp && !promptDispatcher.isBusy(ch, cdp)) {
-                logger.info(`[QuestionCallback] Starting passive monitoring for workspace ${projectName}`);
-                const mirrorPromise = mirrorResponseToTelegram(bridge, ch, cdp, 'Skip action', {
-                    chatSessionService,
-                    chatSessionRepo,
-                    topicManager,
-                    titleGenerator,
-                    modelService,
-                    modeService,
-                    workspaceBindingRepo
-                });
-                promptDispatcher.acquireLock(ch, cdp, mirrorPromise);
+                if (await cdp.queryIsGenerating()) {
+                    logger.info(`[QuestionCallback] Starting passive monitoring for workspace ${projectName}`);
+                    const mirrorPromise = mirrorResponseToTelegram(bridge, ch, cdp, 'Skip action', {
+                        chatSessionService,
+                        chatSessionRepo,
+                        topicManager,
+                        titleGenerator,
+                        modelService,
+                        modeService,
+                        workspaceBindingRepo
+                    });
+                    promptDispatcher.acquireLock(ch, cdp, mirrorPromise);
+                } else {
+                    logger.info(`[QuestionCallback] IDE is not generating, skipping passive monitoring`);
+                }
             }
         } else {
             await ctx.answerCallbackQuery({ text: 'Skip button not found in IDE.' });
@@ -95,17 +99,21 @@ export async function handleQuestions(
 
                     const cdp = (projectName ? bridge.pool.getConnected(projectName) : null) ?? getCurrentCdp(bridge);
                     if (cdp && !promptDispatcher.isBusy(ch, cdp)) {
-                        logger.info(`[QuestionCallback] Starting passive monitoring for workspace ${projectName}`);
-                        const mirrorPromise = mirrorResponseToTelegram(bridge, ch, cdp, `Option ${optionIndex + 1} selection`, {
-                            chatSessionService,
-                            chatSessionRepo,
-                            topicManager,
-                            titleGenerator,
-                            modelService,
-                            modeService,
-                            workspaceBindingRepo
-                        });
-                        promptDispatcher.acquireLock(ch, cdp, mirrorPromise);
+                        if (await cdp.queryIsGenerating()) {
+                            logger.info(`[QuestionCallback] Starting passive monitoring for workspace ${projectName}`);
+                            const mirrorPromise = mirrorResponseToTelegram(bridge, ch, cdp, `Option ${optionIndex + 1} selection`, {
+                                chatSessionService,
+                                chatSessionRepo,
+                                topicManager,
+                                titleGenerator,
+                                modelService,
+                                modeService,
+                                workspaceBindingRepo
+                            });
+                            promptDispatcher.acquireLock(ch, cdp, mirrorPromise);
+                        } else {
+                            logger.info(`[QuestionCallback] IDE is not generating, skipping passive monitoring`);
+                        }
                     }
                 } else {
                     await ctx.answerCallbackQuery({ text: 'Failed to click Submit button in IDE.' });

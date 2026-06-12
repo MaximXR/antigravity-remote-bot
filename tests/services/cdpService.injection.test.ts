@@ -219,4 +219,32 @@ describe('CdpService - Message Injection (Step 5)', () => {
         // Call without connecting
         await expect(service.injectMessage('test')).rejects.toThrow();
     });
+
+    // ---------------------------------------------------------
+    // Test 6: queryIsGenerating returns correct boolean based on IDE state
+    // ---------------------------------------------------------
+    it('returns true when IDE is generating, false otherwise', async () => {
+        await service.connect();
+        await new Promise(r => setTimeout(r, 100));
+
+        let expectedGeneratingVal = true;
+        evaluateResponder = (req) => {
+            if (req.params.expression.includes('input-send-button-cancel-tooltip') || req.params.expression.includes('STOP_PATTERNS')) {
+                return expectedGeneratingVal as any;
+            }
+            return { ok: false, error: 'Unknown evaluation' } as any;
+        };
+
+        const resultTrue = await service.queryIsGenerating();
+        expect(resultTrue).toBe(true);
+
+        expectedGeneratingVal = false;
+        const resultFalse = await service.queryIsGenerating();
+        expect(resultFalse).toBe(false);
+    });
+
+    it('returns false for queryIsGenerating when not connected', async () => {
+        const result = await service.queryIsGenerating();
+        expect(result).toBe(false);
+    });
 });

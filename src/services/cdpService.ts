@@ -110,6 +110,56 @@ export class CdpService extends EventEmitter {
         return this.isGeneratingResponse;
     }
 
+    /**
+     * Query the IDE to check if it is actively generating a response (Stop button visible).
+     */
+    async queryIsGenerating(): Promise<boolean> {
+        if (!this.isConnectedFlag) return false;
+
+        const expression = `(() => {
+            const panel = document.querySelector('.antigravity-agent-side-panel');
+            const scopes = [panel, document].filter(Boolean);
+            const isVisible = (el) => el && el.offsetParent !== null;
+
+            let isGenerating = false;
+            for (const scope of scopes) {
+                const el = scope.querySelector('[data-tooltip-id="input-send-button-cancel-tooltip"]');
+                if (isVisible(el)) { isGenerating = true; break; }
+            }
+            if (!isGenerating) {
+                const normalize = (value) => (value || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+                const STOP_PATTERNS = [/^stop$/, /^stop generating$/, /^stop response$/, /^停止$/, /^生成を停止$/, /^応答を停止$/];
+                const isStopLabel = (value) => { const n = normalize(value); return n ? STOP_PATTERNS.some((re) => re.test(n)) : false; };
+                outer: for (const scope of scopes) {
+                    const buttons = scope.querySelectorAll('button, [role="button"]');
+                    for (let i = 0; i < buttons.length; i++) {
+                        const btn = buttons[i];
+                        if (isVisible(btn) && [btn.textContent || '', btn.getAttribute('aria-label') || '', btn.getAttribute('title') || ''].some(isStopLabel)) {
+                            isGenerating = true; break outer;
+                        }
+                    }
+                }
+            }
+            return isGenerating;
+        })()`;
+
+        try {
+            const contextId = this.getPrimaryContextId();
+            const evalParams: any = {
+                expression,
+                returnByValue: true
+            };
+            if (contextId !== null) {
+                evalParams.contextId = contextId;
+            }
+            const res = await this.call('Runtime.evaluate', evalParams);
+            return !!res?.result?.value;
+        } catch (err) {
+            logger.warn('[CdpService] queryIsGenerating failed:', err);
+            return false;
+        }
+    }
+
     private async getJson(url: string): Promise<any[]> {
         return new Promise((resolve, reject) => {
             const req = http.get(url, (res) => {

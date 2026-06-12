@@ -232,17 +232,21 @@ export async function handleQueue(
                     }
                     
                     if (!promptDispatcher.isBusy(ch, cdp)) {
-                        logger.info(`[ChoicesCallback] Starting passive monitoring for workspace ${projectName}`);
-                        const mirrorPromise = mirrorResponseToTelegram(bridge, ch, cdp, `Choice "${choiceText}"`, {
-                            chatSessionService,
-                            chatSessionRepo,
-                            topicManager,
-                            titleGenerator,
-                            modelService,
-                            modeService,
-                            workspaceBindingRepo
-                        });
-                        promptDispatcher.acquireLock(ch, cdp, mirrorPromise);
+                        if (await cdp.queryIsGenerating()) {
+                            logger.info(`[ChoicesCallback] Starting passive monitoring for workspace ${projectName}`);
+                            const mirrorPromise = mirrorResponseToTelegram(bridge, ch, cdp, `Choice "${choiceText}"`, {
+                                chatSessionService,
+                                chatSessionRepo,
+                                topicManager,
+                                titleGenerator,
+                                modelService,
+                                modeService,
+                                workspaceBindingRepo
+                            });
+                            promptDispatcher.acquireLock(ch, cdp, mirrorPromise);
+                        } else {
+                            logger.info(`[ChoicesCallback] IDE is not generating, skipping passive monitoring`);
+                        }
                     }
                 } else {
                     await ctx.answerCallbackQuery({ text: 'Option not found in IDE. Please try again.' });
