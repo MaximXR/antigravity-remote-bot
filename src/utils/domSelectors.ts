@@ -132,7 +132,8 @@ export const PLANNING_SELECTORS = {
 
         const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
 
-        const allContainers = Array.from(document.querySelectorAll('.notify-user-container'));
+        const allContainers = Array.from(document.querySelectorAll('.notify-user-container'))
+            .filter(el => !el.closest('[aria-label="Message history"]'));
         const newContainers = allContainers.slice(BASELINE_NOTIFY);
         let container = newContainers.length > 0 ? newContainers[newContainers.length - 1] : null;
         let openBtn = null;
@@ -162,7 +163,7 @@ export const PLANNING_SELECTORS = {
         if (!openBtn || !container) {
             const chipSelector = 'div.artifact-card, div[class*="artifact-card"], div[class*="border-gray-500"][class*="select-none"]';
             const allCards = Array.from(document.body.querySelectorAll(chipSelector))
-                .filter(el => el.offsetParent !== null);
+                .filter(el => el.offsetParent !== null && !el.closest('[aria-label="Message history"]'));
             const newCards = allCards.slice(BASELINE_CARD);
 
             for (let i = newCards.length - 1; i >= 0; i--) {
@@ -246,7 +247,7 @@ export const PLANNING_SELECTORS = {
 
             if (!openBtn) {
                 const allIconEls = Array.from(document.querySelectorAll('[class*="implementation-plan-icon"]'))
-                    .filter(el => el.offsetParent !== null);
+                    .filter(el => el.offsetParent !== null && !el.closest('[aria-label="Message history"]'));
                 const newIconEls = allIconEls.slice(BASELINE_ICON);
 
                 for (let k = newIconEls.length - 1; k >= 0; k--) {
@@ -381,7 +382,8 @@ export const PLANNING_SELECTORS = {
             return parts.join('').replace(/\\n{3,}/g, '\\n\\n').trim();
         };
 
-        const allContainers = Array.from(document.querySelectorAll('.notify-user-container'));
+        const allContainers = Array.from(document.querySelectorAll('.notify-user-container'))
+            .filter(el => !el.closest('[aria-label="Message history"]'));
         const newContainers = allContainers.slice(BASELINE_NOTIFY);
 
         for (let i = newContainers.length - 1; i >= 0; i--) {
@@ -399,7 +401,8 @@ export const PLANNING_SELECTORS = {
         }
 
         const chipSelector = 'div.artifact-card, div[class*="artifact-card"], div[class*="border-gray-500"][class*="select-none"]';
-        const allCards = Array.from(document.body.querySelectorAll(chipSelector));
+        const allCards = Array.from(document.body.querySelectorAll(chipSelector))
+            .filter(el => !el.closest('[aria-label="Message history"]'));
         const newCards = allCards.slice(BASELINE_CARD);
         for (let i = newCards.length - 1; i >= 0; i--) {
             const card = newCards[i];
@@ -410,7 +413,8 @@ export const PLANNING_SELECTORS = {
             }
         }
 
-        const allContentDivs = Array.from(document.querySelectorAll('div.relative.pl-4.pr-4.py-1, div.relative.pl-4.pr-4'));
+        const allContentDivs = Array.from(document.querySelectorAll('div.relative.pl-4.pr-4.py-1, div.relative.pl-4.pr-4'))
+            .filter(el => !el.closest('[aria-label="Message history"]'));
         const newContentDivs = allContentDivs.slice(Math.max(BASELINE_NOTIFY, 0));
         for (let i = newContentDivs.length - 1; i >= 0; i--) {
             const textEl = newContentDivs[i].querySelector('.leading-relaxed.select-text');
@@ -447,7 +451,7 @@ export const APPROVAL_SELECTORS = {
 
             const isExcluded = (el) => {
                 if (!el) return true;
-                return !!el.closest('.statusbar, [class*="statusbar"], .titlebar, [class*="titlebar"], .activitybar, [class*="activitybar"]');
+                return !!el.closest('.statusbar, [class*="statusbar"], .titlebar, [class*="titlebar"], .activitybar, [class*="activitybar"], [aria-label="Message history"]');
             };
 
             const matchPattern = (text, pattern) => {
