@@ -60,6 +60,21 @@ function buildCustomIdWithLimit(
     return channelPart ? `${prefix}:${safeProjectName}${channelPart}` : `${prefix}:${safeProjectName}`;
 }
 
+function formatApprovalDescription(desc: string): string {
+    const prefix = 'Review changes in:';
+    if (desc.startsWith(prefix)) {
+        const filesPart = desc.substring(prefix.length).trim();
+        if (filesPart) {
+            const files = filesPart.split(',').map(f => f.trim()).filter(Boolean);
+            if (files.length > 0) {
+                const formattedFiles = files.map(f => `  • <code>${escapeHtml(f)}</code>`).join('\n');
+                return `${escapeHtml(prefix)}\n${formattedFiles}`;
+            }
+        }
+    }
+    return escapeHtml(desc);
+}
+
 export function cleanLabel(label: string): string {
     if (!label) return '';
     let cleaned = label.replace(/[⌃⌥⇧⏎⌘⌫\u2318\u2325\u21B5\u232b]+/g, '').trim();
@@ -341,7 +356,7 @@ export async function flushDeferredApproval(
         const targetChannelStr = targetChannel.threadId ? String(targetChannel.threadId) : String(targetChannel.chatId);
         
         let text = `🔔 <b>Approval Required</b>\n\n`;
-        if (info.description) text += `${escapeHtml(info.description)}\n\n`;
+        if (info.description) text += `${formatApprovalDescription(info.description)}\n\n`;
         text += `<b>Approve:</b> ${escapeHtml(info.approveText)}\n`;
         if (info.alwaysAllowText) text += `<b>Always:</b> ${escapeHtml(info.alwaysAllowText)}\n`;
         text += `<b>Deny:</b> ${escapeHtml(info.denyText || '(None)')}\n`;
@@ -540,7 +555,7 @@ export function ensureApprovalDetector(
             }
 
             let text = `🔔 <b>Approval Required</b>\n\n`;
-            if (info.description) text += `${escapeHtml(info.description)}\n\n`;
+            if (info.description) text += `${formatApprovalDescription(info.description)}\n\n`;
             text += `<b>Approve:</b> ${escapeHtml(info.approveText)}\n`;
             if (info.alwaysAllowText) text += `<b>Always:</b> ${escapeHtml(info.alwaysAllowText)}\n`;
             text += `<b>Deny:</b> ${escapeHtml(info.denyText || '(None)')}\n`;
