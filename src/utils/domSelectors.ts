@@ -452,8 +452,7 @@ export const APPROVAL_SELECTORS = {
             return text.includes(pattern);
         };
 
-        const panel = document.querySelector('${CORE_SELECTORS.SIDE_PANEL}');
-        const scope = panel || document;
+        const scope = document;
 
         const submitBtn = Array.from(scope.querySelectorAll('button')).find(btn => {
             if (!isVisible(btn)) return false;
