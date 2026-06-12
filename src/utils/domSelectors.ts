@@ -442,6 +442,11 @@ export const APPROVAL_SELECTORS = {
                 return style.display !== 'none' && style.visibility !== 'hidden';
             };
 
+            const isExcluded = (el) => {
+                if (!el) return true;
+                return !!el.closest('.statusbar, [class*="statusbar"], .titlebar, [class*="titlebar"], .activitybar, [class*="activitybar"]');
+            };
+
             const matchPattern = (text, pattern) => {
                 if (!text || !pattern) return false;
                 if (/^[a-z]+$/i.test(pattern)) {
@@ -457,6 +462,7 @@ export const APPROVAL_SELECTORS = {
 
             const submitBtn = Array.from(scope.querySelectorAll('button')).find(btn => {
                 if (!isVisible(btn)) return false;
+                if (isExcluded(btn)) return false;
                 const t = normalize(btn.textContent || '');
                 return t === 'submit' || t.startsWith('submit');
             });
@@ -466,6 +472,7 @@ export const APPROVAL_SELECTORS = {
                 const options = Array.from(container.querySelectorAll('label, button, [role="button"], .cursor-pointer'))
                     .filter(el => {
                         if (!isVisible(el)) return false;
+                        if (isExcluded(el)) return false;
                         const text = (el.textContent || '').trim();
                         return text.length > 0 && text.length < 80;
                     });
@@ -547,6 +554,7 @@ export const APPROVAL_SELECTORS = {
                 .filter(el => {
                     const text = (el.textContent || '').trim();
                     if (text.length === 0 || text.length > 50) return false;
+                    if (isExcluded(el)) return false;
                     return isVisible(el);
                 });
 
