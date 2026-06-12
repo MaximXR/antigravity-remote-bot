@@ -42,7 +42,7 @@ function isUiChromeLine(line: string): boolean {
     return false;
 }
 
-const FILE_REF_REGEX = /(?<![`/\\])(\b[a-zA-Z][\w.-]*(?:\/[\w.-]+)+(?::\d+(?:-\d+)?)?)\s?(?!`)/g;
+const FILE_REF_REGEX = /(?<![`/\\])(\b[a-zA-Z][\w.-]*(?:\/[\w.-]+)+(?::\d+(?:-\d+)?)?)(?!`)/g;
 
 /**
  * Escape special HTML characters for Telegram HTML parse mode.

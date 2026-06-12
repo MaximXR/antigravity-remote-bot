@@ -40,6 +40,7 @@ import {
     ensureErrorPopupDetector,
     ensurePlanningDetector,
     ensureUserMessageDetector,
+    ensureQuestionDetector,
     getCurrentCdp,
     initCdpBridge,
     registerApprovalSessionChannel,
@@ -358,6 +359,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         ensureApprovalDetector(bridge, cdp, projectName);
         ensureErrorPopupDetector(bridge, cdp, projectName);
         ensurePlanningDetector(bridge, cdp, projectName);
+        ensureQuestionDetector(bridge, cdp, projectName);
 
         const onUserMessageCallback = (info: any): boolean => {
             const conf = loadConfig();
@@ -688,6 +690,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                                                 const content = fs.readFileSync(cdpInfo.workspacePath, 'utf8');
                                                 const parsed = JSON.parse(content);
                                                 if (parsed.folders && Array.isArray(parsed.folders) && parsed.folders.length > 0) {
+                                                    const baseDir = path.dirname(cdpInfo.workspacePath);
                                                     const folderNames = parsed.folders.map((f: any) => {
                                                         const p = f.path || f.uri || '';
                                                         let clean = p.trim();
@@ -696,6 +699,9 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                                                         }
                                                         clean = decodeURIComponent(clean);
                                                         clean = clean.replace(/^\/([a-zA-Z]):/, '$1:');
+                                                        if (!path.isAbsolute(clean) && !/^[a-zA-Z]:/.test(clean)) {
+                                                            clean = path.resolve(baseDir, clean);
+                                                        }
                                                         return path.basename(clean.replace(/\//g, '\\'));
                                                     }).filter(Boolean);
 
@@ -801,6 +807,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     const content = fs.readFileSync(workspacePath, 'utf8');
                     const parsed = JSON.parse(content);
                     if (parsed.folders && Array.isArray(parsed.folders) && parsed.folders.length > 0) {
+                        const baseDir = path.dirname(workspacePath);
                         const folderNames = parsed.folders.map((f: any) => {
                             const p = f.path || f.uri || '';
                             let clean = p.trim();
@@ -809,6 +816,9 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             }
                             clean = decodeURIComponent(clean);
                             clean = clean.replace(/^\/([a-zA-Z]):/, '$1:');
+                            if (!path.isAbsolute(clean) && !/^[a-zA-Z]:/.test(clean)) {
+                                clean = path.resolve(baseDir, clean);
+                            }
                             return path.basename(clean.replace(/\//g, '\\'));
                         }).filter(Boolean);
 

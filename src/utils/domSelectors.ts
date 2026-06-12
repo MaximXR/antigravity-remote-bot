@@ -940,6 +940,11 @@ export const RESPONSE_SELECTORS = {
             if (el.closest('[class*="feedback"]') || el.closest('footer')) return true;
             if (el.closest('[class*="metadata"]') || el.closest('[class*="metrics"]')) return true;
             
+            // Exclude workspace file/folder links and draggable VS Code resource elements
+            if (el.getAttribute('draggable') === 'true') return true;
+            if (el.tagName === 'A' || el.closest('a')) return true;
+            if (el.querySelector('img[src*="icon"], img[src*="file"], img[src*="document"], img[src*="symbols"]')) return true;
+            
             const normalized = text.toLowerCase().trim()
                 .replace(/([a-z])(\d)/g, '$1 $2')
                 .replace(/(\d)([a-z])/g, '$1 $2')
@@ -947,9 +952,10 @@ export const RESPONSE_SELECTORS = {
 
             if (/^(?:explored|explore|exploring|thought|thinking|run|running|ran|npm|npx|git|python|tsc|test|testing|search|searching|artifact|task|tasks|status|scan|scanning|inspect|inspecting|read|reading|write|writing|resolve|resolving|execute|executing|analyze|analyzing|install|installing|build|building|compile|compiling)\b/i.test(normalized)) return true;
             if (/\b(?:seconds|credits|worked for|gemini|claude)\b/i.test(normalized)) return true;
-            if (normalized === 'отменить' || normalized === 'остановить' || normalized === 'cancel') return true;
+            if (/отменить|остановить|cancel/i.test(normalized)) return true;
             if (/^[+-]\d+\s+[+-]\d+$/.test(normalized)) return true;
             if (/\.[a-z0-9]{1,4}$/i.test(normalized)) return true;
+            if (normalized.includes('/') || normalized.includes('\\')) return true;
             
             return false;
         };
@@ -1533,6 +1539,236 @@ export const ERROR_POPUP_SELECTORS = {
             return text || null;
         } catch (e) {
             return null;
+        }
+    })()`,
+};
+
+// Interactive Question Selectors
+export const QUESTION_SELECTORS = {
+    DETECT_QUESTION_SCRIPT: `(() => {
+        try {
+            const submitBtn = Array.from(document.querySelectorAll('button'))
+                .find(btn => (btn.textContent || '').trim().toLowerCase() === 'submit');
+            if (!submitBtn) return null;
+
+            const card = submitBtn.closest('div[class*="rounded-"], div[class*="border"], [role="dialog"], .modal') 
+                || submitBtn.parentElement?.parentElement;
+            if (!card) return null;
+
+            const skipBtn = Array.from(card.querySelectorAll('button, span, a'))
+                .find(el => (el.textContent || '').trim().toLowerCase() === 'skip');
+            if (!skipBtn) return null;
+
+            // Find question title
+            const titleEl = card.querySelector('div[class*="title"], span[class*="title"], div[class*="header"], h1, h2, h3, h4');
+            let question = titleEl ? (titleEl.textContent || '').trim() : '';
+            if (!question) {
+                const firstDiv = card.querySelector('div');
+                if (firstDiv) question = (firstDiv.textContent || '').split('\\n')[0].trim();
+            }
+            if (!question) {
+                question = (card.textContent || '').trim().split('\\n')[0];
+            }
+            question = question.replace(/^\\s*[?？]\\s*/, '').trim();
+
+            // Find options (labels or interactive items)
+            const options = [];
+            const optionElements = Array.from(card.querySelectorAll('label, div[role="radio"], div[role="checkbox"], div[class*="option"], div[class*="choice"]'))
+                .filter(el => {
+                    const txt = (el.textContent || '').trim();
+                    return txt.length > 0 && txt.length < 200 
+                        && !txt.toLowerCase().includes('submit') 
+                        && !txt.toLowerCase().includes('skip')
+                        && txt !== question;
+                });
+
+            const seenTexts = new Set();
+            for (const el of optionElements) {
+                const txt = el.textContent.trim().replace(/^\\s*\\d+[\\s.)]*/, ''); // remove index
+                if (txt && !seenTexts.has(txt)) {
+                    seenTexts.add(txt);
+                    options.push(txt);
+                }
+            }
+
+            if (options.length === 0) {
+                const divs = Array.from(card.querySelectorAll('div'))
+                    .filter(d => d.children.length === 0 && d.textContent.trim().length > 0);
+                for (const d of divs) {
+                    const txt = d.textContent.trim().replace(/^\\s*\\d+[\\s.)]*/, '');
+                    if (txt.length > 0 && txt.length < 250 
+                        && !txt.toLowerCase().includes('submit') 
+                        && !txt.toLowerCase().includes('skip') 
+                        && !txt.includes(question)) {
+                        if (!seenTexts.has(txt)) {
+                            seenTexts.add(txt);
+                            options.push(txt);
+                        }
+                    }
+                }
+            }
+
+            const hasCheckboxes = card.querySelectorAll('input[type="checkbox"], [role="checkbox"]').length > 0;
+            const isMultiSelect = hasCheckboxes || (card.textContent || '').toLowerCase().includes('select all');
+            const key = \`\${question}::\${options.join('|')}::\${isMultiSelect}\`;
+
+            return { question, options, isMultiSelect, key };
+        } catch (e) {
+            return null;
+        }
+    })()`,
+
+    buildClickQuestionOptionScript: (optionIndex: number) => `(() => {
+        try {
+            const submitBtn = Array.from(document.querySelectorAll('button'))
+                .find(btn => (btn.textContent || '').trim().toLowerCase() === 'submit');
+            if (!submitBtn) return { ok: false, error: 'Submit button not found' };
+
+            const card = submitBtn.closest('div[class*="rounded-"], div[class*="border"], [role="dialog"], .modal') 
+                || submitBtn.parentElement?.parentElement;
+            if (!card) return { ok: false, error: 'Card not found' };
+
+            const optionElements = Array.from(card.querySelectorAll('label, div[role="radio"], div[role="checkbox"], div[class*="option"], div[class*="choice"]'))
+                .filter(el => {
+                    const txt = (el.textContent || '').trim();
+                    return txt.length > 0 && txt.length < 200 
+                        && !txt.toLowerCase().includes('submit') 
+                        && !txt.toLowerCase().includes('skip');
+                });
+
+            const seenTexts = new Set();
+            const cleanOptionElements = [];
+            for (const el of optionElements) {
+                const txt = el.textContent.trim().replace(/^\\s*\\d+[\\s.)]*/, '');
+                if (txt && !seenTexts.has(txt)) {
+                    seenTexts.add(txt);
+                    cleanOptionElements.push(el);
+                }
+            }
+
+            if (cleanOptionElements.length === 0) {
+                const divs = Array.from(card.querySelectorAll('div'))
+                    .filter(d => d.children.length === 0 && d.textContent.trim().length > 0);
+                for (const d of divs) {
+                    const txt = d.textContent.trim().replace(/^\\s*\\d+[\\s.)]*/, '');
+                    if (txt.length > 0 && txt.length < 250 
+                        && !txt.toLowerCase().includes('submit') 
+                        && !txt.toLowerCase().includes('skip')) {
+                        if (!seenTexts.has(txt)) {
+                            seenTexts.add(txt);
+                            cleanOptionElements.push(d);
+                        }
+                    }
+                }
+            }
+
+            const target = cleanOptionElements[${optionIndex}];
+            if (target && typeof target.click === 'function') {
+                target.click();
+                return { ok: true };
+            }
+            return { ok: false, error: 'Option element not found at index ' + ${optionIndex} };
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+    })()`,
+
+    buildSubmitQuestionTextScript: (optionIndex: number, text: string) => `(() => {
+        try {
+            const submitBtn = Array.from(document.querySelectorAll('button'))
+                .find(btn => (btn.textContent || '').trim().toLowerCase() === 'submit');
+            if (!submitBtn) return { ok: false, error: 'Submit button not found' };
+
+            const card = submitBtn.closest('div[class*="rounded-"], div[class*="border"], [role="dialog"], .modal') 
+                || submitBtn.parentElement?.parentElement;
+            if (!card) return { ok: false, error: 'Card not found' };
+
+            const optionElements = Array.from(card.querySelectorAll('label, div[role="radio"], div[role="checkbox"], div[class*="option"], div[class*="choice"]'))
+                .filter(el => {
+                    const txt = (el.textContent || '').trim();
+                    return txt.length > 0 && txt.length < 200 
+                        && !txt.toLowerCase().includes('submit') 
+                        && !txt.toLowerCase().includes('skip');
+                });
+
+            const seenTexts = new Set();
+            const cleanOptionElements = [];
+            for (const el of optionElements) {
+                const txt = el.textContent.trim().replace(/^\\s*\\d+[\\s.)]*/, '');
+                if (txt && !seenTexts.has(txt)) {
+                    seenTexts.add(txt);
+                    cleanOptionElements.push(el);
+                }
+            }
+
+            if (cleanOptionElements.length === 0) {
+                const divs = Array.from(card.querySelectorAll('div'))
+                    .filter(d => d.children.length === 0 && d.textContent.trim().length > 0);
+                for (const d of divs) {
+                    const txt = d.textContent.trim().replace(/^\\s*\\d+[\\s.)]*/, '');
+                    if (txt.length > 0 && txt.length < 250 
+                        && !txt.toLowerCase().includes('submit') 
+                        && !txt.toLowerCase().includes('skip')) {
+                        if (!seenTexts.has(txt)) {
+                            seenTexts.add(txt);
+                            cleanOptionElements.push(d);
+                        }
+                    }
+                }
+            }
+
+            const target = cleanOptionElements[${optionIndex}];
+            if (target && typeof target.click === 'function') {
+                target.click();
+            }
+
+            const inputEl = card.querySelector('textarea, input[type="text"]');
+            if (!inputEl) return { ok: false, error: 'Textarea or text input not found' };
+
+            inputEl.value = ${JSON.stringify(text)};
+            inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+            inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+
+            submitBtn.click();
+            return { ok: true };
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+    })()`,
+
+    SUBMIT_QUESTION_SCRIPT: `(() => {
+        try {
+            const submitBtn = Array.from(document.querySelectorAll('button'))
+                .find(btn => (btn.textContent || '').trim().toLowerCase() === 'submit');
+            if (submitBtn && typeof submitBtn.click === 'function') {
+                submitBtn.click();
+                return { ok: true };
+            }
+            return { ok: false, error: 'Submit button not found' };
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+    })()`,
+
+    SKIP_QUESTION_SCRIPT: `(() => {
+        try {
+            const submitBtn = Array.from(document.querySelectorAll('button'))
+                .find(btn => (btn.textContent || '').trim().toLowerCase() === 'submit');
+            if (!submitBtn) return { ok: false, error: 'Submit button not found' };
+
+            const card = submitBtn.closest('div[class*="rounded-"], div[class*="border"], [role="dialog"], .modal') 
+                || submitBtn.parentElement?.parentElement;
+            if (!card) return { ok: false, error: 'Card not found' };
+
+            const skipBtn = Array.from(card.querySelectorAll('button, span, a'))
+                .find(el => (el.textContent || '').trim().toLowerCase() === 'skip');
+            if (skipBtn && typeof skipBtn.click === 'function') {
+                skipBtn.click();
+                return { ok: true };
+            }
+            return { ok: false, error: 'Skip button not found' };
+        } catch (e) {
+            return { ok: false, error: e.message };
         }
     })()`,
 };

@@ -23,7 +23,7 @@ for %%p in (%SCANNED_PORTS%) do (
         tasklist /fi "pid eq !L_PID!" /nh | find /i "Antigravity" >nul
         if !errorlevel! equ 0 (
             echo [INFO] Antigravity IDE is already running and active on port %%p.
-            exit /b 0
+            goto :ide_running
         )
     )
 )
@@ -53,4 +53,7 @@ echo [INFO] Starting Antigravity IDE on port %LAUNCH_PORT%...
 powershell -NoProfile -Command "Start-Process -FilePath \"$env:USERPROFILE\AppData\Local\Programs\Antigravity IDE\Antigravity IDE.exe\" -ArgumentList '--remote-debugging-port=%LAUNCH_PORT%'"
 echo [OK] Antigravity IDE launched on port %LAUNCH_PORT%.
 timeout /t 3 >nul
+exit /b 0
+
+:ide_running
 exit /b 0

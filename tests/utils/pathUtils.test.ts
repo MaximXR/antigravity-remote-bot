@@ -1,4 +1,4 @@
-import { extractProjectNameFromPath, getAntigravityCdpHint } from '../../src/utils/pathUtils';
+import { extractProjectNameFromPath, getAntigravityCdpHint, isUntitledTitle, getWorkspaceDisplayPath } from '../../src/utils/pathUtils';
 
 // Helper to temporarily override process.platform
 function withPlatform(platform: string, fn: () => void): void {
@@ -81,6 +81,68 @@ describe('pathUtils', () => {
             withPlatform('darwin', () => {
                 expect(getAntigravityCdpHint(9333)).toContain('9333');
             });
+        });
+    });
+
+    describe('isUntitledTitle()', () => {
+        it('returns true for purely empty titles', () => {
+            expect(isUntitledTitle('')).toBe(true);
+            expect(isUntitledTitle(null as any)).toBe(true);
+        });
+
+        it('returns true for untitled/empty window titles', () => {
+            expect(isUntitledTitle('untitled')).toBe(true);
+            expect(isUntitledTitle('без названия')).toBe(true);
+            expect(isUntitledTitle('без имени')).toBe(true);
+            expect(isUntitledTitle('Unbenannt - Antigravity IDE')).toBe(true);
+        });
+
+        it('returns false for workspace/working area titles even if they contain untitled', () => {
+            expect(isUntitledTitle('(Рабочая область) без названия - Antigravity IDE')).toBe(false);
+            expect(isUntitledTitle('(Workspace) untitled - Antigravity IDE')).toBe(false);
+            expect(isUntitledTitle('робоча область без назви')).toBe(false);
+            expect(isUntitledTitle('ワークスペース 無題')).toBe(false);
+        });
+    });
+
+    describe('getWorkspaceDisplayPath()', () => {
+        const fs = require('fs');
+        const path = require('path');
+        const testWsJson = path.resolve(__dirname, 'temp_test_workspace.json');
+
+        afterEach(() => {
+            if (fs.existsSync(testWsJson)) {
+                fs.unlinkSync(testWsJson);
+            }
+        });
+
+        it('returns original path if not workspace.json', () => {
+            expect(getWorkspaceDisplayPath('/some/path/to/folder')).toBe('/some/path/to/folder');
+        });
+
+        it('resolves relative paths in workspace.json relative to its location', () => {
+            const workspaceDir = path.dirname(testWsJson);
+            const content = {
+                folders: [
+                    { path: '.' },
+                    { path: '..' },
+                    { path: 'some-subfolder' },
+                    { path: 'C:\\absolute\\path' }
+                ]
+            };
+            fs.writeFileSync(testWsJson, JSON.stringify(content));
+
+            const resolved = getWorkspaceDisplayPath(testWsJson);
+            
+            const expectedDot = workspaceDir.replace(/\//g, '\\');
+            const expectedParent = path.dirname(workspaceDir).replace(/\//g, '\\');
+            const expectedSub = path.resolve(workspaceDir, 'some-subfolder').replace(/\//g, '\\');
+            const expectedAbs = 'C:\\absolute\\path';
+
+            expect(resolved).toContain(expectedDot);
+            expect(resolved).toContain(expectedParent);
+            expect(resolved).toContain(expectedSub);
+            expect(resolved).toContain(expectedAbs);
         });
     });
 });

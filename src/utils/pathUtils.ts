@@ -167,6 +167,24 @@ export function isUntitledTitle(title: string): boolean {
     const normalized = title.toLowerCase().trim();
     if (normalized === '') return true;
 
+    const workspaceKeywords = [
+        'рабочая область',
+        'workspace',
+        'робоча область',
+        'arbeitsbereich',
+        'espace de travail',
+        'área de trabajo',
+        'espacio de trabajo',
+        'area di lavoro',
+        'ワークスペース',
+        '工作区',
+        '워크스페이스',
+        'espaço de trabalho'
+    ];
+    if (workspaceKeywords.some(keyword => normalized.includes(keyword))) {
+        return false;
+    }
+
     const untitledKeywords = [
         'untitled',
         'без названия',
@@ -198,6 +216,8 @@ export function getWorkspaceDisplayPath(workspacePath: string): string {
                 const content = fs.readFileSync(workspacePath, 'utf8');
                 const parsed = JSON.parse(content);
                 if (parsed.folders && Array.isArray(parsed.folders) && parsed.folders.length > 0) {
+                    const path = require('path');
+                    const baseDir = path.dirname(workspacePath);
                     const paths = parsed.folders.map((f: any) => {
                         const p = f.path || f.uri || '';
                         let clean = p.trim();
@@ -206,6 +226,9 @@ export function getWorkspaceDisplayPath(workspacePath: string): string {
                         }
                         clean = decodeURIComponent(clean);
                         clean = clean.replace(/^\/([a-zA-Z]):/, '$1:');
+                        if (!path.isAbsolute(clean) && !/^[a-zA-Z]:/.test(clean)) {
+                            clean = path.resolve(baseDir, clean);
+                        }
                         return clean.replace(/\//g, '\\');
                     }).filter(Boolean);
                     if (paths.length > 0) {

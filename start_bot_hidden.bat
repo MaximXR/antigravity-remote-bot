@@ -14,7 +14,9 @@ call "%~dp0stop_bot.bat"
 
 echo.
 echo [INFO] Starting Remoat Bot in background mode...
-powershell -NoProfile -WindowStyle Hidden -Command "Start-Process cmd.exe -ArgumentList '/c _start_bot_background.bat' -WindowStyle Hidden -WorkingDirectory '%~dp0'"
+set "WORK_DIR=%~dp0"
+if "%WORK_DIR:~-1%"=="\" set "WORK_DIR=%WORK_DIR:~0,-1%"
+powershell -NoProfile -WindowStyle Hidden -Command "Start-Process cmd.exe -ArgumentList '/c _start_bot_background.bat' -WindowStyle Hidden -WorkingDirectory '%WORK_DIR%'"
 exit
 
 

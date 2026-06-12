@@ -7,6 +7,7 @@ import { ApprovalDetector } from './approvalDetector';
 import { ErrorPopupDetector } from './errorPopupDetector';
 import { PlanningDetector } from './planningDetector';
 import { UserMessageDetector } from './userMessageDetector';
+import { QuestionDetector } from './questionDetector';
 
 /**
  * Pool that manages independent CdpService instances per workspace.
@@ -26,6 +27,7 @@ export class CdpConnectionPool extends EventEmitter {
     private readonly errorPopupDetectors = new Map<string, ErrorPopupDetector>();
     private readonly planningDetectors = new Map<string, PlanningDetector>();
     private readonly userMessageDetectors = new Map<string, UserMessageDetector>();
+    private readonly questionDetectors = new Map<string, QuestionDetector>();
     private readonly connectingPromises = new Map<string, Promise<CdpService>>();
     private readonly cdpOptions: CdpServiceOptions;
 
@@ -120,7 +122,7 @@ export class CdpConnectionPool extends EventEmitter {
 
 
     /**
-     * Pause Planning and ErrorPopup detectors during AI generation to reduce CPU load.
+     * Pause Planning, ErrorPopup and Question detectors during AI generation to reduce CPU load.
      */
     pauseDetectors(projectName: string): void {
         const planning = this.planningDetectors.get(projectName);
@@ -133,11 +135,16 @@ export class CdpConnectionPool extends EventEmitter {
             errorPopup.pause();
         }
 
-        logger.debug(`[CdpConnectionPool] Paused Planning and ErrorPopup detectors for "${projectName}"`);
+        const question = this.questionDetectors.get(projectName);
+        if (question) {
+            question.pause();
+        }
+
+        logger.debug(`[CdpConnectionPool] Paused Planning, ErrorPopup and Question detectors for "${projectName}"`);
     }
 
     /**
-     * Resume Planning and ErrorPopup detectors after AI generation finishes.
+     * Resume Planning, ErrorPopup and Question detectors after AI generation finishes.
      */
     resumeDetectors(projectName: string): void {
         const planning = this.planningDetectors.get(projectName);
@@ -150,7 +157,12 @@ export class CdpConnectionPool extends EventEmitter {
             errorPopup.resume();
         }
 
-        logger.debug(`[CdpConnectionPool] Resumed Planning and ErrorPopup detectors for "${projectName}"`);
+        const question = this.questionDetectors.get(projectName);
+        if (question) {
+            question.resume();
+        }
+
+        logger.debug(`[CdpConnectionPool] Resumed Planning, ErrorPopup and Question detectors for "${projectName}"`);
     }
 
     /**
@@ -187,6 +199,12 @@ export class CdpConnectionPool extends EventEmitter {
         if (userMsgDetector) {
             userMsgDetector.stop();
             this.userMessageDetectors.delete(projectName);
+        }
+
+        const questionDetector = this.questionDetectors.get(projectName);
+        if (questionDetector) {
+            questionDetector.stop();
+            this.questionDetectors.delete(projectName);
         }
     }
 
@@ -308,6 +326,31 @@ export class CdpConnectionPool extends EventEmitter {
      */
     getUserMessageDetector(projectName: string): UserMessageDetector | undefined {
         return this.userMessageDetectors.get(projectName);
+    }
+
+    /**
+     * Register a question detector for a workspace.
+     */
+    registerQuestionDetector(projectName: string, detector: QuestionDetector): void {
+        const existing = this.questionDetectors.get(projectName);
+        if (existing && existing.isActive()) {
+            existing.stop();
+        }
+        this.questionDetectors.set(projectName, detector);
+    }
+
+    /**
+     * Get the question detector for a workspace.
+     */
+    getQuestionDetector(projectName: string): QuestionDetector | undefined {
+        const exact = this.questionDetectors.get(projectName);
+        if (exact) return exact;
+        for (const [name, detector] of this.questionDetectors.entries()) {
+            if (name.startsWith(projectName) || projectName.startsWith(name)) {
+                return detector;
+            }
+        }
+        return undefined;
     }
 
     /**

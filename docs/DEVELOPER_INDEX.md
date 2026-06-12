@@ -12,8 +12,10 @@ Concept map and code reference guide for the Remoat codebase. Designed for devel
 | | [src/bot/botState.ts](file:///e:/Desktop/Remoat/src/bot/botState.ts) | Global bot caches, collections, and maps to avoid circular dependencies. |
 | | [src/bot/tgMirror.ts](file:///e:/Desktop/Remoat/src/bot/tgMirror.ts) | Decoupled logic for mirroring LLM progress, chunking HTML content, and delivering files/images to Telegram. |
 | | [src/bot/commands.ts](file:///e:/Desktop/Remoat/src/bot/commands.ts) | Handlers and registration for Telegram slash commands. |
-| | [src/bot/callbacks.ts](file:///e:/Desktop/Remoat/src/bot/callbacks.ts) | Handlers and registration for inline keyboard callback queries. |
-| | [src/bot/messageHandlers.ts](file:///e:/Desktop/Remoat/src/bot/messageHandlers.ts) | Handlers and registration for text, photo, document, and voice messages. |
+| | [src/bot/callbacks.ts](file:///e:/Desktop/Remoat/src/bot/callbacks.ts) | Thin entry router for inline keyboard callback queries. |
+| | [src/bot/callbacks/](file:///e:/Desktop/Remoat/src/bot/callbacks/) | Modularized handlers for callback actions (sessions, plans, templates, settings, etc.). |
+| | [src/bot/messageHandlers.ts](file:///e:/Desktop/Remoat/src/bot/messageHandlers.ts) | Thin entry router for text, photo, document, and voice messages. |
+| | [src/bot/messages/](file:///e:/Desktop/Remoat/src/bot/messages/) | Modularized handlers for message types (text, media, voice). |
 | | [src/bot/telegramAdapter.ts](file:///e:/Desktop/Remoat/src/bot/telegramAdapter.ts) | Telegram adapter implementation of IMessengerPort. |
 | | [src/bot/telegramTopicManager.ts](file:///e:/Desktop/Remoat/src/bot/telegramTopicManager.ts) | Manages Telegram forum topics and naming. |
 | **Command Parsers** | [src/commands/messageParser.ts](file:///e:/Desktop/Remoat/src/commands/messageParser.ts) | Identifies text-based commands and arguments. |
@@ -26,7 +28,7 @@ Concept map and code reference guide for the Remoat codebase. Designed for devel
 | **IDE Interaction Runner**| [src/services/idePromptRunner.ts](file:///e:/Desktop/Remoat/src/services/idePromptRunner.ts) | Decoupled core layer runner to execute prompts and monitor responses via CDP, independent of Telegram. |
 | **QuickPick Selector** | [src/services/quickPickResolver.ts](file:///e:/Desktop/Remoat/src/services/quickPickResolver.ts) | Dialog detection and resolution logic for active workspace QuickPick. |
 | **DOM Response Poller** | [src/services/responseMonitor.ts](file:///e:/Desktop/Remoat/src/services/responseMonitor.ts) | Polling loop (2s) extracting markdown text, thinking segments, and process logs. |
-| **GUI Action Detectors** | [src/services/cdpBridgeManager.ts](file:///e:/Desktop/Remoat/src/services/cdpBridgeManager.ts) | Spawns background detectors for approval dialogs, errors, planning mode, and echo messages. |
+| **GUI Action Detectors** | [src/services/questionDetector.ts](file:///e:/Desktop/Remoat/src/services/questionDetector.ts), [src/services/cdpBridgeManager.ts](file:///e:/Desktop/Remoat/src/services/cdpBridgeManager.ts) | Spawns background detectors for approval dialogs, errors, planning mode, interactive questions, and echo messages. |
 
 ---
 

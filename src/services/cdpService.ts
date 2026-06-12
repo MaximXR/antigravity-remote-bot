@@ -2,6 +2,7 @@ import { logger } from '../utils/logger';
 import { CDP_PORTS } from '../utils/cdpPorts';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
+import * as path from 'path';
 import * as http from 'http';
 import * as net from 'net';
 import { spawn } from 'child_process';
@@ -683,6 +684,7 @@ export class CdpService extends EventEmitter {
                             const content = fs.readFileSync(detectedPath, 'utf8');
                             const parsed = JSON.parse(content);
                             if (parsed.folders && Array.isArray(parsed.folders)) {
+                                const baseDir = path.dirname(detectedPath);
                                 const containsTarget = parsed.folders.some((f: any) => {
                                     const p = f.path || f.uri || '';
                                     let clean = p.trim();
@@ -691,6 +693,9 @@ export class CdpService extends EventEmitter {
                                     }
                                     clean = decodeURIComponent(clean);
                                     clean = clean.replace(/^\/([a-zA-Z]):/, '$1:');
+                                    if (!path.isAbsolute(clean) && !/^[a-zA-Z]:/.test(clean)) {
+                                        clean = path.resolve(baseDir, clean);
+                                    }
                                     const normFolder = clean.toLowerCase().replace(/\//g, '\\').trim();
                                     return normFolder === normTarget;
                                 });
@@ -904,13 +909,16 @@ export class CdpService extends EventEmitter {
 
             const configVal = configRes?.result?.value;
             if (configVal) {
-                const normalize = (p: string): string => {
+                const normalize = (p: string, baseDir?: string): string => {
                     let clean = p.trim();
                     if (clean.startsWith('file:')) {
                         clean = clean.replace(/^file:\/\/\/?/, '');
                     }
                     clean = decodeURIComponent(clean);
                     clean = clean.replace(/^\/([a-zA-Z]):/, '$1:');
+                    if (baseDir && !path.isAbsolute(clean) && !/^[a-zA-Z]:/.test(clean)) {
+                        clean = path.resolve(baseDir, clean);
+                    }
                     clean = clean.replace(/\//g, '\\').toLowerCase();
                     if (clean.endsWith('\\')) {
                         clean = clean.slice(0, -1);
@@ -938,10 +946,11 @@ export class CdpService extends EventEmitter {
                         const content = fs.readFileSync(wsJsonPath, 'utf8');
                         const parsed = JSON.parse(content);
                         if (parsed.folders && Array.isArray(parsed.folders)) {
+                            const baseDir = path.dirname(wsJsonPath);
                             for (const folder of parsed.folders) {
                                 const folderPath = folder.path || folder.uri;
                                 if (folderPath) {
-                                    const folderPathNorm = normalize(folderPath);
+                                    const folderPathNorm = normalize(folderPath, baseDir);
                                     if (folderPathNorm === targetNorm || folderPathNorm.startsWith(targetNorm + '\\') || targetNorm.startsWith(folderPathNorm + '\\')) {
                                         this.currentWorkspaceName = projectName;
                                         logger.debug(`[CdpService] Confirmed multi-folder workspace match via configuration: "${workspacePath}"`);

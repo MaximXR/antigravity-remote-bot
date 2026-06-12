@@ -10,6 +10,8 @@ import { PlanningDetector, PlanningInfo } from './planningDetector';
 import { QuotaService } from './quotaService';
 import { UserMessageDetector, UserMessageInfo } from './userMessageDetector';
 import { buildPlanNotificationUI } from '../ui/planUi';
+import { QuestionDetector, QuestionInfo } from './questionDetector';
+import { buildQuestionNotificationUI } from '../ui/questionUi';
 import { loadConfig } from '../utils/config';
 import { IMessengerPort, ChannelContext, AbstractButton } from './messengerPort';
 
@@ -224,6 +226,41 @@ export function parseErrorPopupCustomId(customId: string): { action: 'dismiss' |
             const [projectName, channelId] = rest.split(':');
             return { action, projectName: projectName || null, channelId: channelId || null };
         }
+    }
+    return null;
+}
+
+export function buildQuestionAnswerCustomId(
+    optionIndex: number,
+    projectName: string,
+    channelId?: string,
+): string {
+    const prefix = `q_ans:${optionIndex}`;
+    return buildCustomIdWithLimit(prefix, projectName, channelId);
+}
+
+export function buildQuestionSkipCustomId(
+    projectName: string,
+    channelId?: string,
+): string {
+    return buildCustomIdWithLimit('q_skp', projectName, channelId);
+}
+
+export function parseQuestionCustomId(customId: string): { action: 'answer' | 'skip'; optionIndex?: number; projectName: string | null; channelId: string | null } | null {
+    if (customId.startsWith('q_ans:')) {
+        const rest = customId.substring('q_ans:'.length);
+        const parts = rest.split(':');
+        const optionIndex = parseInt(parts[0], 10);
+        const projectName = parts[1] || null;
+        const channelId = parts[2] || null;
+        return { action: 'answer', optionIndex, projectName, channelId };
+    }
+    if (customId.startsWith('q_skp:')) {
+        const rest = customId.substring('q_skp:'.length);
+        const parts = rest.split(':');
+        const projectName = parts[0] || null;
+        const channelId = parts[1] || null;
+        return { action: 'skip', projectName, channelId };
     }
     return null;
 }
@@ -767,4 +804,86 @@ export function ensureUserMessageDetector(
     detector.start();
     bridge.pool.registerUserMessageDetector(projectName, detector);
     logger.debug(`[UserMessageDetector:${projectName}] Started`);
+}
+
+export function ensureQuestionDetector(
+    bridge: CdpBridge,
+    cdp: CdpService,
+    projectName: string,
+): void {
+    const existing = bridge.pool.getQuestionDetector(projectName);
+    if (existing && existing.isActive()) return;
+
+    let lastMessageId: number | null = null;
+    let lastMessageChatId: number | string | null = null;
+
+    const detector = new QuestionDetector({
+        cdpService: cdp,
+        pollIntervalMs: 2000,
+        onResolved: () => {
+            if (!lastMessageId || !lastMessageChatId || !bridge.messenger) return;
+            const msgId = lastMessageId;
+            const chatId = lastMessageChatId;
+            lastMessageId = null;
+            lastMessageChatId = null;
+            if (bridge.messenger.cleanMessageButtons) {
+                bridge.messenger.cleanMessageButtons({ chatId: Number(chatId) }, msgId)
+                    .catch((e) => logger.debug('[QuestionDetector] Markup remove failed (expected if already removed):', e));
+            }
+        },
+        onQuestionRequired: async (info: QuestionInfo) => {
+            logger.debug(`[QuestionDetector:${projectName}] Question detected: ${info.question}`);
+
+            const currentChatTitle = await getCurrentChatTitle(cdp);
+            const targetChannel = resolveApprovalChannelForCurrentChat(bridge, projectName, currentChatTitle);
+
+            if (!targetChannel || !bridge.messenger) return;
+
+            const targetChannelStr = targetChannel.threadId ? String(targetChannel.threadId) : String(targetChannel.chatId);
+
+            const { text, buttons } = buildQuestionNotificationUI(
+                info,
+                projectName,
+                targetChannelStr,
+                buildQuestionAnswerCustomId,
+                buildQuestionSkipCustomId,
+            );
+
+            const msgId = await bridge.messenger.sendMessage(targetChannel, text, buttons);
+            if (msgId) {
+                lastMessageId = msgId;
+                lastMessageChatId = targetChannel.chatId;
+            }
+        },
+    });
+
+    detector.start();
+
+    if ((cdp as any)._questionStartListener) {
+        cdp.removeListener('response-monitor:start', (cdp as any)._questionStartListener);
+    }
+    const startHandler = () => {
+        logger.debug(`[QuestionDetector:${projectName}] Pausing detector due to response-monitor:start`);
+        detector.pause();
+    };
+    (cdp as any)._questionStartListener = startHandler;
+    cdp.on('response-monitor:start', startHandler);
+
+    if ((cdp as any)._questionStopListener) {
+        cdp.removeListener('response-monitor:stop', (cdp as any)._questionStopListener);
+    }
+    const stopHandler = () => {
+        logger.debug(`[QuestionDetector:${projectName}] Resuming detector due to response-monitor:stop`);
+        detector.resume();
+    };
+    (cdp as any)._questionStopListener = stopHandler;
+    cdp.on('response-monitor:stop', stopHandler);
+
+    // By default, if currently generating, pause it
+    if (cdp.isCurrentlyGenerating()) {
+        detector.pause();
+    }
+
+    bridge.pool.registerQuestionDetector(projectName, detector);
+    logger.debug(`[QuestionDetector:${projectName}] Started`);
 }
