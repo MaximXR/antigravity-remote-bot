@@ -631,9 +631,25 @@ export const APPROVAL_SELECTORS = {
             const denyText = (denyBtn.textContent || '').trim();
 
             let description = '';
-            const dialog = container;
-            if (dialog) {
-                const descEl = dialog.querySelector('p, .description, [data-testid="description"]');
+            const card = approveBtn.closest('div[class*="justify-between"], div[class*="outline-solid"], div[class*="border"]');
+            if (card) {
+                const bdis = Array.from(card.querySelectorAll('bdi'))
+                    .map(el => (el.textContent || '').trim())
+                    .filter(Boolean);
+                if (bdis.length > 0) {
+                    description = 'Review changes in: ' + bdis.join(', ');
+                } else {
+                    const fileSpans = Array.from(card.querySelectorAll('span'))
+                        .map(el => (el.textContent || '').trim())
+                        .filter(t => t && t.includes('.') && !t.includes(' ') && t.length > 2 && t.length < 80);
+                    if (fileSpans.length > 0) {
+                        description = 'Review changes in: ' + fileSpans.join(', ');
+                    }
+                }
+            }
+
+            if (!description && container && container !== scope && container !== document.body) {
+                const descEl = container.querySelector('p, .description, [data-testid="description"]');
                 if (descEl) {
                     description = (descEl.textContent || '').trim();
                 }
