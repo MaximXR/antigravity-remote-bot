@@ -17,7 +17,10 @@ export interface CdpServiceOptions {
     maxReconnectAttempts?: number;
     /** Delay between reconnect attempts (ms). Default: 2000 */
     reconnectDelayMs?: number;
+    /** Callback to check if a WebSocket URL is already occupied by another active scanner connection */
+    isWebSocketUrlOccupied?: (url: string) => boolean;
 }
+
 
 export interface CdpContext {
     id: number;
@@ -81,6 +84,8 @@ export class CdpService extends EventEmitter {
     /** Timestamp of last pong received */
     private lastPongTime: number = 0;
     private isGeneratingResponse: boolean = false;
+    private isWebSocketUrlOccupied?: (url: string) => boolean;
+
 
     constructor(options: CdpServiceOptions = {}) {
         super();
@@ -88,6 +93,8 @@ export class CdpService extends EventEmitter {
         if (options.cdpCallTimeout) this.cdpCallTimeout = options.cdpCallTimeout;
         this.maxReconnectAttempts = options.maxReconnectAttempts ?? 3;
         this.reconnectDelayMs = options.reconnectDelayMs ?? 2000;
+        this.isWebSocketUrlOccupied = options.isWebSocketUrlOccupied;
+
 
         // Auto-track LLM response generation states
         this.on('response-monitor:start', () => {
@@ -139,6 +146,7 @@ export class CdpService extends EventEmitter {
         let target = allPages.find(t =>
             t.type === 'page' &&
             t.webSocketDebuggerUrl &&
+            !(this.isWebSocketUrlOccupied && this.isWebSocketUrlOccupied(t.webSocketDebuggerUrl)) &&
             !t.title?.includes('Launchpad') &&
             !t.url?.includes('workbench-jetski-agent') &&
             (t.url?.includes('workbench') || t.title?.includes('Antigravity') || t.title?.includes('Cascade'))
@@ -147,6 +155,7 @@ export class CdpService extends EventEmitter {
         if (!target) {
             target = allPages.find(t =>
                 t.webSocketDebuggerUrl &&
+                !(this.isWebSocketUrlOccupied && this.isWebSocketUrlOccupied(t.webSocketDebuggerUrl)) &&
                 (t.url?.includes('workbench') || t.title?.includes('Antigravity') || t.title?.includes('Cascade')) &&
                 !t.title?.includes('Launchpad')
             );
@@ -155,9 +164,11 @@ export class CdpService extends EventEmitter {
         if (!target) {
             target = allPages.find(t =>
                 t.webSocketDebuggerUrl &&
+                !(this.isWebSocketUrlOccupied && this.isWebSocketUrlOccupied(t.webSocketDebuggerUrl)) &&
                 (t.url?.includes('workbench') || t.title?.includes('Antigravity') || t.title?.includes('Cascade') || t.title?.includes('Launchpad'))
             );
         }
+
 
         if (target && target.webSocketDebuggerUrl) {
             this.targetUrl = target.webSocketDebuggerUrl;
@@ -554,6 +565,7 @@ export class CdpService extends EventEmitter {
             (t: any) =>
                 t.type === 'page' &&
                 t.webSocketDebuggerUrl &&
+                !(this.isWebSocketUrlOccupied && this.isWebSocketUrlOccupied(t.webSocketDebuggerUrl)) &&
                 !t.title?.includes('Launchpad') &&
                 !t.url?.includes('workbench-jetski-agent') &&
                 t.url?.includes('workbench'),
@@ -630,6 +642,11 @@ export class CdpService extends EventEmitter {
                 this.displayName = this.resolveDisplayName(cleanParsedName);
             }
             return true;
+        }
+
+        if (this.isWebSocketUrlOccupied && this.isWebSocketUrlOccupied(page.webSocketDebuggerUrl)) {
+            logger.warn(`[CdpService] Cannot connect to workspace "${projectName}": WebSocket URL "${page.webSocketDebuggerUrl}" is already occupied by another active scanner connection.`);
+            return false;
         }
 
         this.disconnectQuietly();
@@ -787,6 +804,7 @@ export class CdpService extends EventEmitter {
                     (t: any) =>
                         t.type === 'page' &&
                         t.webSocketDebuggerUrl &&
+                        !(this.isWebSocketUrlOccupied && this.isWebSocketUrlOccupied(t.webSocketDebuggerUrl)) &&
                         !t.title?.includes('Launchpad') &&
                         !t.url?.includes('workbench-jetski-agent') &&
                         t.url?.includes('workbench'),
@@ -1102,6 +1120,7 @@ export class CdpService extends EventEmitter {
                 (t: any) =>
                     t.type === 'page' &&
                     t.webSocketDebuggerUrl &&
+                    !(this.isWebSocketUrlOccupied && this.isWebSocketUrlOccupied(t.webSocketDebuggerUrl)) &&
                     !t.title?.includes('Launchpad') &&
                     !t.url?.includes('workbench-jetski-agent') &&
                     t.url?.includes('workbench'),

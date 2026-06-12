@@ -142,4 +142,60 @@ describe('CdpConnectionPool — bug fix coverage', () => {
             expect(eventHandlers['reconnectFailed']).toBeDefined();
         });
     });
+
+    describe('prevent duplicate connection to the same WebSocket URL', () => {
+        it('passes isWebSocketUrlOccupied callback that detects busy URLs', async () => {
+            let optionsPassedA: any = null;
+            let optionsPassedB: any = null;
+
+            const mockCdpA = {
+                isConnected: jest.fn().mockReturnValue(true),
+                getTargetUrl: jest.fn().mockReturnValue('ws://127.0.0.1:9222/devtools/page/abc'),
+                discoverAndConnectForWorkspace: jest.fn().mockResolvedValue(true),
+                on: jest.fn(),
+                disconnect: jest.fn().mockResolvedValue(undefined),
+            };
+
+            const mockCdpB = {
+                isConnected: jest.fn().mockReturnValue(true),
+                getTargetUrl: jest.fn().mockReturnValue('ws://127.0.0.1:9222/devtools/page/xyz'),
+                discoverAndConnectForWorkspace: jest.fn().mockResolvedValue(true),
+                on: jest.fn(),
+                disconnect: jest.fn().mockResolvedValue(undefined),
+            };
+
+            let callCount = 0;
+            (CdpService as jest.MockedClass<typeof CdpService>).mockImplementation((options) => {
+                callCount++;
+                if (callCount === 1) {
+                    optionsPassedA = options;
+                    return mockCdpA as any;
+                }
+                optionsPassedB = options;
+                return mockCdpB as any;
+            });
+
+            // Connect ProjectA
+            await pool.getOrConnect('/path/to/ProjectA');
+            // Connect ProjectB
+            await pool.getOrConnect('/path/to/ProjectB');
+
+            expect(optionsPassedA.isWebSocketUrlOccupied).toBeDefined();
+            expect(optionsPassedB.isWebSocketUrlOccupied).toBeDefined();
+
+            // Project A's callback: checks other connections. Project B is connected to xyz, Project A is abc.
+            // So for Project A, checking URL of Project B (xyz) should return true because B is connected.
+            expect(optionsPassedA.isWebSocketUrlOccupied('ws://127.0.0.1:9222/devtools/page/xyz')).toBe(true);
+
+            // Checking Project A's own URL (abc) for Project A should return false (allows self reconnection)
+            expect(optionsPassedA.isWebSocketUrlOccupied('ws://127.0.0.1:9222/devtools/page/abc')).toBe(false);
+
+            // Checking a totally unused URL should return false
+            expect(optionsPassedA.isWebSocketUrlOccupied('ws://127.0.0.1:9222/devtools/page/other')).toBe(false);
+
+            // Project B's callback: checking Project A's URL (abc) should return true because A is connected.
+            expect(optionsPassedB.isWebSocketUrlOccupied('ws://127.0.0.1:9222/devtools/page/abc')).toBe(true);
+        });
+    });
 });
+

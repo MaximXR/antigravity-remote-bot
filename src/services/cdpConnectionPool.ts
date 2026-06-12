@@ -390,7 +390,17 @@ export class CdpConnectionPool extends EventEmitter {
             this.connections.delete(projectName);
         }
 
-        const cdp = new CdpService(this.cdpOptions);
+        const cdp = new CdpService({
+            ...this.cdpOptions,
+            isWebSocketUrlOccupied: (url: string) => {
+                for (const [name, conn] of this.connections.entries()) {
+                    if (name !== projectName && conn.isConnected() && conn.getTargetUrl() === url) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        });
 
         // Auto-cleanup on disconnect
         cdp.on('disconnected', () => {
