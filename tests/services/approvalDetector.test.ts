@@ -10,7 +10,7 @@
  *   - Verify that scripts are executed with a specified contextId
  */
 
-import { ApprovalDetector, ApprovalDetectorOptions, ApprovalInfo } from '../../src/services/approvalDetector';
+import { ApprovalDetector, ApprovalDetectorOptions, ApprovalInfo, classifyApproval } from '../../src/services/approvalDetector';
 import { CdpService } from '../../src/services/cdpService';
 
 // Mock CdpService
@@ -476,5 +476,53 @@ describe('ApprovalDetector - approval button detection and remote execution', ()
         await jest.advanceTimersByTimeAsync(500);
 
         expect(onResolved).not.toHaveBeenCalled();
+    });
+
+    // ──────────────────────────────────────────────────────
+    // Test 15: classifyApproval correctly identifies localhost as url_access
+    // ──────────────────────────────────────────────────────
+    it('classifyApproval correctly identifies localhost as url_access', () => {
+        const info: ApprovalInfo = {
+            approveText: 'Always Allow',
+            denyText: 'Deny',
+            description: 'Agent needs permission to act on localhost',
+        };
+        expect(classifyApproval(info)).toBe('url_access');
+    });
+
+    // ──────────────────────────────────────────────────────
+    // Test 16: detect approval with fallback to Always Allow when no primary Allow button exists
+    // ──────────────────────────────────────────────────────
+    it('detects approval with fallback to Always Allow when no primary Allow button exists', async () => {
+        const onApprovalRequired = jest.fn();
+        const mockInfo = makeApprovalInfo({
+            approveText: 'Always Allow',
+            alwaysAllowText: '',
+            denyText: 'Deny',
+            description: 'Agent needs permission to act on localhost',
+        });
+
+        mockCdpService.call.mockResolvedValue({
+            result: { value: mockInfo }
+        });
+
+        detector = new ApprovalDetector({
+            cdpService: mockCdpService,
+            pollIntervalMs: 500,
+            onApprovalRequired,
+        });
+        detector.start();
+
+        await jest.advanceTimersByTimeAsync(500);
+
+        expect(onApprovalRequired).toHaveBeenCalledTimes(1);
+        expect(onApprovalRequired).toHaveBeenCalledWith(
+            expect.objectContaining({
+                approveText: 'Always Allow',
+                alwaysAllowText: '',
+                denyText: 'Deny',
+                description: 'Agent needs permission to act on localhost',
+            })
+        );
     });
 });

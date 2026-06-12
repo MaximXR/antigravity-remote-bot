@@ -75,7 +75,8 @@ export function classifyApproval(info: ApprovalInfo): ApprovalType {
         desc.includes('fetch website') ||
         desc.includes('url') ||
         desc.includes('http') ||
-        desc.includes('website')
+        desc.includes('website') ||
+        desc.includes('localhost')
     ) {
         return 'url_access';
     }

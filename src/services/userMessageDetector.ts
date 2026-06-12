@@ -163,6 +163,8 @@ export class UserMessageDetector {
     private lastDetectedHash: string | null = null;
     /** Chat title tracked during the last poll iteration */
     private lastChatTitle: string | null = null;
+    /** Message index tracked during the last poll iteration */
+    private lastDetectedIndex: number = 0;
     /** Set of echo hashes — messages sent by Remoat that should be ignored */
     private readonly echoHashes = new Set<string>();
     /** Set of all previously detected message hashes (defense-in-depth dedup) */
@@ -228,6 +230,7 @@ export class UserMessageDetector {
         this.isRunning = true;
         this.lastDetectedHash = null;
         this.lastChatTitle = null;
+        this.lastDetectedIndex = 0;
         this.seenHashes.clear();
         this.isPriming = true;
         // echoHashes are intentionally NOT cleared — they have their own 60s TTL
@@ -315,9 +318,21 @@ export class UserMessageDetector {
                     this.isPriming = false;
                 }
 
-                // Check in DB using the context-aware dbHash
+                const currentIndex = info.index ?? 0;
+
+                // Detect step revert/undo during normal operation
+                const isRevert = !wasPriming && currentIndex < this.lastDetectedIndex;
+                if (isRevert) {
+                    logger.debug(`[UserMessageDetector] Detected revert/undo (index decreased from ${this.lastDetectedIndex} to ${currentIndex}). Priming state.`);
+                    this.lastDetectedHash = dbHash;
+                    this.lastDetectedIndex = currentIndex;
+                    this.addToSeenHashes(dbHash);
+                    return;
+                }
+
+                // Check in DB using the context-aware dbHash (ONLY during startup/priming)
                 let alreadySeenInDb = false;
-                if (this.db) {
+                if (wasPriming && this.db) {
                     try {
                         const row = this.db.prepare('SELECT 1 FROM seen_user_messages WHERE message_hash = ?').get(dbHash);
                         if (row) {
@@ -330,6 +345,7 @@ export class UserMessageDetector {
 
                 if (alreadySeenInDb) {
                     this.lastDetectedHash = dbHash;
+                    this.lastDetectedIndex = currentIndex;
                     this.addToSeenHashes(dbHash);
                     if (wasPriming) {
                         logger.debug(`[UserMessageDetector] Primed with already seen message (in DB): "${preview}..."`);
@@ -342,6 +358,7 @@ export class UserMessageDetector {
                 // we check if active generation is running. If not, we still prime it to prevent
                 // mirroring old message history upon workspace connection.
                 if (wasPriming) {
+                    this.lastDetectedIndex = currentIndex;
                     const dbEmpty = this.isDbEmpty();
                     
                     let isGenerating = false;
@@ -357,6 +374,7 @@ export class UserMessageDetector {
 
                     if (dbEmpty || !isGenerating) {
                         this.lastDetectedHash = dbHash;
+                        this.lastDetectedIndex = currentIndex;
                         this.addToSeenHashes(dbHash);
                         if (this.db) {
                             try {
@@ -380,6 +398,7 @@ export class UserMessageDetector {
                 if (this.seenHashes.has(dbHash)) {
                     logger.debug(`[UserMessageDetector] seenHash hit, skipping: "${preview}..."`);
                     this.lastDetectedHash = dbHash;
+                    this.lastDetectedIndex = currentIndex;
                     return;
                 }
 
@@ -387,6 +406,7 @@ export class UserMessageDetector {
                 if (this.echoHashes.has(echoHash)) {
                     logger.debug(`[UserMessageDetector] Echo hash match, skipping: "${preview}..."`);
                     this.lastDetectedHash = dbHash;
+                    this.lastDetectedIndex = currentIndex;
                     this.addToSeenHashes(dbHash);
                     if (this.db) {
                         try {
@@ -403,6 +423,7 @@ export class UserMessageDetector {
                 const accepted = this.onUserMessage(info);
                 if (accepted !== false) {
                     this.lastDetectedHash = dbHash;
+                    this.lastDetectedIndex = currentIndex;
                     this.addToSeenHashes(dbHash);
                     if (this.db) {
                         try {

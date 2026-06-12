@@ -476,4 +476,114 @@ describe('UserMessageDetector', () => {
         expect(rows.map(r => r.message_hash)).toContain('fresh_hash');
         expect(rows.map(r => r.message_hash)).not.toContain('stale_hash');
     });
+
+    it('handles message revert/rollback gracefully without triggering callback and allows subsequent messages', async () => {
+        const onUserMessage = jest.fn();
+        let queryCount = 0;
+        mockCdpService.call.mockImplementation(async (method, params) => {
+            if (method === 'Runtime.evaluate') {
+                const expr = params?.expression;
+                if (typeof expr === 'string' && !expr.includes('STOP_BUTTON') && !expr.includes('isGenerating')) {
+                    queryCount++;
+                    if (queryCount === 1) {
+                        // priming: starts with message at index 1
+                        return { result: { value: { text: 'Hello', chatTitle: 'Agent', index: 1, timestamp: '10:00' } } };
+                    }
+                    if (queryCount === 2) {
+                        // message at index 2
+                        return { result: { value: { text: 'How are you', chatTitle: 'Agent', index: 2, timestamp: '10:01' } } };
+                    }
+                    if (queryCount === 3) {
+                        // revert/undo: steps decrease back to index 1 (text is 'Hello')
+                        return { result: { value: { text: 'Hello', chatTitle: 'Agent', index: 1, timestamp: '10:00' } } };
+                    }
+                    // user types the same message or a new message at index 2 again
+                    return { result: { value: { text: 'How are you', chatTitle: 'Agent', index: 2, timestamp: '10:02' } } };
+                }
+                return { result: { value: { isGenerating: false } } };
+            }
+            return { result: { value: null } };
+        });
+
+        const detector = new UserMessageDetector({
+            cdpService: mockCdpService,
+            pollIntervalMs: 100,
+            onUserMessage,
+        });
+
+        detector.start();
+
+        await tick(100); // 1. priming (index 1) - no callback
+        expect(onUserMessage).not.toHaveBeenCalled();
+
+        await tick(100); // 2. index 2 detected - fires callback
+        expect(onUserMessage).toHaveBeenCalledTimes(1);
+        expect(onUserMessage).toHaveBeenLastCalledWith(expect.objectContaining({ text: 'How are you', index: 2 }));
+
+        await tick(100); // 3. revert detected (index 2 -> index 1) - should NOT fire callback
+        expect(onUserMessage).toHaveBeenCalledTimes(1); // count remains 1
+
+        await tick(100); // 4. same/new message at index 2 again - fires callback because of index count and new timestamp/index state
+        expect(onUserMessage).toHaveBeenCalledTimes(2);
+        expect(onUserMessage).toHaveBeenLastCalledWith(expect.objectContaining({ text: 'How are you', index: 2 }));
+
+        await detector.stop();
+    });
+
+    it('restricts database lookup to priming phase', async () => {
+        const db = new Database(':memory:');
+        db.exec(`
+            CREATE TABLE seen_user_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_hash TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        `);
+
+        const onUserMessage = jest.fn();
+        let queryCount = 0;
+        mockCdpService.call.mockImplementation(async (method, params) => {
+            if (method === 'Runtime.evaluate') {
+                const expr = params?.expression;
+                if (typeof expr === 'string' && !expr.includes('STOP_BUTTON') && !expr.includes('isGenerating')) {
+                    queryCount++;
+                    if (queryCount === 1) {
+                        // priming: empty DOM
+                        return { result: { value: null } };
+                    }
+                    // normal poll: message at index 1
+                    return { result: { value: { text: 'Hello DB Test', chatTitle: 'Agent', index: 1, timestamp: '10:00' } } };
+                }
+                return { result: { value: { isGenerating: false } } };
+            }
+            return { result: { value: null } };
+        });
+
+        // Insert the hash of "Hello DB Test" into the DB.
+        // If the detector checked the DB during normal polling, it would skip it.
+        // But since it's normal polling, it shouldn't check DB and should trigger the callback.
+        const crypto = require('node:crypto');
+        const dbHash = crypto.createHash('sha256')
+            .update('Agent_Hello DB Test_1_10:00')
+            .digest('hex')
+            .slice(0, 16);
+        db.prepare('INSERT INTO seen_user_messages (message_hash) VALUES (?)').run(dbHash);
+
+        const detector = new UserMessageDetector({
+            cdpService: mockCdpService,
+            pollIntervalMs: 100,
+            onUserMessage,
+            db
+        });
+
+        detector.start();
+
+        await tick(100); // priming
+        expect(onUserMessage).not.toHaveBeenCalled();
+
+        await tick(100); // normal poll: should trigger callback even though hash is in DB
+        expect(onUserMessage).toHaveBeenCalledTimes(1);
+
+        await detector.stop();
+    });
 });
