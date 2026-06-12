@@ -22,6 +22,7 @@ import { buildSessionPickerUI } from '../ui/sessionPickerUi';
 import { RESPONSE_SELECTORS } from '../utils/domSelectors';
 import { getCurrentCdp } from '../services/cdpBridgeManager';
 import { channelKeyFromChannel } from '../services/workspaceResolver';
+import { getWorkspaceDisplayPath } from '../utils/pathUtils';
 
 import {
     CLEANUP_ARCHIVE_BTN,
@@ -287,7 +288,7 @@ export function registerCommands(bot: Bot, deps: CommandDependencies) {
             if (isEmp) {
                 text += `  <i>${t('Path unknown')}</i>\n\n`;
             } else {
-                text += `  <code>${escapeHtml(binding.workspacePath)}</code>\n\n`;
+                text += `  <code>${escapeHtml(getWorkspaceDisplayPath(binding.workspacePath))}</code>\n\n`;
             }
         } else {
             text += `<b>${t('Current Workspace (this chat)')}:</b> ⚪ ${t('None')}\n\n`;
@@ -327,7 +328,7 @@ export function registerCommands(bot: Bot, deps: CommandDependencies) {
             text += `<b>${t('Open IDE Windows')}:</b>\n`;
             for (const win of activeWindowsWithSessions) {
                 const isEmp = win.workspacePath && win.workspacePath.startsWith('empty-workspace:');
-                const pathStr = win.workspacePath && !isEmp ? `<code>${escapeHtml(win.workspacePath)}</code>` : `<i>${t('Path unknown')}</i>`;
+                const pathStr = win.workspacePath && !isEmp ? `<code>${escapeHtml(getWorkspaceDisplayPath(win.workspacePath))}</code>` : `<i>${t('Path unknown')}</i>`;
                 let sessionStr = '';
                 if (win.sessionInfo) {
                     sessionStr = `\n  Active Chat: 💬 <b>${escapeHtml(win.sessionInfo.title)}</b>`;
@@ -355,8 +356,12 @@ export function registerCommands(bot: Bot, deps: CommandDependencies) {
                 const shortId = `sw_${buttonCount++}`;
                 statusWindowPathCache.set(shortId, win.workspacePath);
 
-                // Add simple connect button
-                keyboard.text(`🔌 ${cleanName}`, `switch_window:${shortId}`).row();
+                // Add simple connect button with length limiting (max 42 chars)
+                let buttonText = `🔌 ${cleanName}`;
+                if (buttonText.length > 42) {
+                    buttonText = buttonText.slice(0, 39) + '...';
+                }
+                keyboard.text(buttonText, `switch_window:${shortId}`).row();
             }
         }
 

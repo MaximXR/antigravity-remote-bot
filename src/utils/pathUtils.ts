@@ -186,3 +186,38 @@ export function isUntitledTitle(title: string): boolean {
     return untitledKeywords.some(keyword => normalized.includes(keyword));
 }
 
+/**
+ * Resolves folder paths from a workspace.json file or returns the original path.
+ */
+export function getWorkspaceDisplayPath(workspacePath: string): string {
+    if (!workspacePath) return '';
+    if (workspacePath.endsWith('workspace.json')) {
+        try {
+            const fs = require('fs');
+            if (fs.existsSync(workspacePath)) {
+                const content = fs.readFileSync(workspacePath, 'utf8');
+                const parsed = JSON.parse(content);
+                if (parsed.folders && Array.isArray(parsed.folders) && parsed.folders.length > 0) {
+                    const paths = parsed.folders.map((f: any) => {
+                        const p = f.path || f.uri || '';
+                        let clean = p.trim();
+                        if (clean.startsWith('file:')) {
+                            clean = clean.replace(/^file:\/\/\/?/, '');
+                        }
+                        clean = decodeURIComponent(clean);
+                        clean = clean.replace(/^\/([a-zA-Z]):/, '$1:');
+                        return clean.replace(/\//g, '\\');
+                    }).filter(Boolean);
+                    if (paths.length > 0) {
+                        return paths.join(', ');
+                    }
+                }
+            }
+        } catch {
+            // ignore
+        }
+    }
+    return workspacePath;
+}
+
+

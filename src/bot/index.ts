@@ -30,7 +30,7 @@ import { ChatSessionService } from '../services/chatSessionService';
 import { ResponseMonitor } from '../services/responseMonitor';
 import { buildClickScript, RESPONSE_SELECTORS } from '../utils/domSelectors';
 import { ensureAntigravityRunning } from '../services/antigravityLauncher';
-import { getAntigravityCdpHint, isTitleMatch } from '../utils/pathUtils';
+import { getAntigravityCdpHint, isTitleMatch, getWorkspaceDisplayPath } from '../utils/pathUtils';
 import { CDP_PORTS } from '../utils/cdpPorts';
 import { AutoAcceptService, AutoAcceptSettings } from '../services/autoAcceptService';
 import { PromptDispatcher } from '../services/promptDispatcher';
@@ -673,7 +673,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                                             }).filter(Boolean);
 
                                             if (folderNames.length > 1) {
-                                                tempProjectName = `(Составная область) ${folderNames.join(' + ')}`;
+                                                tempProjectName = `🗂️ ${folderNames.join(' + ')}`;
                                             } else if (folderNames.length === 1) {
                                                 tempProjectName = folderNames[0];
                                             }
@@ -940,7 +940,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             if (isEmp) {
                 text += `  <i>${t('Path unknown')}</i>\n\n`;
             } else {
-                text += `  <code>${escapeHtml(binding.workspacePath)}</code>\n\n`;
+                text += `  <code>${escapeHtml(getWorkspaceDisplayPath(binding.workspacePath))}</code>\n\n`;
             }
         } else {
             text += `<b>${t('Current Workspace (this chat)')}:</b> ⚪ ${t('None')}\n\n`;
@@ -980,7 +980,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             text += `<b>${t('Open IDE Windows')}:</b>\n`;
             for (const win of activeWindowsWithSessions) {
                 const isEmp = win.workspacePath && win.workspacePath.startsWith('empty-workspace:');
-                const pathStr = win.workspacePath && !isEmp ? `<code>${escapeHtml(win.workspacePath)}</code>` : `<i>${t('Path unknown')}</i>`;
+                const pathStr = win.workspacePath && !isEmp ? `<code>${escapeHtml(getWorkspaceDisplayPath(win.workspacePath))}</code>` : `<i>${t('Path unknown')}</i>`;
                 let sessionStr = '';
                 if (win.sessionInfo) {
                     sessionStr = `\n  Active Chat: 💬 <b>${escapeHtml(win.sessionInfo.title)}</b>`;
@@ -1008,8 +1008,12 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 const shortId = `sw_${buttonCount++}`;
                 statusWindowPathCache.set(shortId, win.workspacePath);
 
-                // Add simple connect button
-                keyboard.text(`🔌 ${cleanName}`, `switch_window:${shortId}`).row();
+                // Add simple connect button with length limiting (max 42 chars)
+                let buttonText = `🔌 ${cleanName}`;
+                if (buttonText.length > 42) {
+                    buttonText = buttonText.slice(0, 39) + '...';
+                }
+                keyboard.text(buttonText, `switch_window:${shortId}`).row();
             }
         }
 
