@@ -420,6 +420,20 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 const isGenerating = !!result?.result?.value;
 
                 if (isGenerating) {
+                    // Give the DOM a brief moment (e.g. 1000ms) to render the new user message bubble if this generation was user-initiated
+                    const detector = bridge.pool.getUserMessageDetector(projectName);
+                    if (detector && detector.isActive()) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        // Re-check busy state in case a mirror was started during our sleep
+                        if (promptDispatcher.isBusy(channel, cdp)) return;
+
+                        const hasNewMsg = await detector.hasNewMessageInDom();
+                        if (hasNewMsg) {
+                            logger.debug(`[setupWorkspaceDetectors:${projectName}] Skipping IDE active generation check because a new user message was found after delay.`);
+                            return;
+                        }
+                    }
+
                     logger.info(`[setupWorkspaceDetectors:${projectName}] Detected active generation in IDE while idle. Starting response mirror.`);
                     
                     const mirrorPromise = mirrorResponseToTelegram(bridge, channel, cdp, 'IDE Action', {
@@ -488,7 +502,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 }
             }
 
-            logger.info(`[UserMessageDetector:${projectName}] Detected user message from IDE: "${info.text.slice(0, 50)}..."`);
+            logger.info(`[UserMessageDetector:${projectName}] Detected user message from IDE: "${info.text.slice(0, 50)}..." (wasFromTelegram=${wasFromTelegram}, chatId=${channel.chatId}, threadId=${channel.threadId})`);
 
             if (promptDispatcher.isBusy(channel, cdp)) {
                 logger.debug(`[UserMessageDetector:${projectName}] Workspace is busy, skipping user message mirror.`);
@@ -499,9 +513,15 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 // 1. Send the user message to the Telegram channel
                 const cleanProjName = projectName.replace(/\.code-workspace$/i, '');
                 const userMsgText = `👤 [IDE: ${cleanProjName}]: ${info.text}`;
-                bot.api.sendMessage(channel.chatId, userMsgText, {
-                    message_thread_id: channel.threadId,
-                }).catch(e => logger.error('[UserMessageDetector] Failed to send user message to TG:', e));
+                logger.debug(`[UserMessageDetector:${projectName}] Mirroring user message to TG channel ${channel.chatId} via bridge.messenger`);
+                if (bridge.messenger) {
+                    bridge.messenger.sendMessage(channel, userMsgText)
+                        .catch(e => logger.error('[UserMessageDetector] Failed to send user message to TG:', e));
+                } else {
+                    bot.api.sendMessage(channel.chatId, userMsgText, {
+                        message_thread_id: channel.threadId,
+                    }).catch(e => logger.error('[UserMessageDetector] Failed to send user message to TG:', e));
+                }
             }
 
             // 2. Start mirroring the response using acquireLock to block TG commands
