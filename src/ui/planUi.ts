@@ -218,8 +218,6 @@ export function buildPlanContentUI(
 export function buildArtifactContentUI(
     pages: string[],
     currentPage: number,
-    projectName: string,
-    targetChannelStr: string,
     fileName: string,
 ): PlanContentPage {
     const page = pages[currentPage] || '(Page not found)';
@@ -231,16 +229,15 @@ export function buildArtifactContentUI(
     }
     text += `\n\n${markdownToTelegramHtml(page)}`;
 
-    const suffix = `${projectName}:${targetChannelStr}:${fileName}`;
     const buttons: AbstractButton[][] = [];
 
     const navRow: AbstractButton[] = [];
     if (totalPages > 1) {
         if (currentPage > 0) {
-            navRow.push({ text: '◀ Prev', action: `${ARTIFACT_PAGE_PREFIX}:${currentPage - 1}:${suffix}` });
+            navRow.push({ text: '◀ Prev', action: `${ARTIFACT_PAGE_PREFIX}:${currentPage - 1}:${fileName}` });
         }
         if (currentPage < totalPages - 1) {
-            navRow.push({ text: 'Next ▶', action: `${ARTIFACT_PAGE_PREFIX}:${currentPage + 1}:${suffix}` });
+            navRow.push({ text: 'Next ▶', action: `${ARTIFACT_PAGE_PREFIX}:${currentPage + 1}:${fileName}` });
         }
     }
     if (navRow.length > 0) {
@@ -248,7 +245,7 @@ export function buildArtifactContentUI(
     }
 
     const actionRow: AbstractButton[] = [];
-    actionRow.push({ text: '🔙 Back to List', action: `${ARTIFACT_LIST_BTN}:${projectName}:${targetChannelStr}` });
+    actionRow.push({ text: '🔙 Back to List', action: `${ARTIFACT_LIST_BTN}` });
     buttons.push(actionRow);
 
     return { text, buttons };

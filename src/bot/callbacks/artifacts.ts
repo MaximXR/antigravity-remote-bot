@@ -87,14 +87,13 @@ export async function handleArtifacts(
     deps: CallbackDependencies,
     ch: any
 ): Promise<boolean> {
-    const { bridge, chatSessionService } = deps;
+    const { chatSessionService } = deps;
 
     // 1. View artifact details
     if (data.startsWith(ARTIFACT_VIEW_BTN + ':')) {
-        // format: art_view:projectName:targetChannelStr:fileName
-        const suffix = data.substring(ARTIFACT_VIEW_BTN.length + 1);
-        const [projectName, targetChannelStr, fileName] = suffix.split(':');
-        if (!projectName || !targetChannelStr || !fileName) {
+        // format: art_view:fileName
+        const fileName = data.substring(ARTIFACT_VIEW_BTN.length + 1);
+        if (!fileName) {
             await ctx.answerCallbackQuery({ text: 'Invalid callback parameters.' });
             return true;
         }
@@ -127,8 +126,6 @@ export async function handleArtifacts(
             const { text: pageText, buttons: pageButtons } = buildArtifactContentUI(
                 pages,
                 0,
-                projectName,
-                targetChannelStr,
                 fileName
             );
             const keyboard = buildTelegramKeyboard(pageButtons);
@@ -142,17 +139,15 @@ export async function handleArtifacts(
 
     // 2. Paginate pages of the artifact
     if (data.startsWith(ARTIFACT_PAGE_PREFIX + ':')) {
-        // format: art_page:pageIndex:projectName:targetChannelStr:fileName
+        // format: art_page:pageIndex:fileName
         const rest = data.substring(ARTIFACT_PAGE_PREFIX.length + 1);
-        const parts = rest.split(':');
-        if (parts.length < 4) {
+        const colonIdx = rest.indexOf(':');
+        if (colonIdx === -1) {
             await ctx.answerCallbackQuery({ text: 'Invalid callback parameters.' });
             return true;
         }
-        const pageIndex = parseInt(parts[0], 10);
-        const projectName = parts[1];
-        const targetChannelStr = parts[2];
-        const fileName = parts.slice(3).join(':');
+        const pageIndex = parseInt(rest.substring(0, colonIdx), 10);
+        const fileName = rest.substring(colonIdx + 1);
 
         const cacheKey = `${channelKey(ch)}:${fileName}`;
         let pages = artifactContentCache.get(cacheKey);
@@ -184,8 +179,6 @@ export async function handleArtifacts(
         const { text: pageText, buttons: pageButtons } = buildArtifactContentUI(
             pages,
             pageIndex,
-            projectName,
-            targetChannelStr,
             fileName
         );
         const keyboard = buildTelegramKeyboard(pageButtons);
@@ -199,15 +192,7 @@ export async function handleArtifacts(
     }
 
     // 3. Return back to artifacts list
-    if (data.startsWith(ARTIFACT_LIST_BTN + ':')) {
-        // format: art_list:projectName:targetChannelStr
-        const suffix = data.substring(ARTIFACT_LIST_BTN.length + 1);
-        const [projectName, targetChannelStr] = suffix.split(':');
-        if (!projectName || !targetChannelStr) {
-            await ctx.answerCallbackQuery({ text: 'Invalid callback parameters.' });
-            return true;
-        }
-
+    if (data === ARTIFACT_LIST_BTN) {
         const resolved = await deps.resolveWorkspaceAndCdp(ch);
         if (!resolved.ok) {
             await ctx.answerCallbackQuery({ text: 'Workspace not found.' });
@@ -252,7 +237,7 @@ export async function handleArtifacts(
                 
                 buttons.push([{
                     text: `${icon} ${f}`,
-                    callback_data: `${ARTIFACT_VIEW_BTN}:${projectName}:${targetChannelStr}:${f}`
+                    callback_data: `${ARTIFACT_VIEW_BTN}:${f}`
                 }]);
             }
 
@@ -260,12 +245,12 @@ export async function handleArtifacts(
             for (const f of presentOthers) {
                 buttons.push([{
                     text: `📄 ${f}`,
-                    callback_data: `${ARTIFACT_VIEW_BTN}:${projectName}:${targetChannelStr}:${f}`
+                    callback_data: `${ARTIFACT_VIEW_BTN}:${f}`
                 }]);
             }
 
             const text = `<b>📂 Session Artifacts</b>\n` +
-                `Workspace: <code>${escapeHtml(projectName)}</code>\n` +
+                `Workspace: <code>${escapeHtml(resolved.projectName)}</code>\n` +
                 `Session: <b>${escapeHtml(sessionInfo.title)}</b>\n\n` +
                 `Select an artifact to view:`;
 

@@ -808,7 +808,6 @@ export function registerCommands(bot: Bot, deps: CommandDependencies) {
 
             // Build inline keyboard
             const keyboard = new InlineKeyboard();
-            const targetChannelStr = ch.threadId ? String(ch.threadId) : String(ch.chatId);
 
             // Add core files
             for (const f of presentCore) {
@@ -816,12 +815,12 @@ export function registerCommands(bot: Bot, deps: CommandDependencies) {
                 if (f.toLowerCase().includes('plan')) icon = '📋';
                 else if (f.toLowerCase().includes('task')) icon = '✅';
                 
-                keyboard.text(`${icon} ${f}`, `${ARTIFACT_VIEW_BTN}:${resolved.projectName}:${targetChannelStr}:${f}`).row();
+                keyboard.text(`${icon} ${f}`, `${ARTIFACT_VIEW_BTN}:${f}`).row();
             }
 
             // Add other files
             for (const f of presentOthers) {
-                keyboard.text(`📄 ${f}`, `${ARTIFACT_VIEW_BTN}:${resolved.projectName}:${targetChannelStr}:${f}`).row();
+                keyboard.text(`📄 ${f}`, `${ARTIFACT_VIEW_BTN}:${f}`).row();
             }
 
             const text = `<b>📂 Session Artifacts</b>\n` +

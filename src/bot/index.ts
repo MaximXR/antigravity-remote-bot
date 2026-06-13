@@ -1259,6 +1259,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                     { command: 'chat', description: t('Current session info') },
                     { command: 'chats', description: t('List and select chats') },
                     { command: 'history', description: t('Load history of the active session') },
+                    { command: 'artifacts', description: t('View session artifacts') },
                     { command: 'screenshot', description: t('Capture Antigravity screen') },
                     { command: 'stop', description: t('Interrupt active generation') },
                     { command: 'mirror', description: t('Set Mirror Mode') },
