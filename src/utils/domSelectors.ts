@@ -1724,7 +1724,9 @@ export const QUESTION_SELECTORS = {
                 const candidates = [];
                 while (sibling) {
                     if (sibling.tagName !== 'STYLE' && sibling.tagName !== 'SCRIPT') {
-                        const text = (sibling.textContent || '').trim();
+                        const clone = sibling.cloneNode(true);
+                        Array.from(clone.querySelectorAll('style, script')).forEach(s => s.remove());
+                        const text = (clone.textContent || '').trim();
                         if (text) candidates.push(text);
                     }
                     sibling = sibling.previousElementSibling;
@@ -1733,7 +1735,9 @@ export const QUESTION_SELECTORS = {
                     let parentSibling = referenceEl.parentElement.previousElementSibling;
                     while (parentSibling) {
                         if (parentSibling.tagName !== 'STYLE' && parentSibling.tagName !== 'SCRIPT') {
-                            const text = (parentSibling.textContent || '').trim();
+                            const clone = parentSibling.cloneNode(true);
+                            Array.from(clone.querySelectorAll('style, script')).forEach(s => s.remove());
+                            const text = (clone.textContent || '').trim();
                             if (text) candidates.push(text);
                         }
                         parentSibling = parentSibling.previousElementSibling;
@@ -1754,15 +1758,26 @@ export const QUESTION_SELECTORS = {
 
             if (!question) {
                 const titleEl = card.querySelector('div[class*="title"], span[class*="title"], div[class*="header"], h1, h2, h3, h4');
-                question = titleEl ? (titleEl.textContent || '').trim() : '';
+                if (titleEl) {
+                    const clone = titleEl.cloneNode(true);
+                    Array.from(clone.querySelectorAll('style, script')).forEach(s => s.remove());
+                    question = (clone.textContent || '').trim();
+                }
             }
             if (!question) {
                 const firstDiv = card.querySelector('div');
-                if (firstDiv) question = (firstDiv.textContent || '').split('\\n')[0].trim();
+                if (firstDiv) {
+                    const clone = firstDiv.cloneNode(true);
+                    Array.from(clone.querySelectorAll('style, script')).forEach(s => s.remove());
+                    question = (clone.textContent || '').split('\\n')[0].trim();
+                }
             }
             if (!question) {
-                question = (card.textContent || '').trim().split('\\n')[0];
+                const clone = card.cloneNode(true);
+                Array.from(clone.querySelectorAll('style, script')).forEach(s => s.remove());
+                question = (clone.textContent || '').trim().split('\\n')[0];
             }
+            question = question.replace(/\\s*\\d+\\s+of\\s+\\d+\\s*$/, '').trim();
             question = question.replace(/^\\s*[?？]\\s*/, '').trim();
 
             // Find options (labels or interactive items)
