@@ -82,10 +82,9 @@ DOM Tree Structure Trace:
 ### Interactive Question Detection (`questionDetector.ts`)
 
 To mirror Cascade's interactive questions (ask_question):
-1. **Detects an active card**: Searches for a button text matching `submit` or `continue`/`continue generating` (case-insensitively) alongside a button/link matching `skip` in containers like `div[class*="rounded-"], div[class*="border"], [role="dialog"], .modal` or their parents.
+1. **Detects an active card**: Searches for a button text matching `submit` or `continue`/`continue generating` (case-insensitively, supporting carriage return symbols like `Submit\n` or `Submit↵`) alongside a button/link matching `skip` in containers like `div[class*="rounded-"], div[class*="border"], [role="dialog"], .modal` or their parents.
 2. **Scrapes the question and choices**:
-   - Question text: extracted from header/title elements inside the card.
-   - Option choices: labels/options matching `label, div[role="radio"], div[role="checkbox"], div[class*="option"], div[class*="choice"]` (excluding buttons matching skip/submit/continue).
+   - **Question text**: Walk backwards/upwards from option elements or the `[role="radiogroup"]` container, filtering out page counters (`/^\d+\s+of\s+\d+$/`) and generator indicators (e.g. `Waiting for user input`). This guarantees that headers, titles, or code comments from other parts of the assistant response bubble do not contaminate the question title.
+   - **Option choices**: Scrapes option container tags like `label, div[role="radio"], div[role="checkbox"], div[class*="option"], div[class*="choice"]`. If the plain text of an option contains only an index number or is empty (typical for write-in fields like "Other"), it falls back to extracting the `placeholder` or `placeholder` attribute of any inner `input` or `textarea` element.
 3. **Telegram integration**: Sends choice options as inline buttons or accepts input text for open text questions.
 4. **Action scripts**: Runs CDP evaluations to click selected choice options or fill/submit textareas inside the question card container.
-

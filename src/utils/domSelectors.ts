@@ -1699,7 +1699,7 @@ export const QUESTION_SELECTORS = {
         try {
             const isSubmitOrContinue = (btn) => {
                 const t = (btn.textContent || '').trim().toLowerCase();
-                return t === 'submit' || t === 'continue' || t.startsWith('continue');
+                return t.includes('submit') || t.includes('continue');
             };
             const submitBtn = Array.from(document.querySelectorAll('button')).find(isSubmitOrContinue);
             if (!submitBtn) return null;
@@ -1712,9 +1712,46 @@ export const QUESTION_SELECTORS = {
                 .find(el => (el.textContent || '').trim().toLowerCase() === 'skip');
             if (!skipBtn) return null;
 
-            // Find question title
-            const titleEl = card.querySelector('div[class*="title"], span[class*="title"], div[class*="header"], h1, h2, h3, h4');
-            let question = titleEl ? (titleEl.textContent || '').trim() : '';
+            // Find options elements first to use as reference for title parsing
+            const rawOptionElements = Array.from(card.querySelectorAll('label, div[role="radio"], div[role="checkbox"], div[class*="option"], div[class*="choice"]'));
+
+            // Find question title by walking upwards/backwards from first option/group
+            let question = '';
+            const radioGroup = card.querySelector('[role="radiogroup"], [role="group"]');
+            const referenceEl = radioGroup || rawOptionElements[0];
+            if (referenceEl) {
+                let sibling = referenceEl.previousElementSibling;
+                const candidates = [];
+                while (sibling) {
+                    const text = (sibling.textContent || '').trim();
+                    if (text) candidates.push(text);
+                    sibling = sibling.previousElementSibling;
+                }
+                if (candidates.length === 0 && referenceEl.parentElement) {
+                    let parentSibling = referenceEl.parentElement.previousElementSibling;
+                    while (parentSibling) {
+                        const text = (parentSibling.textContent || '').trim();
+                        if (text) candidates.push(text);
+                        parentSibling = parentSibling.previousElementSibling;
+                    }
+                }
+                const validQuestions = candidates.filter(txt => {
+                    const clean = txt.toLowerCase();
+                    if (/^\\d+\\s+of\\s+\\d+$/.test(clean)) return false;
+                    if (clean.includes('waiting for user input')) return false;
+                    if (clean.includes('asking')) return false;
+                    if (clean.includes('questions')) return false;
+                    return true;
+                });
+                if (validQuestions.length > 0) {
+                    question = validQuestions[0];
+                }
+            }
+
+            if (!question) {
+                const titleEl = card.querySelector('div[class*="title"], span[class*="title"], div[class*="header"], h1, h2, h3, h4');
+                question = titleEl ? (titleEl.textContent || '').trim() : '';
+            }
             if (!question) {
                 const firstDiv = card.querySelector('div');
                 if (firstDiv) question = (firstDiv.textContent || '').split('\\n')[0].trim();
@@ -1726,9 +1763,16 @@ export const QUESTION_SELECTORS = {
 
             // Find options (labels or interactive items)
             const options = [];
-            const optionElements = Array.from(card.querySelectorAll('label, div[role="radio"], div[role="checkbox"], div[class*="option"], div[class*="choice"]'))
+            const optionElements = rawOptionElements
                 .filter(el => {
-                    const txt = (el.textContent || '').trim();
+                    const inputEl = el.querySelector('textarea, input');
+                    let txt = '';
+                    if (inputEl) {
+                        txt = (inputEl.placeholder || inputEl.getAttribute('placeholder') || '').trim();
+                    }
+                    if (!txt) {
+                        txt = (el.textContent || '').trim();
+                    }
                     return txt.length > 0 && txt.length < 200 
                         && !txt.toLowerCase().includes('submit') 
                         && !txt.toLowerCase().includes('skip')
@@ -1737,7 +1781,15 @@ export const QUESTION_SELECTORS = {
 
             const seenTexts = new Set();
             for (const el of optionElements) {
-                const txt = el.textContent.trim().replace(/^\\s*\\d+[\\s.)]*/, ''); // remove index
+                const inputEl = el.querySelector('textarea, input');
+                let txt = '';
+                if (inputEl) {
+                    txt = (inputEl.placeholder || inputEl.getAttribute('placeholder') || '').trim();
+                }
+                if (!txt) {
+                    txt = el.textContent.trim();
+                }
+                txt = txt.replace(/^\\s*\\d+[\\s.)]*/, ''); // remove index
                 if (txt && !seenTexts.has(txt)) {
                     seenTexts.add(txt);
                     options.push(txt);
@@ -1775,7 +1827,7 @@ export const QUESTION_SELECTORS = {
         try {
             const isSubmitOrContinue = (btn) => {
                 const t = (btn.textContent || '').trim().toLowerCase();
-                return t === 'submit' || t === 'continue' || t.startsWith('continue');
+                return t.includes('submit') || t.includes('continue');
             };
             const submitBtn = Array.from(document.querySelectorAll('button')).find(isSubmitOrContinue);
             if (!submitBtn) return { ok: false, error: 'Submit button not found' };
@@ -1786,7 +1838,14 @@ export const QUESTION_SELECTORS = {
 
             const optionElements = Array.from(card.querySelectorAll('label, div[role="radio"], div[role="checkbox"], div[class*="option"], div[class*="choice"]'))
                 .filter(el => {
-                    const txt = (el.textContent || '').trim();
+                    const inputEl = el.querySelector('textarea, input');
+                    let txt = '';
+                    if (inputEl) {
+                        txt = (inputEl.placeholder || inputEl.getAttribute('placeholder') || '').trim();
+                    }
+                    if (!txt) {
+                        txt = (el.textContent || '').trim();
+                    }
                     return txt.length > 0 && txt.length < 200 
                         && !txt.toLowerCase().includes('submit') 
                         && !txt.toLowerCase().includes('skip');
@@ -1795,7 +1854,15 @@ export const QUESTION_SELECTORS = {
             const seenTexts = new Set();
             const cleanOptionElements = [];
             for (const el of optionElements) {
-                const txt = el.textContent.trim().replace(/^\\s*\\d+[\\s.)]*/, '');
+                const inputEl = el.querySelector('textarea, input');
+                let txt = '';
+                if (inputEl) {
+                    txt = (inputEl.placeholder || inputEl.getAttribute('placeholder') || '').trim();
+                }
+                if (!txt) {
+                    txt = el.textContent.trim();
+                }
+                txt = txt.replace(/^\\s*\\d+[\\s.)]*/, '');
                 if (txt && !seenTexts.has(txt)) {
                     seenTexts.add(txt);
                     cleanOptionElements.push(el);
@@ -1833,7 +1900,7 @@ export const QUESTION_SELECTORS = {
         try {
             const isSubmitOrContinue = (btn) => {
                 const t = (btn.textContent || '').trim().toLowerCase();
-                return t === 'submit' || t === 'continue' || t.startsWith('continue');
+                return t.includes('submit') || t.includes('continue');
             };
             const submitBtn = Array.from(document.querySelectorAll('button')).find(isSubmitOrContinue);
             if (!submitBtn) return { ok: false, error: 'Submit button not found' };
@@ -1844,7 +1911,14 @@ export const QUESTION_SELECTORS = {
 
             const optionElements = Array.from(card.querySelectorAll('label, div[role="radio"], div[role="checkbox"], div[class*="option"], div[class*="choice"]'))
                 .filter(el => {
-                    const txt = (el.textContent || '').trim();
+                    const inputEl = el.querySelector('textarea, input');
+                    let txt = '';
+                    if (inputEl) {
+                        txt = (inputEl.placeholder || inputEl.getAttribute('placeholder') || '').trim();
+                    }
+                    if (!txt) {
+                        txt = (el.textContent || '').trim();
+                    }
                     return txt.length > 0 && txt.length < 200 
                         && !txt.toLowerCase().includes('submit') 
                         && !txt.toLowerCase().includes('skip');
@@ -1853,7 +1927,15 @@ export const QUESTION_SELECTORS = {
             const seenTexts = new Set();
             const cleanOptionElements = [];
             for (const el of optionElements) {
-                const txt = el.textContent.trim().replace(/^\\s*\\d+[\\s.)]*/, '');
+                const inputEl = el.querySelector('textarea, input');
+                let txt = '';
+                if (inputEl) {
+                    txt = (inputEl.placeholder || inputEl.getAttribute('placeholder') || '').trim();
+                }
+                if (!txt) {
+                    txt = el.textContent.trim();
+                }
+                txt = txt.replace(/^\\s*\\d+[\\s.)]*/, '');
                 if (txt && !seenTexts.has(txt)) {
                     seenTexts.add(txt);
                     cleanOptionElements.push(el);
@@ -1899,7 +1981,7 @@ export const QUESTION_SELECTORS = {
         try {
             const isSubmitOrContinue = (btn) => {
                 const t = (btn.textContent || '').trim().toLowerCase();
-                return t === 'submit' || t === 'continue' || t.startsWith('continue');
+                return t.includes('submit') || t.includes('continue');
             };
             const submitBtn = Array.from(document.querySelectorAll('button')).find(isSubmitOrContinue);
             if (submitBtn && typeof submitBtn.click === 'function') {
@@ -1916,7 +1998,7 @@ export const QUESTION_SELECTORS = {
         try {
             const isSubmitOrContinue = (btn) => {
                 const t = (btn.textContent || '').trim().toLowerCase();
-                return t === 'submit' || t === 'continue' || t.startsWith('continue');
+                return t.includes('submit') || t.includes('continue');
             };
             const submitBtn = Array.from(document.querySelectorAll('button')).find(isSubmitOrContinue);
             if (!submitBtn) return { ok: false, error: 'Submit button not found' };

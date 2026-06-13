@@ -77,7 +77,7 @@ export async function handleQuestions(
         const optionText = info?.options[optionIndex] || '';
         const lowerText = optionText.toLowerCase();
 
-        if (lowerText.includes('other') || lowerText.includes('другое') || lowerText.includes('custom') || lowerText.includes('произвольн')) {
+        if (lowerText.includes('other') || lowerText.includes('другое') || lowerText.includes('custom') || lowerText.includes('произвольн') || lowerText.includes('свой ответ') || lowerText.includes('ввел свой')) {
             const chKey = channelKey(ch);
             questionPendingChannels.set(chKey, {
                 projectName: projectName || '',
