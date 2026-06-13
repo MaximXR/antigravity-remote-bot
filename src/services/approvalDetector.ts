@@ -130,6 +130,7 @@ export class ApprovalDetector {
 
     private pollTimer: NodeJS.Timeout | null = null;
     private isRunning: boolean = false;
+    private isPaused: boolean = false;
     /** Key of the last detected button info (for duplicate notification prevention) */
     private lastDetectedKey: string | null = null;
     /** Full ApprovalInfo from the last detection (used for clicking) */
@@ -167,6 +168,30 @@ export class ApprovalDetector {
         }
     }
 
+    pause(): void {
+        this.isPaused = true;
+        if (this.pollTimer) {
+            clearTimeout(this.pollTimer);
+            this.pollTimer = null;
+        }
+    }
+
+    resume(): void {
+        this.isPaused = false;
+        if (this.isRunning) {
+            if (this.pollTimer) {
+                clearTimeout(this.pollTimer);
+                this.pollTimer = null;
+            }
+            this.poll().then(() => {
+                this.schedulePoll();
+            }).catch(err => {
+                logger.error('[ApprovalDetector] Error in resume poll:', err);
+                this.schedulePoll();
+            });
+        }
+    }
+
     /**
      * Return the last detected approval button info.
      * Returns null if nothing has been detected.
@@ -177,12 +202,14 @@ export class ApprovalDetector {
 
     /** Schedule the next poll */
     private schedulePoll(): void {
-        if (!this.isRunning) return;
+        if (!this.isRunning || this.isPaused) return;
+        if (this.pollTimer) {
+            clearTimeout(this.pollTimer);
+        }
         this.pollTimer = setTimeout(async () => {
+            if (!this.isRunning || this.isPaused) return;
             await this.poll();
-            if (this.isRunning) {
-                this.schedulePoll();
-            }
+            this.schedulePoll();
         }, this.pollIntervalMs);
     }
 
@@ -193,6 +220,7 @@ export class ApprovalDetector {
      *   3. Reset lastDetectedKey / lastDetectedInfo when buttons disappear
      */
     private async poll(): Promise<void> {
+        if (this.isPaused) return;
         try {
             const contextId = this.cdpService.getPrimaryContextId();
             logger.debug(`[ApprovalDetector:${this.cdpService.getCurrentWorkspaceName()}] Polling contextId=${contextId}`);

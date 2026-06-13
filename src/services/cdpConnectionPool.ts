@@ -122,7 +122,7 @@ export class CdpConnectionPool extends EventEmitter {
 
 
     /**
-     * Pause Planning, ErrorPopup and Question detectors during AI generation to reduce CPU load.
+     * Pause Planning, ErrorPopup, Question and Approval detectors during AI generation to reduce CPU load.
      */
     pauseDetectors(projectName: string): void {
         const planning = this.planningDetectors.get(projectName);
@@ -140,11 +140,16 @@ export class CdpConnectionPool extends EventEmitter {
             question.pause();
         }
 
-        logger.debug(`[CdpConnectionPool] Paused Planning, ErrorPopup and Question detectors for "${projectName}"`);
+        const approval = this.approvalDetectors.get(projectName);
+        if (approval) {
+            approval.pause();
+        }
+
+        logger.debug(`[CdpConnectionPool] Paused Planning, ErrorPopup, Question and Approval detectors for "${projectName}"`);
     }
 
     /**
-     * Resume Planning, ErrorPopup and Question detectors after AI generation finishes.
+     * Resume Planning, ErrorPopup, Question and Approval detectors after AI generation finishes.
      */
     resumeDetectors(projectName: string): void {
         const planning = this.planningDetectors.get(projectName);
@@ -162,7 +167,12 @@ export class CdpConnectionPool extends EventEmitter {
             question.resume();
         }
 
-        logger.debug(`[CdpConnectionPool] Resumed Planning, ErrorPopup and Question detectors for "${projectName}"`);
+        const approval = this.approvalDetectors.get(projectName);
+        if (approval) {
+            approval.resume();
+        }
+
+        logger.debug(`[CdpConnectionPool] Resumed Planning, ErrorPopup, Question and Approval detectors for "${projectName}"`);
     }
 
     /**

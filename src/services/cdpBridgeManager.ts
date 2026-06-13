@@ -431,49 +431,45 @@ export function ensureApprovalDetector(
     let lastMessageId: number | null = null;
     let lastMessageChatId: number | string | null = null;
 
+    const resolveActiveApproval = async () => {
+        let msgId = lastMessageId;
+        let chatId = lastMessageChatId;
+
+        if (db) {
+            try {
+                const row = db.prepare('SELECT message_id, chat_id FROM active_approvals WHERE project_name = ?').get(projectName) as any;
+                if (row) {
+                    msgId = row.message_id;
+                    chatId = row.chat_id;
+                    db.prepare('DELETE FROM active_approvals WHERE project_name = ?').run(projectName);
+                }
+            } catch (err) {
+                logger.error('[ApprovalDetector] Failed to clean active approval from DB:', err);
+            }
+        }
+
+        lastMessageId = null;
+        lastMessageChatId = null;
+
+        if (msgId && chatId && bridge.messenger && bridge.messenger.cleanMessageButtons) {
+            try {
+                await bridge.messenger.cleanMessageButtons({ chatId: Number(chatId) }, msgId);
+            } catch (err) {
+                logger.debug('[ApprovalDetector] cleanMessageButtons failed in resolveActiveApproval:', err);
+            }
+        }
+
+        if (!cdp.isCurrentlyGenerating()) {
+            logger.debug(`[ApprovalDetector:${projectName}] Stopping detector in resolveActiveApproval because generation is not active`);
+            await detector.stop();
+        }
+    };
+
     const detector = new ApprovalDetector({
         cdpService: cdp,
         pollIntervalMs: 2000,
         onResolved: async () => {
-            let msgId = lastMessageId;
-            let chatId = lastMessageChatId;
-
-            if (db) {
-                try {
-                    const row = db.prepare('SELECT message_id, chat_id FROM active_approvals WHERE project_name = ?').get(projectName) as any;
-                    if (row) {
-                        msgId = row.message_id;
-                        chatId = row.chat_id;
-                        db.prepare('DELETE FROM active_approvals WHERE project_name = ?').run(projectName);
-                    }
-                } catch (err) {
-                    logger.error('[ApprovalDetector] Failed to clean active approval from DB:', err);
-                }
-            }
-
-            if (!msgId || !chatId || !bridge.messenger) {
-                if (!cdp.isCurrentlyGenerating()) {
-                    logger.debug(`[ApprovalDetector:${projectName}] Stopping detector in onResolved (no msg) because generation is not active`);
-                    await detector.stop();
-                }
-                return;
-            }
-            
-            lastMessageId = null;
-            lastMessageChatId = null;
-
-            if (bridge.messenger.cleanMessageButtons) {
-                try {
-                    await bridge.messenger.cleanMessageButtons({ chatId: Number(chatId) }, msgId);
-                } catch (err) {
-                    logger.debug('[ApprovalDetector] cleanMessageButtons failed:', err);
-                }
-            }
-
-            if (!cdp.isCurrentlyGenerating()) {
-                logger.debug(`[ApprovalDetector:${projectName}] Stopping detector in onResolved because generation is not active`);
-                await detector.stop();
-            }
+            await resolveActiveApproval();
         },
         onApprovalRequired: async (info: ApprovalInfo) => {
             logger.debug(`[ApprovalDetector:${projectName}] Approval detected, info: ${JSON.stringify(info)}`);
@@ -618,6 +614,9 @@ export function ensureApprovalDetector(
     }
     const startHandler = () => {
         logger.debug(`[ApprovalDetector:${projectName}] Starting detector due to response-monitor:start`);
+        resolveActiveApproval().catch(err => {
+            logger.error(`[ApprovalDetector:${projectName}] Failed to resolve active approval on start:`, err);
+        });
         detector.start();
     };
     (cdp as any)._approvalStartListener = startHandler;
