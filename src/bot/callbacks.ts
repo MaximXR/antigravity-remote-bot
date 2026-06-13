@@ -23,6 +23,7 @@ import {
     handleWorkspaces,
     handleSettings,
     handleQueue,
+    handleArtifacts,
 } from './callbacks/index';
 
 export interface CallbackDependencies {
@@ -66,6 +67,7 @@ export function registerCallbacks(bot: Bot, deps: CallbackDependencies) {
             handleApprovals,
             handleQuestions,
             handlePlans,
+            handleArtifacts,
             handleErrorPopups,
             handleCleanup,
         ];

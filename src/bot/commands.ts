@@ -23,6 +23,8 @@ import { RESPONSE_SELECTORS } from '../utils/domSelectors';
 import { getCurrentCdp } from '../services/cdpBridgeManager';
 import { channelKeyFromChannel } from '../services/workspaceResolver';
 import { getWorkspaceDisplayPath } from '../utils/pathUtils';
+import { ARTIFACT_VIEW_BTN } from '../ui/planUi';
+import { getActiveSessionDir } from './callbacks/artifacts';
 
 import {
     CLEANUP_ARCHIVE_BTN,
@@ -138,7 +140,8 @@ export function registerCommands(bot: Bot, deps: CommandDependencies) {
             `/new — ` + t('Start a new chat session') + `\n` +
             `/chat — ` + t('Current session info') + `\n` +
             `/chats — ` + t('List and select chats') + `\n` +
-            `/history — ` + t('Load history of the active session') + `\n\n` +
+            `/history — ` + t('Load history of the active session') + `\n` +
+            `/artifacts — ` + t('View session artifacts (plans, tasks)') + `\n\n` +
             `<b>⏹️ ` + t('Control') + `</b>\n` +
             `/stop — ` + t('Interrupt active generation') + `\n` +
             `/screenshot — ` + t('Capture Antigravity screen') + `\n` +
@@ -763,6 +766,73 @@ export function registerCommands(bot: Bot, deps: CommandDependencies) {
         } catch (e: any) {
             await bot.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
             await ctx.reply(`❌ ${t('Failed to rollback')}: ${e.message}`);
+        }
+    });
+
+    // /artifacts and /docs commands
+    bot.command(['artifacts', 'docs'], async (ctx) => {
+        const ch = getChannel(ctx);
+        const resolved = await resolveWorkspaceAndCdp(ch);
+        if (!resolved.ok) {
+            await ctx.reply(resolved.message);
+            return;
+        }
+
+        const statusMsg = await ctx.reply('🔍 Scanning artifacts...');
+        try {
+            const sessionInfo = await chatSessionService.getCurrentSessionInfo(resolved.cdp);
+            const sessionDir = getActiveSessionDir(sessionInfo.title);
+            
+            await bot.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
+
+            if (!sessionDir) {
+                await ctx.reply(`⚠️ Could not locate session directory on disk for: <b>${escapeHtml(sessionInfo.title)}</b>`, { parse_mode: 'HTML' });
+                return;
+            }
+
+            const files = fs.readdirSync(sessionDir)
+                .filter(file => {
+                    const fp = path.join(sessionDir, file);
+                    return fs.statSync(fp).isFile() && file.endsWith('.md');
+                });
+
+            if (files.length === 0) {
+                await replyHtml(ctx, `📂 <b>Session Artifacts</b>\n\nNo artifacts found in session <code>${escapeHtml(sessionInfo.title)}</code>.`);
+                return;
+            }
+
+            // Group core files
+            const coreFiles = ['walkthrough.md', 'implementation_plan.md', 'task.md'];
+            const presentCore = files.filter(f => coreFiles.includes(f.toLowerCase()));
+            const presentOthers = files.filter(f => !coreFiles.includes(f.toLowerCase()));
+
+            // Build inline keyboard
+            const keyboard = new InlineKeyboard();
+            const targetChannelStr = ch.threadId ? String(ch.threadId) : String(ch.chatId);
+
+            // Add core files
+            for (const f of presentCore) {
+                let icon = '📝';
+                if (f.toLowerCase().includes('plan')) icon = '📋';
+                else if (f.toLowerCase().includes('task')) icon = '✅';
+                
+                keyboard.text(`${icon} ${f}`, `${ARTIFACT_VIEW_BTN}:${resolved.projectName}:${targetChannelStr}:${f}`).row();
+            }
+
+            // Add other files
+            for (const f of presentOthers) {
+                keyboard.text(`📄 ${f}`, `${ARTIFACT_VIEW_BTN}:${resolved.projectName}:${targetChannelStr}:${f}`).row();
+            }
+
+            const text = `<b>📂 Session Artifacts</b>\n` +
+                `Workspace: <code>${escapeHtml(resolved.projectName)}</code>\n` +
+                `Session: <b>${escapeHtml(sessionInfo.title)}</b>\n\n` +
+                `Select an artifact to view:`;
+
+            await replyHtml(ctx, text, keyboard);
+        } catch (e: any) {
+            await bot.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
+            await ctx.reply(`❌ Failed to list artifacts: ${e.message}`);
         }
     });
 

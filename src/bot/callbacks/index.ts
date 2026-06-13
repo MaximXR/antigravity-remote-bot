@@ -9,3 +9,5 @@ export { handleSessions } from './sessions';
 export { handleWorkspaces } from './workspaces';
 export { handleSettings } from './settings';
 export { handleQueue } from './queue';
+export { handleArtifacts } from './artifacts';
+

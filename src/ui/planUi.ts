@@ -9,6 +9,10 @@ export const PLAN_EDIT_BTN = 'plan_edit_btn';
 export const PLAN_REFRESH_BTN = 'plan_refresh_btn';
 export const PLAN_PAGE_PREFIX = 'plan_page';
 
+export const ARTIFACT_VIEW_BTN = 'art_view';
+export const ARTIFACT_PAGE_PREFIX = 'art_page';
+export const ARTIFACT_LIST_BTN = 'art_list';
+
 const PAGE_SIZE = 3500;
 
 /**
@@ -203,6 +207,48 @@ export function buildPlanContentUI(
     actionRow.push({ text: '✍️ Edit', action: `${PLAN_EDIT_BTN}:${suffix}` });
     actionRow.push({ text: '🔄 Refresh', action: `${PLAN_REFRESH_BTN}:${suffix}` });
     actionRow.push({ text: '📖 View Full', action: `${PLAN_VIEW_BTN}:${suffix}` });
+    buttons.push(actionRow);
+
+    return { text, buttons };
+}
+
+/**
+ * Build a paginated artifact content message.
+ */
+export function buildArtifactContentUI(
+    pages: string[],
+    currentPage: number,
+    projectName: string,
+    targetChannelStr: string,
+    fileName: string,
+): PlanContentPage {
+    const page = pages[currentPage] || '(Page not found)';
+    const totalPages = pages.length;
+
+    let text = `📂 <b>Artifact: ${escapeHtml(fileName)}</b>`;
+    if (totalPages > 1) {
+        text += ` (${currentPage + 1}/${totalPages})`;
+    }
+    text += `\n\n${markdownToTelegramHtml(page)}`;
+
+    const suffix = `${projectName}:${targetChannelStr}:${fileName}`;
+    const buttons: AbstractButton[][] = [];
+
+    const navRow: AbstractButton[] = [];
+    if (totalPages > 1) {
+        if (currentPage > 0) {
+            navRow.push({ text: '◀ Prev', action: `${ARTIFACT_PAGE_PREFIX}:${currentPage - 1}:${suffix}` });
+        }
+        if (currentPage < totalPages - 1) {
+            navRow.push({ text: 'Next ▶', action: `${ARTIFACT_PAGE_PREFIX}:${currentPage + 1}:${suffix}` });
+        }
+    }
+    if (navRow.length > 0) {
+        buttons.push(navRow);
+    }
+
+    const actionRow: AbstractButton[] = [];
+    actionRow.push({ text: '🔙 Back to List', action: `${ARTIFACT_LIST_BTN}:${projectName}:${targetChannelStr}` });
     buttons.push(actionRow);
 
     return { text, buttons };

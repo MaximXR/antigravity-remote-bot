@@ -14,6 +14,7 @@ Concept map and code reference guide for the Remoat codebase. Designed for devel
 | | [src/bot/commands.ts](file:///e:/Desktop/Remoat/src/bot/commands.ts) | Handlers and registration for Telegram slash commands. |
 | | [src/bot/callbacks.ts](file:///e:/Desktop/Remoat/src/bot/callbacks.ts) | Thin entry router for inline keyboard callback queries. |
 | | [src/bot/callbacks/](file:///e:/Desktop/Remoat/src/bot/callbacks/) | Modularized handlers for callback actions (sessions, plans, templates, settings, etc.). |
+| | [src/bot/callbacks/artifacts.ts](file:///e:/Desktop/Remoat/src/bot/callbacks/artifacts.ts) | Handlers for viewing, paginating, and listing session artifacts. |
 | | [src/bot/messageHandlers.ts](file:///e:/Desktop/Remoat/src/bot/messageHandlers.ts) | Thin entry router for text, photo, document, and voice messages. |
 | | [src/bot/messages/](file:///e:/Desktop/Remoat/src/bot/messages/) | Modularized handlers for message types (text, media, voice). |
 | | [src/bot/telegramAdapter.ts](file:///e:/Desktop/Remoat/src/bot/telegramAdapter.ts) | Telegram adapter implementation of IMessengerPort. |
@@ -41,6 +42,7 @@ When a Telegram command is triggered, it delegates actions as follows:
 | `/chats` | `src/bot/commands.ts` | `ChatSessionService.listAllSessions()` | Opens "Past Conversations" sidebar -> Scrapes row elements -> Simulates Escape. |
 | `/new` | `src/bot/commands.ts` | `ChatSessionService.startNewChat()` | Clicks "New Chat" button -> Resets active session record in DB. |
 | `/history` | `src/bot/commands.ts` | `ChatSessionService.getChatHistory()` | Reads response markdown list from DOM. |
+| `/artifacts` | `src/bot/commands.ts` | `getActiveSessionDir()` & `fs` scanner | Scans and displays list of files (`walkthrough.md`, `task.md`, etc.). |
 | `/undo` | `src/bot/commands.ts` | `ChatSessionService.rollbackLastChanges()` | Focuses page -> Clicks Cascade "Undo" button -> Presses Enter. |
 | `/workspace` | `src/bot/commands.ts` | `WorkspaceService` & `scanActiveWindows()` | Probes active IDE windows -> Displays select list. |
 | `/status` | `src/bot/commands.ts` | `scanActiveWindows()` & `getCurrentSessionInfo()` | Returns LLM model, active workspace name, and active chat titles. |
