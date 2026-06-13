@@ -249,6 +249,61 @@ export class UserMessageDetector {
         return this.isRunning;
     }
 
+    /**
+     * Checks if the latest user message in the DOM has already been processed/seen.
+     * Returns true if there is a new user message in the DOM that has not been processed.
+     */
+    async hasNewMessageInDom(): Promise<boolean> {
+        try {
+            const contextId = this.cdpService.getPrimaryContextId();
+            const callParams: Record<string, unknown> = {
+                expression: DETECT_USER_MESSAGE_SCRIPT,
+                returnByValue: true,
+                awaitPromise: false,
+            };
+            if (contextId !== null) {
+                callParams.contextId = contextId;
+            }
+
+            const result = await this.cdpService.call('Runtime.evaluate', callParams);
+            const info: UserMessageInfo | null = result?.result?.value ?? null;
+
+            if (info && info.text) {
+                const dbHash = computeDbHash(
+                    info.chatTitle || '',
+                    info.text,
+                    info.index ?? 0
+                );
+                
+                // If this is an echo hash, it's not a "new" user message that needs mirroring from IDE (it was sent from TG)
+                const echoHash = computeEchoHash(info.text);
+                if (this.echoHashes.has(echoHash)) {
+                    return false;
+                }
+
+                if (dbHash === this.lastDetectedHash || this.seenHashes.has(dbHash)) {
+                    return false;
+                }
+
+                if (this.db) {
+                    try {
+                        const row = this.db.prepare('SELECT 1 FROM seen_user_messages WHERE message_hash = ?').get(dbHash);
+                        if (row) {
+                            return false;
+                        }
+                    } catch (err) {
+                        logger.error('[UserMessageDetector] DB query error in hasNewMessageInDom:', err);
+                    }
+                }
+
+                return true;
+            }
+        } catch (error) {
+            logger.error('[UserMessageDetector] Error in hasNewMessageInDom:', error);
+        }
+        return false;
+    }
+
     /** Add a hash to the seenHashes set, evicting the oldest entry if at capacity. */
     private addToSeenHashes(hash: string): void {
         if (this.seenHashes.size >= UserMessageDetector.MAX_SEEN_HASHES) {

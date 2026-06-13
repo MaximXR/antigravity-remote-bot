@@ -1921,12 +1921,18 @@ export const QUESTION_SELECTORS = {
                 const t = (btn.textContent || '').trim().toLowerCase();
                 return t.includes('submit') || t.includes('continue');
             };
-            const submitBtn = Array.from(document.querySelectorAll('button')).find(isSubmitOrContinue);
-            if (!submitBtn) return { ok: false, error: 'Submit button not found' };
+            
+            const card = Array.from(document.querySelectorAll('div[class*="rounded-"], div[class*="border"], [role="dialog"], .modal'))
+                .filter(c => !c.closest('[aria-label="Message history"]') && c.offsetParent !== null)
+                .reverse()
+                .find(c => {
+                    const btns = Array.from(c.querySelectorAll('button'));
+                    return btns.some(isSubmitOrContinue) && btns.some(b => (b.textContent || '').trim().toLowerCase() === 'skip');
+                });
+            if (!card) return { ok: false, error: 'Active card not found' };
 
-            const card = submitBtn.closest('div[class*="rounded-"], div[class*="border"], [role="dialog"], .modal') 
-                || submitBtn.parentElement?.parentElement;
-            if (!card) return { ok: false, error: 'Card not found' };
+            const submitBtn = Array.from(card.querySelectorAll('button')).find(isSubmitOrContinue);
+            if (!submitBtn) return { ok: false, error: 'Submit button not found' };
 
             const optionElements = Array.from(card.querySelectorAll('label, div[role="radio"], div[role="checkbox"], div[class*="option"], div[class*="choice"]'))
                 .filter(el => {
@@ -1982,14 +1988,22 @@ export const QUESTION_SELECTORS = {
                 target.click();
             }
 
-            const inputEl = card.querySelector('textarea, input[type="text"]');
+            const inputEl = card.querySelector('textarea, input:not([type="radio"]):not([type="checkbox"])');
             if (!inputEl) return { ok: false, error: 'Textarea or text input not found' };
 
+            inputEl.focus();
             inputEl.value = ${JSON.stringify(text)};
             inputEl.dispatchEvent(new Event('input', { bubbles: true }));
             inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+            
+            inputEl.blur();
 
-            submitBtn.click();
+            setTimeout(() => {
+                try {
+                    submitBtn.click();
+                } catch(e) {}
+            }, 150);
+
             return { ok: true };
         } catch (e) {
             return { ok: false, error: e.message };

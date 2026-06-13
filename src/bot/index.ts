@@ -379,6 +379,16 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             try {
                 if (promptDispatcher.isBusy(channel, cdp)) return;
 
+                // If a new user message is detected in the DOM, let UserMessageDetector handle it
+                const detector = bridge.pool.getUserMessageDetector(projectName);
+                if (detector && detector.isActive()) {
+                    const hasNewMsg = await detector.hasNewMessageInDom();
+                    if (hasNewMsg) {
+                        logger.debug(`[setupWorkspaceDetectors:${projectName}] Skipping IDE active generation check because a new user message is pending.`);
+                        return;
+                    }
+                }
+
                 const isGeneratingScript = `(() => {
                     const panel = document.querySelector('.antigravity-agent-side-panel');
                     const scope = panel || document;

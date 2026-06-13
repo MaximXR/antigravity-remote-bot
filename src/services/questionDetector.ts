@@ -12,6 +12,8 @@ export interface QuestionInfo {
     isMultiSelect: boolean;
     /** Unique key for deduplication */
     key: string;
+    /** Indices of options that are write-in text inputs */
+    writeInIndices?: number[];
 }
 
 export interface QuestionDetectorOptions {

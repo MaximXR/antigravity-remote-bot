@@ -77,14 +77,24 @@ export async function handleQuestions(
         const optionText = info?.options[optionIndex] || '';
         const lowerText = optionText.toLowerCase();
 
-        if (lowerText.includes('other') || lowerText.includes('другое') || lowerText.includes('custom') || lowerText.includes('произвольн') || lowerText.includes('свой ответ') || lowerText.includes('ввел свой')) {
+        const isWriteIn = info?.writeInIndices?.includes(optionIndex) ||
+            lowerText.includes('other') ||
+            lowerText.includes('другое') ||
+            lowerText.includes('custom') ||
+            lowerText.includes('произвольн') ||
+            lowerText.includes('свой ответ') ||
+            lowerText.includes('ввел свой') ||
+            lowerText.includes('??') ||
+            optionText.trim() === '';
+
+        if (isWriteIn) {
             const chKey = channelKey(ch);
             questionPendingChannels.set(chKey, {
                 projectName: projectName || '',
                 optionIndex,
             });
             
-            await bot.api.sendMessage(ch.chatId, `✍️ <b>Ввод своего ответа</b>\n\nВы выбрали вариант: "<i>${escapeHtml(optionText)}</i>".\nПожалуйста, напишите ваше текстовое сообщение в ответ. Оно будет передано в поле ввода IDE.`, {
+            await bot.api.sendMessage(ch.chatId, `✍️ <b>Ввод своего ответа</b>\n\nВы выбрали вариант: "<i>${escapeHtml(optionText || 'Свой вариант')}</i>".\nПожалуйста, напишите ваше текстовое сообщение в ответ. Оно будет передано в поле ввода IDE.`, {
                 parse_mode: 'HTML',
                 message_thread_id: ch.threadId,
             });
