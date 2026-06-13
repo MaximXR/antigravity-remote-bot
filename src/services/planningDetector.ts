@@ -397,6 +397,37 @@ export class PlanningDetector {
         }
     }
 
+    /**
+     * Perform a single query to detect if a planning mode card exists inside the last assistant message.
+     */
+    async checkLastMessageOnce(): Promise<PlanningInfo | null> {
+        try {
+            const contextId = this.cdpService.getPrimaryContextId();
+            const callParams: Record<string, unknown> = {
+                expression: PLANNING_SELECTORS.CHECK_LAST_MESSAGE_SCRIPT,
+                returnByValue: true,
+                awaitPromise: false,
+            };
+            if (contextId !== null) {
+                callParams.contextId = contextId;
+            }
+            const result = await this.cdpService.call('Runtime.evaluate', callParams);
+            const info: PlanningInfo | null = result?.result?.value ?? null;
+            if (info) {
+                const planTitle = info.planTitle || '';
+                const planSummary = info.planSummary || '';
+                const description = info.description || '';
+                const uniquePreview = `${planTitle}::${planSummary.slice(0, 50)}::${description.slice(0, 50)}`;
+                this.lastDetectedKey = `${info.openText}::${info.proceedText}::${uniquePreview}`;
+                this.lastDetectedInfo = info;
+            }
+            return info;
+        } catch (error) {
+            logger.error('[PlanningDetector] Error in checkLastMessageOnce:', error);
+            return null;
+        }
+    }
+
     /** Schedule the next poll. */
     private schedulePoll(): void {
         if (!this.isRunning || this.isPaused) return;

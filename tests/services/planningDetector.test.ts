@@ -621,4 +621,32 @@ describe('PlanningDetector - planning button detection and remote execution', ()
         await jest.advanceTimersByTimeAsync(4000);
         expect(mockCdpService.call).not.toHaveBeenCalled();
     });
+
+    // ──────────────────────────────────────────────────────
+    // checkLastMessageOnce() tests
+    // ──────────────────────────────────────────────────────
+    it('checkLastMessageOnce() evaluates CHECK_LAST_MESSAGE_SCRIPT and returns planning info', async () => {
+        const mockInfo = makePlanningInfo({ planTitle: 'Single Check Plan' });
+        mockCdpService.call.mockResolvedValue({
+            result: { value: mockInfo },
+        });
+
+        detector = new PlanningDetector({
+            cdpService: mockCdpService,
+            onPlanningRequired: jest.fn(),
+        });
+
+        const info = await detector.checkLastMessageOnce();
+
+        expect(info).toEqual(mockInfo);
+        expect(mockCdpService.call).toHaveBeenCalledWith(
+            'Runtime.evaluate',
+            expect.objectContaining({
+                expression: expect.stringContaining('currentTurnScope'),
+                returnByValue: true,
+                contextId: 42,
+            }),
+        );
+        expect(detector.getLastDetectedInfo()).toEqual(mockInfo);
+    });
 });

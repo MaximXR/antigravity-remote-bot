@@ -399,6 +399,131 @@ export const PLANNING_SELECTORS = {
 
         return null;
     })()`,
+    
+    CHECK_LAST_MESSAGE_SCRIPT: `(() => {
+        try {
+            const OPEN_PATTERNS = ['open', 'view'];
+            const PROCEED_PATTERNS = ['proceed', 'accept', 'approve', 'continue'];
+            const PLAN_TYPE_KEYWORDS = ['implementation plan', 'implementation_plan', 'plan', 'walkthrough', 'task'];
+            
+            const normalize = (text) => (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+            const isVisible = (el) => el && el.offsetParent !== null;
+
+            const panel = document.querySelector('.antigravity-agent-side-panel');
+            const rootScope = panel || document;
+            const userMessages = rootScope.querySelectorAll('[role="article"][aria-label="User message"], [aria-label="User message"], [data-testid="user-input-step"]');
+            const lastUserMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1] : null;
+
+            let assistantTurns = Array.from(rootScope.querySelectorAll('[data-message-author-role="assistant"], [role="article"][aria-label="Agent response"], [aria-label="Agent response"]'));
+            let currentTurnScope = null;
+            if (lastUserMsg) {
+                assistantTurns = assistantTurns.filter(node => !!(lastUserMsg.compareDocumentPosition(node) & 4));
+                currentTurnScope = assistantTurns.length > 0 ? assistantTurns[assistantTurns.length - 1] : null;
+            } else {
+                currentTurnScope = assistantTurns.length > 0 ? assistantTurns[assistantTurns.length - 1] : null;
+            }
+            if (!currentTurnScope) return null;
+
+            const chipSelector = 'div.artifact-card, div[class*="artifact-card"], div[class*="border-gray-500"][class*="select-none"]';
+            const card = currentTurnScope.querySelector(chipSelector);
+            if (!card) return null;
+
+            const parent = card.parentElement || card;
+            const buttons = Array.from(parent.querySelectorAll('button')).filter(isVisible);
+            let openBtn = buttons.find(btn => {
+                const t = normalize(btn.textContent);
+                return OPEN_PATTERNS.some(p => t === p || t.includes(p));
+            });
+            const proceedBtn = buttons.find(btn => {
+                const t = normalize(btn.textContent);
+                return PROCEED_PATTERNS.some(p => t === p || t.includes(p));
+            });
+
+            let openOnCard = false;
+            if (!openBtn && (card.classList.contains('artifact-card') || card.querySelector('.artifact-card') || card.getAttribute('class')?.includes('artifact-card'))) {
+                openBtn = card;
+                openOnCard = true;
+            }
+
+            if (!openBtn) {
+                const hasPlanIcon = !!card.querySelector('[class*="implementation-plan-icon"]')
+                    || !!card.querySelector('[class*="walkthrough-icon"]')
+                    || !!card.querySelector('[class*="task-icon"]');
+                const cardTextNorm = normalize(card.textContent);
+                const looksLikePlan = hasPlanIcon || PLAN_TYPE_KEYWORDS.some(k => cardTextNorm.includes(k));
+                if (looksLikePlan) {
+                    const innerChip = card.querySelector('span[class*="inline-flex"][class*="cursor-pointer"]');
+                    const clickTarget = innerChip || (card.classList.contains('cursor-pointer') ? card : null);
+                    if (clickTarget) {
+                        openBtn = clickTarget;
+                        openOnCard = true;
+                    }
+                }
+            }
+
+            if (!openBtn) return null;
+
+            const openText = openOnCard ? 'Open' : (openBtn.textContent || '').trim();
+            const proceedText = proceedBtn ? (proceedBtn.textContent || '').trim() : null;
+
+            const titleEl = card.querySelector('span.inline-flex.break-all, .inline-flex.break-all, span.break-all, span.select-text.break-all, .font-mono.text-sm.truncate, .font-mono.truncate');
+            let planTitle = titleEl ? (titleEl.textContent || '').trim() : '';
+
+            if (!planTitle && openText) {
+                const match = openText.match(/open\\s+(.*)/i);
+                if (match) planTitle = match[1].trim();
+            }
+
+            if (!planTitle) {
+                const possibleTitleEl = card.querySelector('[class*="title"], [class*="name"], span');
+                if (possibleTitleEl) {
+                    planTitle = (possibleTitleEl.textContent || '').trim();
+                }
+            }
+
+            if (!planTitle) {
+                planTitle = (card.textContent || '').split('\\n')[0].trim().slice(0, 60);
+            }
+
+            if (planTitle.length > 100) {
+                planTitle = planTitle.slice(0, 100) + '...';
+            }
+
+            const summaryEls = Array.from(card.querySelectorAll('span.text-sm'));
+            const planSummary = summaryEls
+                .map(el => (el.textContent || '').trim())
+                .filter(text => text.length > 0 && text !== openText && text !== proceedText && text !== planTitle)
+                .join(' ');
+
+            const descEl = card.querySelector('.leading-relaxed.select-text');
+            let description = '';
+            const SKIP_TAGS = new Set(['PRE', 'CODE', 'STYLE', 'SCRIPT', 'BUTTON']);
+            const walkToText = (el) => {
+                const parts = [];
+                const walk = (node) => {
+                    if (node.nodeType === 3) {
+                        const t = node.textContent || '';
+                        if (t.trim()) parts.push(t.trim());
+                    } else if (node.nodeType === 1 && !SKIP_TAGS.has(node.tagName)) {
+                        for (const child of node.childNodes) walk(child);
+                    }
+                };
+                walk(el);
+                return parts.join(' ').slice(0, 500);
+            };
+            if (descEl) {
+                description = walkToText(descEl);
+            } else {
+                const fullText = walkToText(card);
+                const strippedParts = [planTitle, openText, proceedText, planSummary].filter(Boolean);
+                description = strippedParts.reduce((t, s) => t.replace(s, ''), fullText).replace(/\\s+/g, ' ').trim();
+            }
+
+            return { openText, proceedText, planTitle, planSummary, description, openOnCard };
+        } catch (e) {
+            return null;
+        }
+    })()`,
 };
 
 // Approval Mode Selectors

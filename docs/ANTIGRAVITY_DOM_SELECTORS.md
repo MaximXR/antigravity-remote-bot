@@ -30,6 +30,7 @@ This index maps each DOM selector to the exact file where it is declared in the 
 | **Approval Modal Container** | `[role="dialog"], .modal, .dialog, .approval-container, .permission-dialog` | [src/services/cdpBridgeManager.ts](file:///e:/Desktop/Remoat/src/services/cdpBridgeManager.ts) (L39)<br/>[src/detectors/approvalDetector.ts](file:///e:/Desktop/Remoat/src/detectors/approvalDetector.ts) |
 | **Planning Notification** | `.notify-user-container` | [src/services/cdpBridgeManager.ts](file:///e:/Desktop/Remoat/src/services/cdpBridgeManager.ts) (L41)<br/>[src/detectors/planningDetector.ts](file:///e:/Desktop/Remoat/src/detectors/planningDetector.ts) |
 | **Planning Modal Content** | `div.relative.pl-4.pr-4.py-1, div.relative.pl-4.pr-4` | [src/detectors/planningDetector.ts](file:///e:/Desktop/Remoat/src/detectors/planningDetector.ts) |
+| **Planning Artifact Card** | `div.artifact-card, div[class*="artifact-card"], div[class*="border-gray-500"]` | [src/utils/domSelectors.ts](file:///e:/Desktop/Remoat/src/utils/domSelectors.ts) (L106)<br/>[src/services/planningDetector.ts](file:///e:/Desktop/Remoat/src/services/planningDetector.ts) |
 | **Error Popup Dialog** | `[role="dialog"], [role="alertdialog"], .modal, .dialog` | [src/services/cdpBridgeManager.ts](file:///e:/Desktop/Remoat/src/services/cdpBridgeManager.ts) (L40)<br/>[src/detectors/errorPopupDetector.ts](file:///e:/Desktop/Remoat/src/detectors/errorPopupDetector.ts) |
 
 ---
@@ -58,3 +59,21 @@ Normalizes raw response code blocks:
 - Identifies the language label using `.font-sans.text-sm` or `[class*="text-sm"][class*="opacity"]`.
 - Locates line blocks using `.code-line, [class*="code-line"]`.
 - Ignores injected `<style>` blocks and header bars matching `[class*="rounded-t"][class*="border-b"]`.
+
+### Planning Card DOM Trace (`planningDetector.ts`)
+A planning mode implementation card containing the `Proceed` button is rendered directly inside the assistant's response bubble in the scrollable chat history.
+DOM Tree Structure Trace:
+1. `DIV` (Plan card container matching `div.artifact-card` / `div[class*="border-gray-500"]`)
+2. `DIV` (Inner wrapper with `class="flex flex-col py-1 gap-1.5"`)
+3. `DIV` (Assistant response container with `aria-label="Agent response" role="article"`)
+4. `DIV` (wrapper with `class="flex flex-col gap-0.5 group w-full"`)
+5. `DIV` (wrapper with `class="flex items-start"`)
+6. `DIV` (wrapper with `class="relative flex flex-col gap-y-3 px-4"`)
+7. `DIV` (wrapper with no class)
+8. `DIV` (wrapper with `class="mx-auto w-full"`)
+9. `DIV` (Scrollable messages list container with **`aria-label="Message history"`**)
+10. `DIV` (wrapper with `class="flex w-full grow flex-col overflow-hidden"`)
+11. `DIV` (Workspace conversation panel with `id="conversation" aria-label="Agent Conversation" role="region"`)
+12. `DIV` (Side panel wrapper with `class="w-full h-full flex flex-col box-border focus:!outline-none"`)
+13. `DIV` (Side panel root container with `class="antigravity-agent-side-panel"`)
+14. `DIV` (Monaco workbench shell with `role="application"`)

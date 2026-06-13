@@ -738,8 +738,16 @@ export function ensurePlanningDetector(
         cdp.removeListener('response-monitor:start', (cdp as any)._planningStartListener);
     }
     const startHandler = () => {
-        logger.debug(`[PlanningDetector:${projectName}] Pausing detector due to response-monitor:start`);
+        logger.debug(`[PlanningDetector:${projectName}] Pausing detector and cleaning previous buttons due to response-monitor:start`);
         detector.pause();
+        if (lastMessageId && lastMessageChatId && bridge.messenger && bridge.messenger.cleanMessageButtons) {
+            const msgId = lastMessageId;
+            const chatId = lastMessageChatId;
+            lastMessageId = null;
+            lastMessageChatId = null;
+            bridge.messenger.cleanMessageButtons({ chatId: Number(chatId) }, msgId)
+                .catch((e) => logger.debug('[PlanningDetector] Markup remove failed on start:', e));
+        }
     };
     (cdp as any)._planningStartListener = startHandler;
     cdp.on('response-monitor:start', startHandler);
@@ -747,9 +755,26 @@ export function ensurePlanningDetector(
     if ((cdp as any)._planningStopListener) {
         cdp.removeListener('response-monitor:stop', (cdp as any)._planningStopListener);
     }
-    const stopHandler = () => {
-        logger.debug(`[PlanningDetector:${projectName}] Triggering post-generation check burst due to response-monitor:stop`);
-        detector.triggerPostGenerationCheck();
+    const stopHandler = async () => {
+        logger.debug(`[PlanningDetector:${projectName}] Stop handler triggered (response-monitor:stop). Waiting 1500ms...`);
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        if (cdp.isCurrentlyGenerating()) {
+            logger.debug(`[PlanningDetector:${projectName}] Generation resumed during delay. Skipping plan check.`);
+            return;
+        }
+        logger.debug(`[PlanningDetector:${projectName}] Performing checkLastMessageOnce...`);
+        const info = await detector.checkLastMessageOnce().catch(err => {
+            logger.error(`[PlanningDetector:${projectName}] checkLastMessageOnce failed:`, err);
+            return null;
+        });
+        if (info) {
+            logger.info(`[PlanningDetector:${projectName}] Planning required:`, info.planTitle);
+            Promise.resolve((detector as any).onPlanningRequired(info)).catch((err) => {
+                logger.error('[PlanningDetector] onPlanningRequired callback failed:', err);
+            });
+        } else {
+            logger.debug(`[PlanningDetector:${projectName}] No plan found in the last message bubble.`);
+        }
     };
     (cdp as any)._planningStopListener = stopHandler;
     cdp.on('response-monitor:stop', stopHandler);
