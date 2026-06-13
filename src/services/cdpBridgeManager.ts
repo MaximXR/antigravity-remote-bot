@@ -612,11 +612,17 @@ export function ensureApprovalDetector(
     if ((cdp as any)._approvalStartListener) {
         cdp.removeListener('response-monitor:start', (cdp as any)._approvalStartListener);
     }
-    const startHandler = () => {
+    const startHandler = async () => {
         logger.debug(`[ApprovalDetector:${projectName}] Starting detector due to response-monitor:start`);
-        resolveActiveApproval().catch(err => {
-            logger.error(`[ApprovalDetector:${projectName}] Failed to resolve active approval on start:`, err);
-        });
+        const info = await detector.checkOnce().catch(() => null);
+        if (!info) {
+            logger.debug(`[ApprovalDetector:${projectName}] No active approval on start. Resolving active approval.`);
+            await resolveActiveApproval().catch(err => {
+                logger.error(`[ApprovalDetector:${projectName}] Failed to resolve active approval on start:`, err);
+            });
+        } else {
+            logger.debug(`[ApprovalDetector:${projectName}] Active approval still exists on start. Keeping Telegram buttons.`);
+        }
         detector.start();
     };
     (cdp as any)._approvalStartListener = startHandler;
@@ -632,7 +638,10 @@ export function ensureApprovalDetector(
             logger.debug(`[ApprovalDetector:${projectName}] Keeping detector running due to active approval dialog: ${JSON.stringify(info)}`);
             await flushDeferredApproval(bridge, projectName, cdp);
         } else {
-            logger.debug(`[ApprovalDetector:${projectName}] No active approval on stop. Stopping detector.`);
+            logger.debug(`[ApprovalDetector:${projectName}] No active approval on stop. Stopping detector and resolving active approval.`);
+            await resolveActiveApproval().catch(err => {
+                logger.error(`[ApprovalDetector:${projectName}] Failed to resolve active approval on stop:`, err);
+            });
             await detector.stop();
             await flushDeferredApproval(bridge, projectName, cdp);
         }

@@ -467,14 +467,14 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             if (mirrorMode === 'telegram_only') {
                 if (!wasFromTelegram) {
                     logger.debug(`[UserMessageDetector:${projectName}] mirrorMode is telegram_only and this message did not originate from Telegram, skipping.`);
-                    return false;
+                    return true;
                 }
             } else if (mirrorMode === 'active') {
                 const binding = workspaceBindingRepo.findByChannelId(channelKey(channel));
                 const activeProjectName = binding ? bridge.pool.extractProjectName(binding.workspacePath) : null;
                 if (activeProjectName !== projectName) {
                     logger.debug(`[UserMessageDetector:${projectName}] mirrorMode is active and this is not the active workspace (${activeProjectName}), skipping user message mirror.`);
-                    return false;
+                    return true;
                 }
             }
 
@@ -482,7 +482,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
             if (promptDispatcher.isBusy(channel, cdp)) {
                 logger.debug(`[UserMessageDetector:${projectName}] Workspace is busy, skipping user message mirror.`);
-                return false;
+                return true;
             }
 
             if (!wasFromTelegram) {

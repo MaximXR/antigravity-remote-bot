@@ -81,6 +81,7 @@ export class ResponseMonitor {
     private lastExtractionSource: 'structured' | 'legacy' | null = null;
     /** Consecutive WebSocket error count — stops monitor after threshold */
     private consecutiveWsErrors: number = 0;
+    private detectorsResumedTemporarily: boolean = false;
 
     /**
      * Baseline artifact counts captured at monitoring start.
@@ -234,6 +235,7 @@ export class ResponseMonitor {
         this.seenProcessLogKeys = new Set();
         this.seenThinkingLogKeys = new Set();
         this.consecutiveWsErrors = 0;
+        this.detectorsResumedTemporarily = false;
 
         this.onPhaseChange?.(this.currentPhase, null);
 
@@ -592,6 +594,12 @@ export class ResponseMonitor {
                     this.setPhase('thinking', null);
                 }
                 this.stopGoneCount = 0;
+
+                if (this.detectorsResumedTemporarily) {
+                    this.detectorsResumedTemporarily = false;
+                    logger.debug(`[ResponseMonitor] LLM resumed generation, pausing detectors again`);
+                    this.cdpService.emit('response-monitor:start');
+                }
             }
 
             // Handle quota detection
@@ -642,6 +650,12 @@ export class ResponseMonitor {
                 if (planningActive || approvalActive) {
                     this.stopGoneCount = 0;
                     logger.info(`[ResponseMonitor] ${planningActive ? 'Planning' : 'Approval'} dialog active — deferring completion`);
+
+                    if (!this.detectorsResumedTemporarily) {
+                        this.detectorsResumedTemporarily = true;
+                        logger.debug(`[ResponseMonitor] LLM paused for ${planningActive ? 'planning' : 'approval'}, temporarily resuming detectors`);
+                        this.cdpService.emit('response-monitor:stop');
+                    }
                 } else {
                     this.stopGoneCount++;
                     if (this.stopGoneCount >= this.stopGoneConfirmCount && this.isRunning) {
