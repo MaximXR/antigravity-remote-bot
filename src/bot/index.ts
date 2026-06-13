@@ -265,10 +265,20 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         const channel = bridge.lastActiveChannel;
         if (!channel) return;
 
+        const matchProjectNames = (name1: string, name2: string): boolean => {
+            const clean = (s: string) => s
+                .replace(/[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD00-\uDFFF]/g, '')
+                .trim()
+                .toLowerCase();
+            const n1 = clean(name1);
+            const n2 = clean(name2);
+            return n1.includes(n2) || n2.includes(n1);
+        };
+
         // Find workspace path from bindings
         const binding = workspaceBindingRepo.findByChannelId(channelKey(channel));
         const activeProjectName = binding ? bridge.pool.extractProjectName(binding.workspacePath) : null;
-        const isMain = activeProjectName === projectName;
+        const isMain = activeProjectName ? matchProjectNames(activeProjectName, projectName) : false;
 
         // Try to get workspace path
         let workspacePath = '';
@@ -277,12 +287,12 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         } else {
             // Find in recent workspaces or bindings by name
             const allBindings = workspaceBindingRepo.findAll();
-            const found = allBindings.find(b => bridge.pool.extractProjectName(b.workspacePath) === projectName);
+            const found = allBindings.find(b => matchProjectNames(bridge.pool.extractProjectName(b.workspacePath), projectName));
             if (found) {
                 workspacePath = found.workspacePath;
             } else {
                 const recent = workspaceService.getRecentWorkspaces();
-                const matched = recent.find(w => bridge.pool.extractProjectName(w.path) === projectName);
+                const matched = recent.find(w => matchProjectNames(bridge.pool.extractProjectName(w.path), projectName));
                 if (matched) workspacePath = matched.path;
             }
         }
@@ -302,7 +312,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
 
             // Scan other active windows
             const activeWindows = await scanActiveWindows();
-            const otherWindows = activeWindows.filter(w => w.projectName !== projectName);
+            const otherWindows = activeWindows.filter(w => !matchProjectNames(w.projectName, projectName));
 
             if (otherWindows.length > 0) {
                 text += `\n<b>${t('Other open windows:')}</b>\n`;
@@ -1120,36 +1130,93 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         commands,
     });
 
-    // Proactively connect to all existing workspace bindings on startup
-    try {
-        const bindings = workspaceBindingRepo.findAll();
-        logger.info(`[startup] Found ${bindings.length} workspace binding(s). Connecting proactively...`);
-        for (const binding of bindings) {
-            const workspacePath = workspaceService.getWorkspacePath(binding.workspacePath);
-            const channel: ChannelContext = {
-                chatId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[0]) : Number(binding.channelId),
-                threadId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[1]) : undefined,
-            };
+    // Proactively connect to workspaces on startup with user rules
+    const connectOnStartup = async () => {
+        try {
+            const bindings = workspaceBindingRepo.findAll();
+            if (bindings.length === 0) {
+                logger.info('[startup] No workspace bindings found in DB.');
+                return;
+            }
 
-            const connectProactively = () => {
-                bridge.pool.getOrConnect(workspacePath, false, undefined, false).then((cdp) => {
-                    const projectName = bridge.pool.extractProjectName(binding.workspacePath);
-                    logger.info(`[startup] Proactively connected to workspace: ${projectName} (${binding.workspacePath})`);
+            const activeWindows = await scanActiveWindows().catch(() => []);
+            logger.info(`[startup] Found ${bindings.length} binding(s), ${activeWindows.length} active window(s).`);
 
-                    setupWorkspaceDetectors(cdp, projectName, channel);
+            for (const binding of bindings) {
+                const channel: ChannelContext = {
+                    chatId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[0]) : Number(binding.channelId),
+                    threadId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[1]) : undefined,
+                };
+                const key = channelKey(channel);
 
+                if (activeWindows.length === 1) {
+                    const win = activeWindows[0];
+                    if (win.workspacePath) {
+                        const cdp = await bridge.pool.getOrConnect(win.workspacePath, false, undefined, false);
+                        setupWorkspaceDetectors(cdp, win.projectName, channel);
 
+                        // Save new binding in DB if it changed
+                        workspaceBindingRepo.upsert({
+                            channelId: binding.channelId,
+                            workspacePath: win.workspacePath,
+                            guildId: String(channel.chatId)
+                        });
 
-                }).catch((err) => {
-                    logger.warn(`[startup] Failed proactive connection for ${binding.workspacePath}: ${err?.message || err}. Retrying in 10s...`);
-                    setTimeout(connectProactively, 10000);
-                });
-            };
-            connectProactively();
+                        const cleanName = win.projectName.replace(/\.code-workspace$/i, '').replace(/^🗂️\s*/, '');
+                        await bot.api.sendMessage(channel.chatId, `🚀 <b>${t('Remoat Bot успешно запущен!')}</b>\n\n💼 Основная рабочая область: <b>${escapeHtml(cleanName)}</b>`, {
+                            parse_mode: 'HTML',
+                            message_thread_id: channel.threadId
+                        }).catch(() => {});
+                    }
+                } else if (activeWindows.length >= 2) {
+                    const matchingWin = activeWindows.find(w => {
+                        if (!w.workspacePath) return false;
+                        const normW = w.workspacePath.toLowerCase().replace(/\//g, '\\').trim();
+                        const normPrev = binding.workspacePath.toLowerCase().replace(/\//g, '\\').trim();
+                        return normW === normPrev || normW.startsWith(normPrev + '\\') || normPrev.startsWith(normW + '\\');
+                    });
+
+                    if (matchingWin && matchingWin.workspacePath) {
+                        const cdp = await bridge.pool.getOrConnect(matchingWin.workspacePath, false, undefined, false);
+                        setupWorkspaceDetectors(cdp, matchingWin.projectName, channel);
+
+                        const cleanName = matchingWin.projectName.replace(/\.code-workspace$/i, '').replace(/^🗂️\s*/, '');
+                        await bot.api.sendMessage(channel.chatId, `🚀 <b>${t('Remoat Bot успешно запущен!')}</b>\n\n💼 Основная рабочая область: <b>${escapeHtml(cleanName)}</b>`, {
+                            parse_mode: 'HTML',
+                            message_thread_id: channel.threadId
+                        }).catch(() => {});
+                    } else {
+                        // Prompt user to select which one to make active
+                        if (!promptSelectionSentChannels.has(key)) {
+                            promptSelectionSentChannels.add(key);
+
+                            let text = `🖥️ <b>${t('Remoat Bot запущен!')}</b>\n\n`;
+                            text += `${t('Обнаружено несколько открытых окон IDE. Выберите, какое сделать основным:')}`;
+
+                            const keyboard = new InlineKeyboard();
+                            let btnCount = 0;
+                            for (const win of activeWindows) {
+                                if (win.workspacePath) {
+                                    const cleanName = win.projectName.replace(/\.code-workspace$/i, '').replace(/^🗂️\s*/, '');
+                                    const swId = `sw_scan_${btnCount++}_${Date.now()}`;
+                                    statusWindowPathCache.set(swId, win.workspacePath);
+                                    keyboard.text(`🔌 ${cleanName}`, `switch_window:${swId}`).row();
+                                }
+                            }
+
+                            await bot.api.sendMessage(channel.chatId, text, {
+                                parse_mode: 'HTML',
+                                message_thread_id: channel.threadId,
+                                reply_markup: keyboard
+                            }).catch(e => logger.error('[startup] Failed to send multiple windows selection:', e));
+                        }
+                    }
+                }
+            }
+        } catch (e: any) {
+            logger.error('[startup] Startup workspace connections failed:', e?.message || e);
         }
-    } catch (e: any) {
-        logger.error('[startup] Proactive workspace connections failed:', e?.message || e);
-    }
+    };
 
     const scanAndConnectNewWindows = async () => {
         try {
@@ -1232,8 +1299,10 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
         }
     };
 
-    // Run background scanner immediately on start and then every 10s
-    scanAndConnectNewWindows().catch(err => logger.error('[background] Initial scanAndConnectNewWindows failed:', err));
+    // Run background scanner after 5 seconds delay to let startup connections establish first
+    setTimeout(() => {
+        scanAndConnectNewWindows().catch(err => logger.error('[background] Initial scanAndConnectNewWindows failed:', err));
+    }, 5000);
     setInterval(scanAndConnectNewWindows, 7000);
 
     logger.info('Starting Remoat Telegram bot...');
@@ -1272,6 +1341,9 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             } catch (err) {
                 logger.error('Failed to register command menu:', err);
             }
+
+            // Proactively connect/check on startup with user rules
+            connectOnStartup().catch(err => logger.error('[startup] connectOnStartup error:', err));
         },
     });
 };

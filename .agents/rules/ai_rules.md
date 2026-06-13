@@ -7,7 +7,7 @@ description: "ТРИГГЕР: Важные правила разработки R
 
 ## 1. База Данных и Контекст
 - Файл БД SQLite по умолчанию: `C:\Users\sss77\.remoat\remoat.db`.
-- Схемы таблиц вынесены в [DB_SCHEMA.md](../../docs/DB_SCHEMA.md) (запрещено читать проактивно).
+- Схемы таблиц вынесены в [DB_SCHEMA.md](<workspace-root>/docs/DB_SCHEMA.md) (запрещено читать проактивно).
 
 ## 2. Производительность CDP (КРИТИЧЕСКИ)
 - **ЗАПРЕЩЕНО** использовать неспецифичные селекторы общего назначения (`div`, `span`, `*`) для фоновых периодических опросов по всей странице. Это вызывает сильные лаги интерфейса.
@@ -27,22 +27,22 @@ description: "ТРИГГЕР: Важные правила разработки R
 - **ОБЯЗАТЕЛЬНО** сохранять настройки трансляции диалогов (`mirrorMode`, `onlyActiveWorkspaceMessages`) в слое бота при фильтрации сообщений.
 
 ## 5. Доступная документация (Жесткий Индекс)
-- **ОБЯЗАТЕЛЬНО** при создании, перемещении, переименовании или декомпозиции файлов обновлять карту проекта, пути и индексы в [DEVELOPER_INDEX.md](../../docs/DEVELOPER_INDEX.md). ИИ обязан строго следить за структурой проекта и держать её в актуальном состоянии ВСЕГДА, когда вносит какие-либо изменения.
+- **ОБЯЗАТЕЛЬНО** при создании, перемещении, переименовании или декомпозиции файлов обновлять карту проекта, пути и индексы в [DEVELOPER_INDEX.md](<workspace-root>/docs/DEVELOPER_INDEX.md). ИИ обязан строго следить за структурой проекта и держать её в актуальном состоянии ВСЕГДА, когда вносит какие-либо изменения.
 *(Запрещено читать проактивно для экономии контекста).*
-- [DEVELOPER_INDEX.md](../../docs/DEVELOPER_INDEX.md) — Главная карта проекта и индекс. Читать при старте.
-- [CLAUDE.md](../../CLAUDE.md) — Команды запуска, сборки, порты и структура каталогов.
-- [ARCHITECTURE.md](../../docs/ARCHITECTURE.md) — Описание двухуровневой архитектуры и потоков данных.
-- [DB_SCHEMA.md](../../docs/DB_SCHEMA.md) — Структура таблиц SQLite.
-- [ANTIGRAVITY_DOM_SELECTORS.md](../../docs/ANTIGRAVITY_DOM_SELECTORS.md) — Справочник селекторов DOM и CDP-кликов.
-- [CONTRIBUTING.md](../../CONTRIBUTING.md) — Правила участия, код-стайл и коммиты.
-- [CODE_OF_CONDUCT.md](../../CODE_OF_CONDUCT.md) — Кодекс поведения.
-- [RESPONSE_MONITOR.md](../../docs/RESPONSE_MONITOR.md) — Логика мониторинга ответов.
+- [DEVELOPER_INDEX.md](<workspace-root>/docs/DEVELOPER_INDEX.md) — Главная карта проекта и индекс. Читать при старте.
+- [CLAUDE.md](<workspace-root>/CLAUDE.md) — Команды запуска, сборки, порты и структура каталогов.
+- [ARCHITECTURE.md](<workspace-root>/docs/ARCHITECTURE.md) — Описание двухуровневой архитектуры и потоков данных.
+- [DB_SCHEMA.md](<workspace-root>/docs/DB_SCHEMA.md) — Структура таблиц SQLite.
+- [ANTIGRAVITY_DOM_SELECTORS.md](<workspace-root>/docs/ANTIGRAVITY_DOM_SELECTORS.md) — Справочник селекторов DOM и CDP-кликов.
+- [CONTRIBUTING.md](<workspace-root>/CONTRIBUTING.md) — Правила участия, код-стайл и коммиты.
+- [CODE_OF_CONDUCT.md](<workspace-root>/CODE_OF_CONDUCT.md) — Кодекс поведения.
+- [RESPONSE_MONITOR.md](<workspace-root>/docs/RESPONSE_MONITOR.md) — Логика мониторинга ответов.
 
 ## 6. Принцип DRY (Don't Repeat Yourself) (КРИТИЧЕСКИ)
 - **КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО** дублировать код обработчиков команд Telegram-бота и бизнес-логику.
 - Любое дублирование кода неизбежно ведет к регрессионным багам: *«в одном месте чинишь — в другом ломается»*.
-- **ОБЯЗАТЕЛЬНО** выносить все обработчики команд бота исключительно в файл [commands.ts](file:///e:/Desktop/Remoat/src/bot/commands.ts) (или подключать из `src/commands/`).
-- В файле [index.ts](file:///e:/Desktop/Remoat/src/bot/index.ts) разрешено только импортировать и регистрировать команды через соответствующие функции-инициализаторы.
+- **ОБЯЗАТЕЛЬНО** выносить все обработчики команд бота исключительно в файл [commands.ts](<workspace-root>/src/bot/commands.ts) (или подключать из `src/commands/`).
+- В файле [index.ts](<workspace-root>/src/bot/index.ts) разрешено только импортировать и регистрировать команды через соответствующие функции-инициализаторы.
 - *Контрастный пример:*
   - ❌ **Как НЕ надо:** Описывать команду `/status` параллельно в `index.ts` и `commands.ts`.
   - ✅ **Как надо:** Объявить обработчик `/status` в `commands.ts`, а в `index.ts` вызвать `registerCommands(bot, deps)`.
