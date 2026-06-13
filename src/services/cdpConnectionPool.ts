@@ -152,11 +152,6 @@ export class CdpConnectionPool extends EventEmitter {
      * Resume Planning, ErrorPopup, Question and Approval detectors after AI generation finishes.
      */
     resumeDetectors(projectName: string): void {
-        const planning = this.planningDetectors.get(projectName);
-        if (planning) {
-            planning.resume();
-        }
-
         const errorPopup = this.errorPopupDetectors.get(projectName);
         if (errorPopup) {
             errorPopup.resume();
