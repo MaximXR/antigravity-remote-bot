@@ -180,6 +180,13 @@ describe('htmlToTelegramHtml', () => {
             expect(result).toContain('1. first');
             expect(result).toContain('2. second');
         });
+
+        it('preserves formatting tags inside list items', () => {
+            const html = '<ul><li>item <b>bold</b></li><li>item <code>code</code></li></ul>';
+            const result = htmlToTelegramHtml(html);
+            expect(result).toContain('- item <b>bold</b>');
+            expect(result).toContain('- item <code>code</code>');
+        });
     });
 
     describe('images', () => {

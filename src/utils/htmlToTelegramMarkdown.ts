@@ -200,7 +200,7 @@ export function htmlToTelegramHtml(html: string): string {
             (_m, content) => {
                 const items = content.replace(
                     /<li[^>]*>([\s\S]*?)<\/li>/gi,
-                    (_lm: string, text: string) => `- ${stripTags(text).trim()}\n`,
+                    (_lm: string, text: string) => `- ${text.trim()}\n`,
                 );
                 return `\n${items}`;
             },
@@ -214,7 +214,7 @@ export function htmlToTelegramHtml(html: string): string {
                     /<li[^>]*>([\s\S]*?)<\/li>/gi,
                     (_lm: string, text: string) => {
                         counter++;
-                        return `${counter}. ${stripTags(text).trim()}\n`;
+                        return `${counter}. ${text.trim()}\n`;
                     },
                 );
                 return `\n${items}`;

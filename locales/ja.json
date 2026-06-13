@@ -135,5 +135,15 @@
   "Mirror all open VS Code windows.": "開いているすべてのVS Codeウィンドウをミラーリングします。",
   "Mirror only the active (bound) workspace.": "アクティブにバインドされたワークスペースのみをミラーリングします。",
   "Set Mirror Mode": "ミラーリングモードを設定",
-  "Select a mirror mode:": "ミラーリングモードを選択:"
+  "Select a mirror mode:": "ミラーリングモードを選択:",
+  "Remoat Bot successfully started!": "Remoat Bot successfully started!",
+  "Active IDE windows not found. Please start Antigravity IDE.": "Active IDE windows not found. Please start Antigravity IDE.",
+  "Connected to IDE window!": "Connected to IDE window!",
+  "Successfully connected to IDE!": "Successfully connected to IDE!",
+  "Active workspace:": "Active workspace:",
+  "Remoat Bot started!": "Remoat Bot started!",
+  "Multiple open IDE windows detected. Select which one to make active:": "Multiple open IDE windows detected. Select which one to make active:",
+  "(found {{count}} windows)": "({{count}}個のウィンドウを検出)",
+  "New IDE window detected:": "新しいIDEウィンドウが検出されました:",
+  "Make active": "メインにする"
 }

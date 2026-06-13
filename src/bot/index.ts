@@ -1149,7 +1149,12 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                 };
                 const key = channelKey(channel);
 
-                if (activeWindows.length === 1) {
+                if (activeWindows.length === 0) {
+                    await bot.api.sendMessage(channel.chatId, `🚀 <b>${t('Remoat Bot successfully started!')}</b>\n\n⚠️ ${t('Active IDE windows not found. Please start Antigravity IDE.')}`, {
+                        parse_mode: 'HTML',
+                        message_thread_id: channel.threadId
+                    }).catch(() => {});
+                } else if (activeWindows.length === 1) {
                     const win = activeWindows[0];
                     if (win.workspacePath) {
                         const cdp = await bridge.pool.getOrConnect(win.workspacePath, false, undefined, false);
@@ -1163,7 +1168,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         });
 
                         const cleanName = win.projectName.replace(/\.code-workspace$/i, '').replace(/^🗂️\s*/, '');
-                        await bot.api.sendMessage(channel.chatId, `🚀 <b>${t('Remoat Bot успешно запущен!')}</b>\n\n💼 Основная рабочая область: <b>${escapeHtml(cleanName)}</b>`, {
+                        await bot.api.sendMessage(channel.chatId, `🚀 <b>${t('Remoat Bot successfully started!')}</b>\n\n💼 ${t('Active workspace:')} <b>${escapeHtml(cleanName)}</b>`, {
                             parse_mode: 'HTML',
                             message_thread_id: channel.threadId
                         }).catch(() => {});
@@ -1181,7 +1186,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         setupWorkspaceDetectors(cdp, matchingWin.projectName, channel);
 
                         const cleanName = matchingWin.projectName.replace(/\.code-workspace$/i, '').replace(/^🗂️\s*/, '');
-                        await bot.api.sendMessage(channel.chatId, `🚀 <b>${t('Remoat Bot успешно запущен!')}</b>\n\n💼 Основная рабочая область: <b>${escapeHtml(cleanName)}</b>`, {
+                        await bot.api.sendMessage(channel.chatId, `🚀 <b>${t('Remoat Bot successfully started!')}</b>\n\n${t('(found {{count}} windows)', { count: activeWindows.length })}\n💼 ${t('Active workspace:')} <b>${escapeHtml(cleanName)}</b>`, {
                             parse_mode: 'HTML',
                             message_thread_id: channel.threadId
                         }).catch(() => {});
@@ -1190,8 +1195,8 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                         if (!promptSelectionSentChannels.has(key)) {
                             promptSelectionSentChannels.add(key);
 
-                            let text = `🖥️ <b>${t('Remoat Bot запущен!')}</b>\n\n`;
-                            text += `${t('Обнаружено несколько открытых окон IDE. Выберите, какое сделать основным:')}`;
+                            let text = `🖥️ <b>${t('Remoat Bot started!')}</b>\n\n`;
+                            text += `${t('Multiple open IDE windows detected. Select which one to make active:')}`;
 
                             const keyboard = new InlineKeyboard();
                             let btnCount = 0;
@@ -1221,55 +1226,84 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     const scanAndConnectNewWindows = async () => {
         try {
             const activeWindows = await scanActiveWindows();
-            for (const win of activeWindows) {
-                if (!win.workspacePath) continue;
+            const bindings = workspaceBindingRepo.findAll();
+            if (bindings.length === 0) return;
 
-                // Check if already connected
-                if (bridge.pool.getConnectedByWebSocketUrl(win.webSocketDebuggerUrl)) continue;
+            for (const binding of bindings) {
+                const channel: ChannelContext = {
+                    chatId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[0]) : Number(binding.channelId),
+                    threadId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[1]) : undefined,
+                };
+                const key = channelKey(channel);
 
-                // Find channel target: either from DB, or fallback to last active channel, or first binding in DB
-                let targetChannel: ChannelContext | null = null;
-                const bindings = workspaceBindingRepo.findAll();
-                const matched = bindings.find(b => {
-                    const normB = b.workspacePath.toLowerCase().replace(/\//g, '\\').trim();
-                    const normW = win.workspacePath!.toLowerCase().replace(/\//g, '\\').trim();
-                    return normB === normW || normW.startsWith(normB + '\\') || normB.startsWith(normW + '\\');
-                });
+                // Check and connect to each active window
+                for (const win of activeWindows) {
+                    if (!win.workspacePath) continue;
 
-                if (matched) {
-                    targetChannel = {
-                        chatId: matched.channelId.includes(':') ? Number(matched.channelId.split(':')[0]) : Number(matched.channelId),
-                        threadId: matched.channelId.includes(':') ? Number(matched.channelId.split(':')[1]) : undefined,
-                    };
-                } else if (bridge.lastActiveChannel) {
-                    targetChannel = bridge.lastActiveChannel;
-                }
+                    // Skip if already connected
+                    if (bridge.pool.getConnectedByWebSocketUrl(win.webSocketDebuggerUrl)) continue;
 
-                if (targetChannel) {
-                    logger.info(`[background] Auto-connecting to newly discovered window: ${win.projectName} (${win.workspacePath})`);
-                    bridge.pool.getOrConnect(win.workspacePath, false, undefined, false).then((cdp) => {
-                        setupWorkspaceDetectors(cdp, win.projectName, targetChannel!);
+                    // Determine if this is the active workspace window we should notify about
+                    let shouldNotify = false;
+                    if (activeWindows.length === 1) {
+                        shouldNotify = true;
+                    } else {
+                        const normW = win.workspacePath.toLowerCase().replace(/\//g, '\\').trim();
+                        const normPrev = binding.workspacePath.toLowerCase().replace(/\//g, '\\').trim();
+                        if (normW === normPrev || normW.startsWith(normPrev + '\\') || normPrev.startsWith(normW + '\\')) {
+                            shouldNotify = true;
+                        }
+                    }
+
+                    const wsPath = win.workspacePath;
+                    logger.info(`[background] Auto-connecting to newly discovered window: ${win.projectName} (${wsPath}) (notify=${shouldNotify})`);
+
+                    bridge.pool.getOrConnect(wsPath, false, undefined, false).then((cdp) => {
+                        setupWorkspaceDetectors(cdp, win.projectName, channel);
                         logger.info(`[background] Successfully connected to window: ${win.projectName}`);
+
+                        if (shouldNotify) {
+                            // Update binding in DB
+                            workspaceBindingRepo.upsert({
+                                channelId: binding.channelId,
+                                workspacePath: wsPath,
+                                guildId: String(channel.chatId)
+                            });
+
+                            const cleanName = win.projectName.replace(/\.code-workspace$/i, '').replace(/^🗂️\s*/, '');
+                            bot.api.sendMessage(channel.chatId, `🔌 <b>${t('Successfully connected to IDE!')}</b>\n\n💼 ${t('Active workspace:')} <b>${escapeHtml(cleanName)}</b>`, {
+                                parse_mode: 'HTML',
+                                message_thread_id: channel.threadId
+                            }).catch(() => {});
+                        } else {
+                            const cleanName = win.projectName.replace(/\.code-workspace$/i, '').replace(/^🗂️\s*/, '');
+                            const swId = `sw_new_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`;
+                            statusWindowPathCache.set(swId, wsPath);
+
+                            const keyboard = new InlineKeyboard()
+                                .text(`🔌 ${t('Make active')}`, `switch_window:${swId}`);
+
+                            bot.api.sendMessage(channel.chatId, `🖥️ <b>${t('New IDE window detected:')}</b>\n\n💼 <b>${escapeHtml(cleanName)}</b>`, {
+                                parse_mode: 'HTML',
+                                message_thread_id: channel.threadId,
+                                reply_markup: keyboard
+                            }).catch(() => {});
+                        }
                     }).catch((err) => {
                         logger.debug(`[background] Failed auto-connection to ${win.projectName}:`, err?.message || err);
                     });
                 }
-            }
 
-            // Prompt user if multiple windows are open but none are connected to the current channel/chat
-            if (activeWindows.length > 1) {
-                const bindings = workspaceBindingRepo.findAll();
-                for (const binding of bindings) {
-                    const ch: ChannelContext = {
-                        chatId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[0]) : Number(binding.channelId),
-                        threadId: binding.channelId.includes(':') ? Number(binding.channelId.split(':')[1]) : undefined,
-                    };
-                    const key = channelKey(ch);
+                // Prompt user if multiple windows are open but none matches the active one, and we haven't asked yet
+                if (activeWindows.length >= 2) {
+                    const hasMatchingWin = activeWindows.some(w => {
+                        if (!w.workspacePath) return false;
+                        const normW = w.workspacePath.toLowerCase().replace(/\//g, '\\').trim();
+                        const normPrev = binding.workspacePath.toLowerCase().replace(/\//g, '\\').trim();
+                        return normW === normPrev || normW.startsWith(normPrev + '\\') || normPrev.startsWith(normW + '\\');
+                    });
 
-                    const bindingProjectName = bridge.pool.extractProjectName(binding.workspacePath);
-                    const isBindingConnected = !!bridge.pool.getConnected(bindingProjectName);
-
-                    if (!isBindingConnected && !promptSelectionSentChannels.has(key)) {
+                    if (!hasMatchingWin && !promptSelectionSentChannels.has(key)) {
                         promptSelectionSentChannels.add(key);
 
                         let text = `🖥️ <b>${t('Multiple open IDE windows detected:')}</b>\n\n`;
@@ -1286,9 +1320,9 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             }
                         }
 
-                        bot.api.sendMessage(ch.chatId, text, {
+                        bot.api.sendMessage(channel.chatId, text, {
                             parse_mode: 'HTML',
-                            message_thread_id: ch.threadId,
+                            message_thread_id: channel.threadId,
                             reply_markup: keyboard
                         }).catch(e => logger.error('[background] Failed to send multiple windows selection:', e));
                     }

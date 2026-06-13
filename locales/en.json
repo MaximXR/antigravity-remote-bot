@@ -164,5 +164,15 @@
   "Mirror only the active (bound) workspace.": "Mirror only the active (bound) workspace.",
   "Set Mirror Mode": "Set Mirror Mode",
   "Select a mirror mode:": "Select a mirror mode:",
-  "⚠️ This workspace is currently closed or not running in the IDE!": "⚠️ This workspace is currently closed or not running in the IDE!"
+  "⚠️ This workspace is currently closed or not running in the IDE!": "⚠️ This workspace is currently closed or not running in the IDE!",
+  "Remoat Bot successfully started!": "Remoat Bot successfully started!",
+  "Active IDE windows not found. Please start Antigravity IDE.": "Active IDE windows not found. Please start Antigravity IDE.",
+  "Connected to IDE window!": "Connected to IDE window!",
+  "Successfully connected to IDE!": "Successfully connected to IDE!",
+  "Active workspace:": "Active workspace:",
+  "Remoat Bot started!": "Remoat Bot started!",
+  "Multiple open IDE windows detected. Select which one to make active:": "Multiple open IDE windows detected. Select which one to make active:",
+  "(found {{count}} windows)": "(found {{count}} windows)",
+  "New IDE window detected:": "New IDE window detected:",
+  "Make active": "Make active"
 }

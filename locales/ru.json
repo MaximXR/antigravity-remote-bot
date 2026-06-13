@@ -197,5 +197,15 @@
   "Mirror only the active (bound) workspace.": "Транслировать сообщения только из активной привязанной рабочей области.",
   "Set Mirror Mode": "Задать режим трансляции",
   "Select a mirror mode:": "Выберите режим трансляции:",
-  "⚠️ This workspace is currently closed or not running in the IDE!": "⚠️ Эта рабочая область сейчас закрыта или не запущена в IDE!"
+  "⚠️ This workspace is currently closed or not running in the IDE!": "⚠️ Эта рабочая область сейчас закрыта или не запущена в IDE!",
+  "Remoat Bot successfully started!": "Remoat Bot успешно запущен!",
+  "Active IDE windows not found. Please start Antigravity IDE.": "Активные окна IDE не обнаружены. Пожалуйста, запустите Antigravity IDE.",
+  "Connected to IDE window!": "Подключено к окну IDE!",
+  "Successfully connected to IDE!": "Подключение к IDE установлено!",
+  "Active workspace:": "Основная рабочая область:",
+  "Remoat Bot started!": "Remoat Bot запущен!",
+  "Multiple open IDE windows detected. Select which one to make active:": "Обнаружено несколько открытых окон IDE. Выберите, какое сделать основным:",
+  "(found {{count}} windows)": "(найдено {{count}} окна)",
+  "New IDE window detected:": "Найдено новое окно:",
+  "Make active": "Сделать основным"
 }
