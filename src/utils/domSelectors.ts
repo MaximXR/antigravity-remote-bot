@@ -1723,15 +1723,19 @@ export const QUESTION_SELECTORS = {
                 let sibling = referenceEl.previousElementSibling;
                 const candidates = [];
                 while (sibling) {
-                    const text = (sibling.textContent || '').trim();
-                    if (text) candidates.push(text);
+                    if (sibling.tagName !== 'STYLE' && sibling.tagName !== 'SCRIPT') {
+                        const text = (sibling.textContent || '').trim();
+                        if (text) candidates.push(text);
+                    }
                     sibling = sibling.previousElementSibling;
                 }
                 if (candidates.length === 0 && referenceEl.parentElement) {
                     let parentSibling = referenceEl.parentElement.previousElementSibling;
                     while (parentSibling) {
-                        const text = (parentSibling.textContent || '').trim();
-                        if (text) candidates.push(text);
+                        if (parentSibling.tagName !== 'STYLE' && parentSibling.tagName !== 'SCRIPT') {
+                            const text = (parentSibling.textContent || '').trim();
+                            if (text) candidates.push(text);
+                        }
                         parentSibling = parentSibling.previousElementSibling;
                     }
                 }
@@ -1765,7 +1769,7 @@ export const QUESTION_SELECTORS = {
             const options = [];
             const optionElements = rawOptionElements
                 .filter(el => {
-                    const inputEl = el.querySelector('textarea, input');
+                    const inputEl = el.querySelector('textarea, input[placeholder], input:not([type="radio"]):not([type="checkbox"])');
                     let txt = '';
                     if (inputEl) {
                         txt = (inputEl.placeholder || inputEl.getAttribute('placeholder') || '').trim();
@@ -1781,7 +1785,7 @@ export const QUESTION_SELECTORS = {
 
             const seenTexts = new Set();
             for (const el of optionElements) {
-                const inputEl = el.querySelector('textarea, input');
+                const inputEl = el.querySelector('textarea, input[placeholder], input:not([type="radio"]):not([type="checkbox"])');
                 let txt = '';
                 if (inputEl) {
                     txt = (inputEl.placeholder || inputEl.getAttribute('placeholder') || '').trim();
@@ -1838,7 +1842,7 @@ export const QUESTION_SELECTORS = {
 
             const optionElements = Array.from(card.querySelectorAll('label, div[role="radio"], div[role="checkbox"], div[class*="option"], div[class*="choice"]'))
                 .filter(el => {
-                    const inputEl = el.querySelector('textarea, input');
+                    const inputEl = el.querySelector('textarea, input[placeholder], input:not([type="radio"]):not([type="checkbox"])');
                     let txt = '';
                     if (inputEl) {
                         txt = (inputEl.placeholder || inputEl.getAttribute('placeholder') || '').trim();
@@ -1854,7 +1858,7 @@ export const QUESTION_SELECTORS = {
             const seenTexts = new Set();
             const cleanOptionElements = [];
             for (const el of optionElements) {
-                const inputEl = el.querySelector('textarea, input');
+                const inputEl = el.querySelector('textarea, input[placeholder], input:not([type="radio"]):not([type="checkbox"])');
                 let txt = '';
                 if (inputEl) {
                     txt = (inputEl.placeholder || inputEl.getAttribute('placeholder') || '').trim();
@@ -1911,7 +1915,7 @@ export const QUESTION_SELECTORS = {
 
             const optionElements = Array.from(card.querySelectorAll('label, div[role="radio"], div[role="checkbox"], div[class*="option"], div[class*="choice"]'))
                 .filter(el => {
-                    const inputEl = el.querySelector('textarea, input');
+                    const inputEl = el.querySelector('textarea, input[placeholder], input:not([type="radio"]):not([type="checkbox"])');
                     let txt = '';
                     if (inputEl) {
                         txt = (inputEl.placeholder || inputEl.getAttribute('placeholder') || '').trim();
@@ -1927,7 +1931,7 @@ export const QUESTION_SELECTORS = {
             const seenTexts = new Set();
             const cleanOptionElements = [];
             for (const el of optionElements) {
-                const inputEl = el.querySelector('textarea, input');
+                const inputEl = el.querySelector('textarea, input[placeholder], input:not([type="radio"]):not([type="checkbox"])');
                 let txt = '';
                 if (inputEl) {
                     txt = (inputEl.placeholder || inputEl.getAttribute('placeholder') || '').trim();
