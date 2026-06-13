@@ -501,6 +501,7 @@ export class ResponseMonitor {
             let quotaDetected: boolean;
             let planningActive: boolean;
             let approvalActive = false;
+            let questionActive = false;
             let currentText: string | null = null;
             let structuredHandledLogs = false;
 
@@ -516,6 +517,7 @@ export class ResponseMonitor {
                 quotaDetected = !!combined.quotaError;
                 planningActive = !!combined.planningActive;
                 approvalActive = !!combined.approvalActive;
+                questionActive = !!combined.questionActive;
 
                 // Try structured extraction first
                 if (structuredResult) {
@@ -576,6 +578,7 @@ export class ResponseMonitor {
                 quotaDetected = !!combined.quotaError;
                 planningActive = !!combined.planningActive;
                 approvalActive = !!combined.approvalActive;
+                questionActive = !!combined.questionActive;
                 currentText = typeof combined.responseText === 'string' ? combined.responseText.trim() || null : null;
                 this.lastExtractionSource = 'legacy';
 
@@ -587,18 +590,20 @@ export class ResponseMonitor {
             // CDP calls succeeded — reset WebSocket error counter
             this.consecutiveWsErrors = 0;
 
-            // Handle stop button appearing
-            if (isGenerating) {
+            // Handle stop button appearing or active dialogs (avoiding race conditions on fast models)
+            if (isGenerating || planningActive || approvalActive || questionActive) {
                 if (!this.generationStarted) {
                     this.generationStarted = true;
                     this.setPhase('thinking', null);
                 }
-                this.stopGoneCount = 0;
 
-                if (this.detectorsResumedTemporarily) {
-                    this.detectorsResumedTemporarily = false;
-                    logger.debug(`[ResponseMonitor] LLM resumed generation, pausing detectors again`);
-                    this.cdpService.emit('response-monitor:start');
+                if (isGenerating) {
+                    this.stopGoneCount = 0;
+                    if (this.detectorsResumedTemporarily) {
+                        this.detectorsResumedTemporarily = false;
+                        logger.debug(`[ResponseMonitor] LLM resumed generation, pausing detectors again`);
+                        this.cdpService.emit('response-monitor:start');
+                    }
                 }
             }
 
@@ -647,13 +652,13 @@ export class ResponseMonitor {
             // Completion: stop button gone N consecutive times
             if (!isGenerating && this.generationStarted) {
                 // Planning check already done in combined poll script
-                if (planningActive || approvalActive) {
+                if (planningActive || approvalActive || questionActive) {
                     this.stopGoneCount = 0;
-                    logger.info(`[ResponseMonitor] ${planningActive ? 'Planning' : 'Approval'} dialog active — deferring completion`);
+                    logger.info(`[ResponseMonitor] ${planningActive ? 'Planning' : (approvalActive ? 'Approval' : 'Question')} dialog active — deferring completion`);
 
                     if (!this.detectorsResumedTemporarily) {
                         this.detectorsResumedTemporarily = true;
-                        logger.debug(`[ResponseMonitor] LLM paused for ${planningActive ? 'planning' : 'approval'}, temporarily resuming detectors`);
+                        logger.debug(`[ResponseMonitor] LLM paused for ${planningActive ? 'planning' : (approvalActive ? 'approval' : 'question')}, temporarily resuming detectors`);
                         this.cdpService.emit('response-monitor:stop');
                     }
                 } else {

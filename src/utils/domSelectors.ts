@@ -1544,7 +1544,32 @@ export const RESPONSE_SELECTORS = {
 
         // approvalVisible is already calculated strictly above
 
-        return { isGenerating, quotaError, planningActive, approvalActive: approvalVisible, responseText, processLogs };
+        const checkQuestionActive = () => {
+            try {
+                const submitBtn = Array.from(document.querySelectorAll('button'))
+                    .find(btn => {
+                        const t = (btn.textContent || '').trim().toLowerCase();
+                        return t === 'submit' || t === 'continue' || t.startsWith('continue');
+                    });
+                if (!submitBtn) return false;
+
+                const card = submitBtn.closest('div[class*="rounded-"], div[class*="border"], [role="dialog"], .modal') 
+                    || submitBtn.parentElement?.parentElement;
+                if (!card) return false;
+
+                const skipBtn = Array.from(card.querySelectorAll('button, span, a'))
+                    .find(el => {
+                        const t = (el.textContent || '').trim().toLowerCase();
+                        return t === 'skip';
+                    });
+                return !!skipBtn;
+            } catch (e) {
+                return false;
+            }
+        };
+        const questionActive = checkQuestionActive();
+
+        return { isGenerating, quotaError, planningActive, approvalActive: approvalVisible, questionActive, responseText, processLogs };
     })()`,
 
     QUOTA_ERROR: `(() => {
@@ -1672,8 +1697,11 @@ export const ERROR_POPUP_SELECTORS = {
 export const QUESTION_SELECTORS = {
     DETECT_QUESTION_SCRIPT: `(() => {
         try {
-            const submitBtn = Array.from(document.querySelectorAll('button'))
-                .find(btn => (btn.textContent || '').trim().toLowerCase() === 'submit');
+            const isSubmitOrContinue = (btn) => {
+                const t = (btn.textContent || '').trim().toLowerCase();
+                return t === 'submit' || t === 'continue' || t.startsWith('continue');
+            };
+            const submitBtn = Array.from(document.querySelectorAll('button')).find(isSubmitOrContinue);
             if (!submitBtn) return null;
 
             const card = submitBtn.closest('div[class*="rounded-"], div[class*="border"], [role="dialog"], .modal') 
@@ -1745,8 +1773,11 @@ export const QUESTION_SELECTORS = {
 
     buildClickQuestionOptionScript: (optionIndex: number) => `(() => {
         try {
-            const submitBtn = Array.from(document.querySelectorAll('button'))
-                .find(btn => (btn.textContent || '').trim().toLowerCase() === 'submit');
+            const isSubmitOrContinue = (btn) => {
+                const t = (btn.textContent || '').trim().toLowerCase();
+                return t === 'submit' || t === 'continue' || t.startsWith('continue');
+            };
+            const submitBtn = Array.from(document.querySelectorAll('button')).find(isSubmitOrContinue);
             if (!submitBtn) return { ok: false, error: 'Submit button not found' };
 
             const card = submitBtn.closest('div[class*="rounded-"], div[class*="border"], [role="dialog"], .modal') 
@@ -1800,8 +1831,11 @@ export const QUESTION_SELECTORS = {
 
     buildSubmitQuestionTextScript: (optionIndex: number, text: string) => `(() => {
         try {
-            const submitBtn = Array.from(document.querySelectorAll('button'))
-                .find(btn => (btn.textContent || '').trim().toLowerCase() === 'submit');
+            const isSubmitOrContinue = (btn) => {
+                const t = (btn.textContent || '').trim().toLowerCase();
+                return t === 'submit' || t === 'continue' || t.startsWith('continue');
+            };
+            const submitBtn = Array.from(document.querySelectorAll('button')).find(isSubmitOrContinue);
             if (!submitBtn) return { ok: false, error: 'Submit button not found' };
 
             const card = submitBtn.closest('div[class*="rounded-"], div[class*="border"], [role="dialog"], .modal') 
@@ -1863,8 +1897,11 @@ export const QUESTION_SELECTORS = {
 
     SUBMIT_QUESTION_SCRIPT: `(() => {
         try {
-            const submitBtn = Array.from(document.querySelectorAll('button'))
-                .find(btn => (btn.textContent || '').trim().toLowerCase() === 'submit');
+            const isSubmitOrContinue = (btn) => {
+                const t = (btn.textContent || '').trim().toLowerCase();
+                return t === 'submit' || t === 'continue' || t.startsWith('continue');
+            };
+            const submitBtn = Array.from(document.querySelectorAll('button')).find(isSubmitOrContinue);
             if (submitBtn && typeof submitBtn.click === 'function') {
                 submitBtn.click();
                 return { ok: true };
@@ -1877,8 +1914,11 @@ export const QUESTION_SELECTORS = {
 
     SKIP_QUESTION_SCRIPT: `(() => {
         try {
-            const submitBtn = Array.from(document.querySelectorAll('button'))
-                .find(btn => (btn.textContent || '').trim().toLowerCase() === 'submit');
+            const isSubmitOrContinue = (btn) => {
+                const t = (btn.textContent || '').trim().toLowerCase();
+                return t === 'submit' || t === 'continue' || t.startsWith('continue');
+            };
+            const submitBtn = Array.from(document.querySelectorAll('button')).find(isSubmitOrContinue);
             if (!submitBtn) return { ok: false, error: 'Submit button not found' };
 
             const card = submitBtn.closest('div[class*="rounded-"], div[class*="border"], [role="dialog"], .modal') 
