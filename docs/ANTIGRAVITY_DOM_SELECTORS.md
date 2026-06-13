@@ -32,6 +32,7 @@ This index maps each DOM selector to the exact file where it is declared in the 
 | **Planning Modal Content** | `div.relative.pl-4.pr-4.py-1, div.relative.pl-4.pr-4` | [src/detectors/planningDetector.ts](file:///e:/Desktop/Remoat/src/detectors/planningDetector.ts) |
 | **Planning Artifact Card** | `div.artifact-card, div[class*="artifact-card"], div[class*="border-gray-500"]` | [src/utils/domSelectors.ts](file:///e:/Desktop/Remoat/src/utils/domSelectors.ts) (L106)<br/>[src/services/planningDetector.ts](file:///e:/Desktop/Remoat/src/services/planningDetector.ts) |
 | **Error Popup Dialog** | `[role="dialog"], [role="alertdialog"], .modal, .dialog` | [src/services/cdpBridgeManager.ts](file:///e:/Desktop/Remoat/src/services/cdpBridgeManager.ts) (L40)<br/>[src/detectors/errorPopupDetector.ts](file:///e:/Desktop/Remoat/src/detectors/errorPopupDetector.ts) |
+| **Interactive Question Card** | Container with Submit/Continue button and Skip button | [src/utils/domSelectors.ts](file:///e:/Desktop/Remoat/src/utils/domSelectors.ts) (L1697)<br/>[src/services/questionDetector.ts](file:///e:/Desktop/Remoat/src/services/questionDetector.ts) |
 
 ---
 
@@ -76,4 +77,15 @@ DOM Tree Structure Trace:
 11. `DIV` (Workspace conversation panel with `id="conversation" aria-label="Agent Conversation" role="region"`)
 12. `DIV` (Side panel wrapper with `class="w-full h-full flex flex-col box-border focus:!outline-none"`)
 13. `DIV` (Side panel root container with `class="antigravity-agent-side-panel"`)
-14. `DIV` (Monaco workbench shell with `role="application"`)
+14: `DIV` (Monaco workbench shell with `role="application"`)
+
+### Interactive Question Detection (`questionDetector.ts`)
+
+To mirror Cascade's interactive questions (ask_question):
+1. **Detects an active card**: Searches for a button text matching `submit` or `continue`/`continue generating` (case-insensitively) alongside a button/link matching `skip` in containers like `div[class*="rounded-"], div[class*="border"], [role="dialog"], .modal` or their parents.
+2. **Scrapes the question and choices**:
+   - Question text: extracted from header/title elements inside the card.
+   - Option choices: labels/options matching `label, div[role="radio"], div[role="checkbox"], div[class*="option"], div[class*="choice"]` (excluding buttons matching skip/submit/continue).
+3. **Telegram integration**: Sends choice options as inline buttons or accepts input text for open text questions.
+4. **Action scripts**: Runs CDP evaluations to click selected choice options or fill/submit textareas inside the question card container.
+
