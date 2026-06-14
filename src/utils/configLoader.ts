@@ -20,7 +20,11 @@ export interface PersistedConfig {
     autoApproveConsoleCommands?: boolean;
     autoApproveReadAccess?: boolean;
     autoApproveUrlAccess?: boolean;
+    autoApproveBrowserAccess?: boolean;
     autoApproveOtherRequests?: boolean;
+    autoApproveAlways?: boolean;
+    notifyOnAutoApprove?: boolean;
+    approvalMirrorMode?: 'all' | 'active' | 'telegram_only';
     logLevel?: LogLevel;
     extractionMode?: 'legacy' | 'structured';
     useTopics?: boolean;
@@ -95,11 +99,35 @@ function mergeConfig(persisted: PersistedConfig): AppConfig {
         false,
     );
 
+    const autoApproveBrowserAccess = resolveBoolean(
+        process.env.AUTO_APPROVE_BROWSER_ACCESS,
+        persisted.autoApproveBrowserAccess,
+        false,
+    );
+
     const autoApproveOtherRequests = resolveBoolean(
         process.env.AUTO_APPROVE_OTHER_REQUESTS,
         persisted.autoApproveOtherRequests,
         false,
     );
+
+    const autoApproveAlways = resolveBoolean(
+        process.env.AUTO_APPROVE_ALWAYS,
+        persisted.autoApproveAlways,
+        false,
+    );
+
+    const notifyOnAutoApprove = resolveBoolean(
+        process.env.NOTIFY_ON_AUTO_APPROVE,
+        persisted.notifyOnAutoApprove,
+        true,
+    );
+
+    const approvalMirrorModeRaw = process.env.APPROVAL_MIRROR_MODE ?? persisted.approvalMirrorMode;
+    let approvalMirrorMode: 'all' | 'active' | 'telegram_only' = 'all';
+    if (approvalMirrorModeRaw === 'all' || approvalMirrorModeRaw === 'active' || approvalMirrorModeRaw === 'telegram_only') {
+        approvalMirrorMode = approvalMirrorModeRaw;
+    }
 
     // Master switch autoApprove defaults to true if autoApproveFileEdits was true, otherwise false
     const autoApprove = resolveBoolean(
@@ -149,7 +177,11 @@ function mergeConfig(persisted: PersistedConfig): AppConfig {
         autoApproveConsoleCommands,
         autoApproveReadAccess,
         autoApproveUrlAccess,
+        autoApproveBrowserAccess,
         autoApproveOtherRequests,
+        autoApproveAlways,
+        notifyOnAutoApprove,
+        approvalMirrorMode,
         logLevel,
         extractionMode,
         useTopics,

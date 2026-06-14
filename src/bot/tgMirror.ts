@@ -290,151 +290,156 @@ export async function sendPromptToAntigravity(
     const projectName = cdp.getCurrentWorkspaceName() || bridge.lastActiveWorkspace;
     const planningDetector = projectName ? bridge.pool.getPlanningDetector(projectName) : undefined;
 
-    await IdePromptRunner.runPrompt(
-        cdp,
-        prompt,
-        inboundImages.map(img => img.localPath),
-        {
-            modelLabel,
-            modeName,
-            isStopRequested: () => userStopRequestedChannels.has(channelKey(channel)),
-            clearStopRequest: () => { userStopRequestedChannels.delete(channelKey(channel)); },
-            planningDetector,
-            maxOutboundImages: MAX_OUTBOUND_GENERATED_IMAGES
-        },
-        {
-            onActivityProgress: async ({ title, body, footer, isFinalized }) => {
-                enqueueActivity(async () => {
-                    if (isFinalized) {
-                        const text = `<b>${PHASE_ICONS.complete} ${escapeHtml(modelLabel)} · ${footer}</b>\n\n${body}`;
-                        lastLiveActivityKey = text.slice(0, 200);
-                        if (liveActivityMsgId) {
-                            await editMsg(liveActivityMsgId, text, undefined);
-                        } else {
-                            liveActivityMsgId = await sendMsg(text, undefined);
-                        }
-                    } else {
-                        const text = `<b>${escapeHtml(title)}</b>\n\n${body}\n\n<i>${escapeHtml(footer)}</i>`;
-                        const bodySnap = body.length + '|' + title + '|' + footer;
-                        if (bodySnap === lastLiveActivityKey && liveActivityMsgId) return;
-                        lastLiveActivityKey = bodySnap;
-                        await editMsg(liveActivityMsgId!, text, stopKeyboard);
-                    }
-                });
+    try {
+        cdp.setTelegramInitiated(true);
+        await IdePromptRunner.runPrompt(
+            cdp,
+            prompt,
+            inboundImages.map(img => img.localPath),
+            {
+                modelLabel,
+                modeName,
+                isStopRequested: () => userStopRequestedChannels.has(channelKey(channel)),
+                clearStopRequest: () => { userStopRequestedChannels.delete(channelKey(channel)); },
+                planningDetector,
+                maxOutboundImages: MAX_OUTBOUND_GENERATED_IMAGES
             },
-            onLiveResponseUpdate: async ({ title, body, footer, isAlreadyHtml, isFinalized }) => {
-                await upsertLiveResponse(title, body, footer, {
-                    isAlreadyHtml,
-                    skipWhenFinalized: isFinalized
-                });
-            },
-            onComplete: async ({ finalText, isHtml, choices, elapsedSeconds, generatedImages }) => {
-                try {
-                    const replyKeyboard = new InlineKeyboard();
-                    if (choices && choices.length > 0) {
-                        const proj = cdp.getCurrentWorkspaceName() || bridge.lastActiveWorkspace || 'default';
-                        lastChoicesCache.set(channelKey(channel), choices);
-                        choices.forEach((choice, idx) => {
-                            replyKeyboard.text(choice, `ai_choice:${proj}:${idx}`);
-                            replyKeyboard.row();
-                        });
-                    }
-                    replyKeyboard.text('↩️ ' + t('Undo'), 'undo_last');
-
-                    liveResponseUpdateVersion += 1;
-                    if (finalText && finalText.trim().length > 0) {
-                        const footer = `⏱️ ${elapsedSeconds}s`;
-                        await sendChunkedResponse('', footer, finalText, isHtml, replyKeyboard);
-                    } else {
-                        await upsertLiveResponse(`${PHASE_ICONS.complete} Complete`, t('Failed to extract response. Use /screenshot to verify.'), `⏱️ ${elapsedSeconds}s`, { expectedVersion: liveResponseUpdateVersion, replyMarkup: replyKeyboard });
-                    }
-
-                    if (options) {
-                        try {
-                            const sessionInfo = await options.chatSessionService.getCurrentSessionInfo(cdp);
-                            if (sessionInfo && sessionInfo.hasActiveChat && sessionInfo.title && sessionInfo.title !== t('(Untitled)')) {
-                                const session = options.chatSessionRepo.findByChannelId(channelKey(channel));
-                                const pName = session
-                                    ? bridge.pool.extractProjectName(session.workspacePath)
-                                    : cdp.getCurrentWorkspaceName();
-                                if (pName) {
-                                    registerApprovalSessionChannel(bridge, pName, sessionInfo.title, channel);
-                                }
-
-                                if (session && session.displayName !== sessionInfo.title) {
-                                    const newName = options.titleGenerator.sanitizeForChannelName(sessionInfo.title);
-                                    const formattedName = `${session.sessionNumber}-${newName}`;
-                                    const threadId = session.channelId.includes(':')
-                                        ? Number(session.channelId.split(':')[1])
-                                        : undefined;
-                                    if (threadId) {
-                                        try {
-                                            options.topicManager.setChatId(Number(session.channelId.split(':')[0]));
-                                            await options.topicManager.renameTopic(threadId, formattedName);
-                                        } catch (e) { logger.debug('[Rename] Topic rename optional, failed:', e); }
-                                    }
-                                    options.chatSessionRepo.updateDisplayName(channelKey(channel), sessionInfo.title);
-                                }
+            {
+                onActivityProgress: async ({ title, body, footer, isFinalized }) => {
+                    enqueueActivity(async () => {
+                        if (isFinalized) {
+                            const text = `<b>${PHASE_ICONS.complete} ${escapeHtml(modelLabel)} · ${footer}</b>\n\n${body}`;
+                            lastLiveActivityKey = text.slice(0, 200);
+                            if (liveActivityMsgId) {
+                                await editMsg(liveActivityMsgId, text, undefined);
+                            } else {
+                                liveActivityMsgId = await sendMsg(text, undefined);
                             }
-                        } catch (e) { logger.error('[Rename] Failed:', e); }
-                    }
-
-                    for (let i = 0; i < generatedImages.length; i++) {
-                        const file = await toTelegramInputFile(generatedImages[i], i);
-                        if (file) {
-                            try {
-                                await api.sendPhoto(channel.chatId, new InputFile(file.buffer, file.name), {
-                                    caption: `🖼️ Generated image (${i + 1}/${generatedImages.length})`,
-                                    message_thread_id: channel.threadId,
-                                });
-                            } catch (e) { logger.error('[sendGeneratedImages] Failed:', e); }
+                        } else {
+                            const text = `<b>${escapeHtml(title)}</b>\n\n${body}\n\n<i>${escapeHtml(footer)}</i>`;
+                            const bodySnap = body.length + '|' + title + '|' + footer;
+                            if (bodySnap === lastLiveActivityKey && liveActivityMsgId) return;
+                            lastLiveActivityKey = bodySnap;
+                            await editMsg(liveActivityMsgId!, text, stopKeyboard);
                         }
-                    }
-                } catch (error) {
-                    logger.error(`[sendPrompt:${monitorTraceId}] onComplete failed:`, error);
-                } finally {
-                    resolveMonitorDone();
-                }
-            },
-            onQuotaReached: async ({ elapsedSeconds, modelLabel, progressBody }) => {
-                try {
-                    liveActivityUpdateVersion += 1;
-                    await setProgressMessage(`<b>⚠️ ${escapeHtml(modelLabel)} · Quota Reached</b>\n\n${progressBody}\n\n<i>⏱️ ${elapsedSeconds}s</i>`);
-                    liveResponseUpdateVersion += 1;
-                    await upsertLiveResponse('⚠️ Quota Reached', 'Model quota limit reached. Please wait or switch to a different model.', `⏱️ ${elapsedSeconds}s`, { expectedVersion: liveResponseUpdateVersion, isAlreadyHtml: false, skipTruncation: true });
-
+                    });
+                },
+                onLiveResponseUpdate: async ({ title, body, footer, isAlreadyHtml, isFinalized }) => {
+                    await upsertLiveResponse(title, body, footer, {
+                        isAlreadyHtml,
+                        skipWhenFinalized: isFinalized
+                    });
+                },
+                onComplete: async ({ finalText, isHtml, choices, elapsedSeconds, generatedImages }) => {
                     try {
-                        const payload = await buildModelsUI(cdp, () => bridge.quota.fetchQuota());
-                        if (payload) {
-                            await api.sendMessage(channel.chatId, payload.text, { parse_mode: 'HTML', message_thread_id: channel.threadId, reply_markup: payload.keyboard });
+                        const replyKeyboard = new InlineKeyboard();
+                        if (choices && choices.length > 0) {
+                            const proj = cdp.getCurrentWorkspaceName() || bridge.lastActiveWorkspace || 'default';
+                            lastChoicesCache.set(channelKey(channel), choices);
+                            choices.forEach((choice, idx) => {
+                                replyKeyboard.text(choice, `ai_choice:${proj}:${idx}`);
+                                replyKeyboard.row();
+                            });
                         }
-                    } catch (e) { logger.error('[Quota] Failed to send model selection UI:', e); }
-                } finally {
-                    resolveMonitorDone();
-                }
-            },
-            onTimeout: async ({ elapsedSeconds, payloadText, isHtml }) => {
-                try {
-                    const undoKeyboard = new InlineKeyboard().text('↩️ ' + t('Undo'), 'undo_last');
-                    liveResponseUpdateVersion += 1;
-                    await sendChunkedResponse(`${PHASE_ICONS.timeout} Timeout`, `⏱️ ${elapsedSeconds}s`, payloadText, isHtml, undoKeyboard);
-                    liveActivityUpdateVersion += 1;
-                    await setProgressMessage(`<b>${PHASE_ICONS.timeout} ${escapeHtml(modelLabel)} · ${elapsedSeconds}s</b>`);
-                } finally {
-                    resolveMonitorDone();
-                }
-            },
-            onError: async (errorMsg) => {
-                try {
-                    await sendEmbed(`${PHASE_ICONS.error} Error`, t(`Error occurred during processing: ${errorMsg}`));
-                } finally {
-                    resolveMonitorDone();
+                        replyKeyboard.text('↩️ ' + t('Undo'), 'undo_last');
+
+                        liveResponseUpdateVersion += 1;
+                        if (finalText && finalText.trim().length > 0) {
+                            const footer = `⏱️ ${elapsedSeconds}s`;
+                            await sendChunkedResponse('', footer, finalText, isHtml, replyKeyboard);
+                        } else {
+                            await upsertLiveResponse(`${PHASE_ICONS.complete} Complete`, t('Failed to extract response. Use /screenshot to verify.'), `⏱️ ${elapsedSeconds}s`, { expectedVersion: liveResponseUpdateVersion, replyMarkup: replyKeyboard });
+                        }
+
+                        if (options) {
+                            try {
+                                const sessionInfo = await options.chatSessionService.getCurrentSessionInfo(cdp);
+                                if (sessionInfo && sessionInfo.hasActiveChat && sessionInfo.title && sessionInfo.title !== t('(Untitled)')) {
+                                    const session = options.chatSessionRepo.findByChannelId(channelKey(channel));
+                                    const pName = session
+                                        ? bridge.pool.extractProjectName(session.workspacePath)
+                                        : cdp.getCurrentWorkspaceName();
+                                    if (pName) {
+                                        registerApprovalSessionChannel(bridge, pName, sessionInfo.title, channel);
+                                    }
+
+                                    if (session && session.displayName !== sessionInfo.title) {
+                                        const newName = options.titleGenerator.sanitizeForChannelName(sessionInfo.title);
+                                        const formattedName = `${session.sessionNumber}-${newName}`;
+                                        const threadId = session.channelId.includes(':')
+                                            ? Number(session.channelId.split(':')[1])
+                                            : undefined;
+                                        if (threadId) {
+                                            try {
+                                                options.topicManager.setChatId(Number(session.channelId.split(':')[0]));
+                                                await options.topicManager.renameTopic(threadId, formattedName);
+                                            } catch (e) { logger.debug('[Rename] Topic rename optional, failed:', e); }
+                                        }
+                                        options.chatSessionRepo.updateDisplayName(channelKey(channel), sessionInfo.title);
+                                    }
+                                }
+                            } catch (e) { logger.error('[Rename] Failed:', e); }
+                        }
+
+                        for (let i = 0; i < generatedImages.length; i++) {
+                            const file = await toTelegramInputFile(generatedImages[i], i);
+                            if (file) {
+                                try {
+                                    await api.sendPhoto(channel.chatId, new InputFile(file.buffer, file.name), {
+                                        caption: `🖼️ Generated image (${i + 1}/${generatedImages.length})`,
+                                        message_thread_id: channel.threadId,
+                                    });
+                                } catch (e) { logger.error('[sendGeneratedImages] Failed:', e); }
+                            }
+                        }
+                    } catch (error) {
+                        logger.error(`[sendPrompt:${monitorTraceId}] onComplete failed:`, error);
+                    } finally {
+                        resolveMonitorDone();
+                    }
+                },
+                onQuotaReached: async ({ elapsedSeconds, modelLabel, progressBody }) => {
+                    try {
+                        liveActivityUpdateVersion += 1;
+                        await setProgressMessage(`<b>⚠️ ${escapeHtml(modelLabel)} · Quota Reached</b>\n\n${progressBody}\n\n<i>⏱️ ${elapsedSeconds}s</i>`);
+                        liveResponseUpdateVersion += 1;
+                        await upsertLiveResponse('⚠️ Quota Reached', 'Model quota limit reached. Please wait or switch to a different model.', `⏱️ ${elapsedSeconds}s`, { expectedVersion: liveResponseUpdateVersion, isAlreadyHtml: false, skipTruncation: true });
+
+                        try {
+                            const payload = await buildModelsUI(cdp, () => bridge.quota.fetchQuota());
+                            if (payload) {
+                                await api.sendMessage(channel.chatId, payload.text, { parse_mode: 'HTML', message_thread_id: channel.threadId, reply_markup: payload.keyboard });
+                            }
+                        } catch (e) { logger.error('[Quota] Failed to send model selection UI:', e); }
+                    } finally {
+                        resolveMonitorDone();
+                    }
+                },
+                onTimeout: async ({ elapsedSeconds, payloadText, isHtml }) => {
+                    try {
+                        const undoKeyboard = new InlineKeyboard().text('↩️ ' + t('Undo'), 'undo_last');
+                        liveResponseUpdateVersion += 1;
+                        await sendChunkedResponse(`${PHASE_ICONS.timeout} Timeout`, `⏱️ ${elapsedSeconds}s`, payloadText, isHtml, undoKeyboard);
+                        liveActivityUpdateVersion += 1;
+                        await setProgressMessage(`<b>${PHASE_ICONS.timeout} ${escapeHtml(modelLabel)} · ${elapsedSeconds}s</b>`);
+                    } finally {
+                        resolveMonitorDone();
+                    }
+                },
+                onError: async (errorMsg) => {
+                    try {
+                        await sendEmbed(`${PHASE_ICONS.error} Error`, t(`Error occurred during processing: ${errorMsg}`));
+                    } finally {
+                        resolveMonitorDone();
+                    }
                 }
             }
-        }
-    );
+        );
 
-    await monitorDone;
+        await monitorDone;
+    } finally {
+        cdp.setTelegramInitiated(false);
+    }
 }
 
 export async function mirrorResponseToTelegram(

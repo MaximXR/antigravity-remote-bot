@@ -259,9 +259,10 @@ export function registerCommands(bot: Bot, deps: CommandDependencies) {
             if (s.consoleCommands) activeCats.push(t('Console'));
             if (s.readAccess) activeCats.push(t('Read'));
             if (s.urlAccess) activeCats.push(t('URL'));
+            if (s.browserAccess) activeCats.push(t('Browser'));
             if (s.otherRequests) activeCats.push(t('Other'));
 
-            if (activeCats.length === 5) {
+            if (activeCats.length === 6) {
                 autoAcceptStatus = `🟢 ${t('ON')} (${t('all')})`;
             } else if (activeCats.length > 0) {
                 autoAcceptStatus = `🟢 ${t('ON')} (${activeCats.join(', ')})`;

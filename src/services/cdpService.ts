@@ -85,6 +85,7 @@ export class CdpService extends EventEmitter {
     private lastPongTime: number = 0;
     private isGeneratingResponse: boolean = false;
     private isWebSocketUrlOccupied?: (url: string) => boolean;
+    private isTelegramInitiatedPrompt: boolean = false;
 
 
     constructor(options: CdpServiceOptions = {}) {
@@ -108,6 +109,14 @@ export class CdpService extends EventEmitter {
     /** Check if LLM response generation is currently active */
     isCurrentlyGenerating(): boolean {
         return this.isGeneratingResponse;
+    }
+
+    setTelegramInitiated(val: boolean): void {
+        this.isTelegramInitiatedPrompt = val;
+    }
+
+    isTelegramInitiated(): boolean {
+        return this.isTelegramInitiatedPrompt;
     }
 
     /**

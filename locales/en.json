@@ -174,5 +174,20 @@
   "Multiple open IDE windows detected. Select which one to make active:": "Multiple open IDE windows detected. Select which one to make active:",
   "(found {{count}} windows)": "(found {{count}} windows)",
   "New IDE window detected:": "New IDE window detected:",
-  "Make active": "Make active"
+  "Make active": "Make active",
+  "browser_access": "Browser Access",
+  "Browser Access": "Browser Access",
+  "Auto-approve strategy": "Auto-approve",
+  "Only once": "Only once",
+  "Always": "Always",
+  "Auto-approve notifications": "Auto-approve notifications",
+  "Manual approval filter": "Receive requests",
+  "Browser": "Browser",
+  "approval_filter_all": "From all IDE windows",
+  "approval_filter_active": "Only from active window",
+  "approval_filter_telegram_only": "Don't receive (except TG prompts)",
+  "autoaccept_help_title": "ℹ️ Parameters Help:",
+  "autoaccept_help_strategy": "• <b>Auto-approve strategy</b> — type of action for auto-approval: 'Only once' (clicks 'Allow once', prompting again for new actions) or 'Always' (clicks 'Always allow', remembering the choice for the current prompt generation).",
+  "autoaccept_help_notify": "• <b>Auto-approve notifications</b> — whether to send a report in Telegram when the bot automatically approves an action.",
+  "autoaccept_help_filter": "• <b>Receive requests</b> — manual approvals to forward: 'From all IDE windows' (forward from everywhere), 'Only from active window' (from the workspace selected in the chat), or 'Don't receive (except TG prompts)' (only forward approvals if the prompt was initiated by you from this Telegram bot)."
 }

@@ -12,7 +12,11 @@ export interface AppConfig {
     autoApproveConsoleCommands: boolean;
     autoApproveReadAccess: boolean;
     autoApproveUrlAccess: boolean;
+    autoApproveBrowserAccess: boolean;
     autoApproveOtherRequests: boolean;
+    autoApproveAlways: boolean;
+    notifyOnAutoApprove: boolean;
+    approvalMirrorMode: 'all' | 'active' | 'telegram_only';
     logLevel: LogLevel;
     extractionMode: ExtractionMode;
     useTopics: boolean;

@@ -145,5 +145,20 @@
   "Multiple open IDE windows detected. Select which one to make active:": "Multiple open IDE windows detected. Select which one to make active:",
   "(found {{count}} windows)": "({{count}}個のウィンドウを検出)",
   "New IDE window detected:": "新しいIDEウィンドウが検出されました:",
-  "Make active": "メインにする"
+  "Make active": "メインにする",
+  "browser_access": "ブラウザアクセス",
+  "Browser Access": "ブラウザアクセス",
+  "Auto-approve strategy": "自動承認範囲",
+  "Only once": "1回のみ",
+  "Always": "常に",
+  "Auto-approve notifications": "自動承認通知",
+  "Manual approval filter": "手動承認フィルター",
+  "Browser": "ブラウザ",
+  "approval_filter_all": "すべてのIDEウィンドウ",
+  "approval_filter_active": "アクティブウィンドウのみ",
+  "approval_filter_telegram_only": "受信しない（TG要求を除く）",
+  "autoaccept_help_title": "ℹ️ 設定ヘルプ:",
+  "autoaccept_help_strategy": "• <b>自動承認範囲</b> — 自動承認時の動作を選択します：「1回のみ許可」（新しいアクションごとに再確認）または「常に許可」（現在のプロンプト生成中、選択を記憶）。",
+  "autoaccept_help_notify": "• <b>自動承認通知</b> — ボットが自動的に承認アクションを実行した際に、Telegramでレポートを送信するかどうか。",
+  "autoaccept_help_filter": "• <b>手動承認の転送</b> — 手動承認要求を転送する条件：すべての開いているIDEウィンドウ（すべて転送）、「アクティブウィンドウのみ」（選択されたプロジェクトからのみ）、または「受信しない（TG要求を除く）」（このTelegramボットから送信されたプロンプトに対する承認のみを転送）。"
 }

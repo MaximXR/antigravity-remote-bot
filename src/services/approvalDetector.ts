@@ -16,7 +16,7 @@ export interface ApprovalInfo {
     isGenerating?: boolean;
 }
 
-export type ApprovalType = 'file_edits' | 'console_commands' | 'read_access' | 'url_access' | 'other_requests';
+export type ApprovalType = 'file_edits' | 'console_commands' | 'read_access' | 'url_access' | 'browser_access' | 'other_requests';
 
 export function classifyApproval(info: ApprovalInfo): ApprovalType {
     const desc = (info.description || '').toLowerCase();
@@ -62,7 +62,22 @@ export function classifyApproval(info: ApprovalInfo): ApprovalType {
         return 'file_edits';
     }
 
-    // 3. URL/Web access
+    // 3. URL/Web access (browser vs internal)
+    const isBrowserRequest =
+        desc.includes('browser') ||
+        desc.includes('read_browser_page') ||
+        desc.includes('read browser page') ||
+        desc.includes('execute_url') ||
+        desc.includes('execute url') ||
+        desc.includes('execute_browser') ||
+        desc.includes('run_browser') ||
+        desc.includes('open_browser') ||
+        desc.includes('open browser');
+
+    if (isBrowserRequest) {
+        return 'browser_access';
+    }
+
     if (
         desc.includes('read_url') ||
         desc.includes('read url') ||

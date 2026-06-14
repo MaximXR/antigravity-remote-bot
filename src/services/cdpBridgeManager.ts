@@ -295,7 +295,11 @@ export function initCdpBridge(): CdpBridge {
         consoleCommands: conf.autoApproveConsoleCommands,
         readAccess: conf.autoApproveReadAccess,
         urlAccess: conf.autoApproveUrlAccess,
+        browserAccess: conf.autoApproveBrowserAccess,
         otherRequests: conf.autoApproveOtherRequests,
+        autoApproveAlways: conf.autoApproveAlways,
+        notifyOnAutoApprove: conf.notifyOnAutoApprove,
+        approvalMirrorMode: conf.approvalMirrorMode,
     });
 
     return {
@@ -350,9 +354,25 @@ export async function flushDeferredApproval(
     }
 
     if (isAutoApproved) {
-        const text = `✅ <b>Auto-approved (File Edits)</b>\nFile changes were automatically approved during generation.\n<b>Workspace:</b> ${escapeHtml(projectName)}`;
-        await bridge.messenger.sendMessage(targetChannel, text);
+        const notify = bridge.autoAccept.getSettings().notifyOnAutoApprove;
+        if (notify) {
+            const text = `✅ <b>Auto-approved (File Edits)</b>\nFile changes were automatically approved during generation.\n<b>Workspace:</b> ${escapeHtml(projectName)}`;
+            await bridge.messenger.sendMessage(targetChannel, text);
+        }
     } else {
+        const approvalMirrorMode = bridge.autoAccept.getSettings().approvalMirrorMode;
+        if (approvalMirrorMode === 'active') {
+            if (bridge.lastActiveWorkspace !== projectName) {
+                logger.debug(`[ApprovalDetector:${projectName}] approvalMirrorMode is 'active' and this is not the active workspace (${bridge.lastActiveWorkspace}), skipping deferred manual approval notification.`);
+                return;
+            }
+        } else if (approvalMirrorMode === 'telegram_only') {
+            if (!cdp.isTelegramInitiated()) {
+                logger.debug(`[ApprovalDetector:${projectName}] approvalMirrorMode is 'telegram_only' and prompt was not initiated from Telegram, skipping deferred manual approval notification.`);
+                return;
+            }
+        }
+
         const targetChannelStr = targetChannel.threadId ? String(targetChannel.threadId) : String(targetChannel.chatId);
         
         let text = `🔔 <b>Approval Required</b>\n\n`;
@@ -492,7 +512,10 @@ export function ensureApprovalDetector(
             if (approvalType === 'file_edits') {
                 if (isGenerating) {
                     if (bridge.autoAccept.isCategoryEnabled(approvalType)) {
-                        const accepted = await detector.alwaysAllowButton() || await detector.approveButton();
+                        const always = bridge.autoAccept.getSettings().autoApproveAlways;
+                        const accepted = always
+                            ? (await detector.alwaysAllowButton() || await detector.approveButton())
+                            : await detector.approveButton();
                         logger.debug(`[ApprovalDetector:${projectName}] Auto-approved file edit during active generation: ${accepted}`);
                         
                         deferredFileApprovals.set(projectName, {
@@ -548,13 +571,34 @@ export function ensureApprovalDetector(
             }
 
             if (bridge.autoAccept.isCategoryEnabled(approvalType)) {
-                const accepted = await detector.alwaysAllowButton() || await detector.approveButton();
+                const always = bridge.autoAccept.getSettings().autoApproveAlways;
+                const accepted = always
+                    ? (await detector.alwaysAllowButton() || await detector.approveButton())
+                    : await detector.approveButton();
                 const categoryLabel = t(approvalType);
                 const text = accepted
                     ? `✅ <b>Auto-approved (${categoryLabel})</b>\nAn action was automatically approved.\n<b>Workspace:</b> ${escapeHtml(projectName)}`
                     : `⚠️ <b>Auto-approve failed (${categoryLabel})</b>\nManual approval required.\n<b>Workspace:</b> ${escapeHtml(projectName)}`;
-                await bridge.messenger.sendMessage(targetChannel, text);
+                
+                const notify = bridge.autoAccept.getSettings().notifyOnAutoApprove;
+                if (notify || !accepted) {
+                    await bridge.messenger.sendMessage(targetChannel, text);
+                }
                 if (accepted) return;
+            }
+
+            // Apply manual approval mirror filtering
+            const approvalMirrorMode = bridge.autoAccept.getSettings().approvalMirrorMode;
+            if (approvalMirrorMode === 'active') {
+                if (bridge.lastActiveWorkspace !== projectName) {
+                    logger.debug(`[ApprovalDetector:${projectName}] approvalMirrorMode is 'active' and this is not the active workspace (${bridge.lastActiveWorkspace}), skipping manual approval notification.`);
+                    return;
+                }
+            } else if (approvalMirrorMode === 'telegram_only') {
+                if (!cdp.isTelegramInitiated()) {
+                    logger.debug(`[ApprovalDetector:${projectName}] approvalMirrorMode is 'telegram_only' and prompt was not initiated from Telegram, skipping manual approval notification.`);
+                    return;
+                }
             }
 
             let text = `🔔 <b>Approval Required</b>\n\n`;

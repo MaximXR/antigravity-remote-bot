@@ -17,7 +17,11 @@ export interface AutoAcceptSettings {
     consoleCommands: boolean;
     readAccess: boolean;
     urlAccess: boolean;
+    browserAccess: boolean;
     otherRequests: boolean;
+    autoApproveAlways: boolean;
+    notifyOnAutoApprove: boolean;
+    approvalMirrorMode: 'all' | 'active' | 'telegram_only';
 }
 
 export class AutoAcceptService {
@@ -38,6 +42,7 @@ export class AutoAcceptService {
             case 'console_commands': return this.settings.consoleCommands;
             case 'read_access': return this.settings.readAccess;
             case 'url_access': return this.settings.urlAccess;
+            case 'browser_access': return this.settings.browserAccess;
             case 'other_requests': return this.settings.otherRequests;
             default: return false;
         }
@@ -52,21 +57,29 @@ export class AutoAcceptService {
         ConfigLoader.save({ autoApprove: enabled });
     }
 
-    toggleCategory(category: keyof Omit<AutoAcceptSettings, 'enabled'>, enabled: boolean): void {
-        this.settings[category] = enabled;
+    toggleCategory(category: 'fileEdits' | 'consoleCommands' | 'readAccess' | 'urlAccess' | 'browserAccess' | 'otherRequests' | 'autoApproveAlways' | 'notifyOnAutoApprove', enabled: boolean): void {
+        (this.settings as any)[category] = enabled;
         const configKey = this.mapSettingToConfigKey(category);
         if (configKey) {
             ConfigLoader.save({ [configKey]: enabled });
         }
     }
 
-    private mapSettingToConfigKey(setting: keyof Omit<AutoAcceptSettings, 'enabled'>): string | null {
+    setApprovalMirrorMode(mode: 'all' | 'active' | 'telegram_only'): void {
+        this.settings.approvalMirrorMode = mode;
+        ConfigLoader.save({ approvalMirrorMode: mode });
+    }
+
+    private mapSettingToConfigKey(setting: string): string | null {
         switch (setting) {
             case 'fileEdits': return 'autoApproveFileEdits';
             case 'consoleCommands': return 'autoApproveConsoleCommands';
             case 'readAccess': return 'autoApproveReadAccess';
             case 'urlAccess': return 'autoApproveUrlAccess';
+            case 'browserAccess': return 'autoApproveBrowserAccess';
             case 'otherRequests': return 'autoApproveOtherRequests';
+            case 'autoApproveAlways': return 'autoApproveAlways';
+            case 'notifyOnAutoApprove': return 'notifyOnAutoApprove';
             default: return null;
         }
     }
