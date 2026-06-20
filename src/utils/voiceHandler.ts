@@ -90,23 +90,28 @@ export async function downloadTelegramVoice(
 
     let url = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
     let init: any = {};
-    const fallbackIpsRaw = process.env.TELEGRAM_FALLBACK_IPS || '';
-    const fallbackIps = fallbackIpsRaw.split(',').map(ip => ip.trim()).filter(Boolean);
-    if (fallbackIps.length > 0) {
-        const ip = fallbackIps[0];
-        url = `https://${ip}/file/bot${botToken}/${filePath}`;
-        process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-        const agent = new https.Agent({
-            keepAlive: true,
-            rejectUnauthorized: false,
-            servername: 'api.telegram.org',
-        });
-        init = {
-            agent,
-            headers: {
-                'Host': 'api.telegram.org',
-            },
-        };
+    if (process.env.ACTIVE_TELEGRAM_API_ROOT && process.env.ACTIVE_TELEGRAM_API_ROOT !== 'https://api.telegram.org') {
+        const apiRoot = process.env.ACTIVE_TELEGRAM_API_ROOT.replace(/\/$/, '');
+        url = `${apiRoot}/file/bot${botToken}/${filePath}`;
+    } else {
+        const fallbackIpsRaw = process.env.TELEGRAM_FALLBACK_IPS || '';
+        const fallbackIps = fallbackIpsRaw.split(',').map(ip => ip.trim()).filter(Boolean);
+        if (fallbackIps.length > 0) {
+            const ip = fallbackIps[0];
+            url = `https://${ip}/file/bot${botToken}/${filePath}`;
+            process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+            const agent = new https.Agent({
+                keepAlive: true,
+                rejectUnauthorized: false,
+                servername: 'api.telegram.org',
+            });
+            init = {
+                agent,
+                headers: {
+                    'Host': 'api.telegram.org',
+                },
+            };
+        }
     }
     const response = await fetch(url, init);
     if (!response.ok) {

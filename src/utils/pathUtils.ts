@@ -291,4 +291,52 @@ export function parseWorkspaceJsonName(workspaceJsonPath: string): string | null
     return null;
 }
 
+export function parseProjectNameFromTitle(title: string): string {
+    if (!title) return 'Unknown';
+    const parts = title.split(/\s[—–-]\s/).map(p => p.trim()).filter(Boolean);
+    if (parts.length === 0) return 'Unknown';
+    
+    const appRegex = /^(antigravity\s*ide|antigravity|visual\s*studio\s*code|vscode|cursor|code\s*oss|code)$/i;
+    
+    // Filter out application name
+    const filteredParts = parts.filter(p => !appRegex.test(p));
+    if (filteredParts.length === 0) {
+        return parts[0];
+    }
+    if (filteredParts.length === 1) {
+        return filteredParts[0];
+    }
+    
+    let bestPart = filteredParts[0];
+    let bestScore = -100;
+    
+    for (const part of filteredParts) {
+        let score = 0;
+        const norm = part.toLowerCase();
+        
+        if (norm.includes('(рабочая область)') || norm.includes('(workspace)')) {
+            score += 100;
+        }
+        if (norm.endsWith('.js') || norm.endsWith('.ts') || norm.endsWith('.json') || norm.endsWith('.md') || norm.endsWith('.py') || norm.endsWith('.html') || norm.endsWith('.css')) {
+            score -= 50;
+        }
+        if (norm.includes('manager') || norm.includes('scratchpad') || norm.includes('extension') || norm.includes('settings') || norm.includes('настройки')) {
+            score -= 30;
+        }
+        if (part.length > 30) {
+            score -= 5;
+        }
+        if (part === filteredParts[0]) {
+            score += 10;
+        }
+        
+        if (score > bestScore) {
+            bestScore = score;
+            bestPart = part;
+        }
+    }
+    
+    return bestPart;
+}
+
 

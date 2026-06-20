@@ -30,7 +30,7 @@ import { ChatSessionService } from '../services/chatSessionService';
 import { ResponseMonitor } from '../services/responseMonitor';
 import { buildClickScript, RESPONSE_SELECTORS } from '../utils/domSelectors';
 import { ensureAntigravityRunning } from '../services/antigravityLauncher';
-import { getAntigravityCdpHint, isTitleMatch, isUntitledTitle, getWorkspaceDisplayPath } from '../utils/pathUtils';
+import { getAntigravityCdpHint, isTitleMatch, isUntitledTitle, getWorkspaceDisplayPath, parseProjectNameFromTitle } from '../utils/pathUtils';
 import { CDP_PORTS } from '../utils/cdpPorts';
 import { AutoAcceptService, AutoAcceptSettings } from '../services/autoAcceptService';
 import { PromptDispatcher } from '../services/promptDispatcher';
@@ -210,33 +210,69 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
     const cleanupHandler = new CleanupCommandHandler(chatSessionRepo, workspaceBindingRepo);
 
     let botConfig: any = {};
-    const fallbackIpsRaw = process.env.TELEGRAM_FALLBACK_IPS || '';
-    const fallbackIps = fallbackIpsRaw.split(',').map(ip => ip.trim()).filter(Boolean);
-    if (fallbackIps.length > 0) {
-        process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-        const agent = new https.Agent({
-            keepAlive: true,
-            rejectUnauthorized: false,
-            servername: 'api.telegram.org',
+    
+    // Test direct connection to api.telegram.org
+    logger.info('[startup] Testing direct connection to api.telegram.org...');
+    let directOk = false;
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const testRes = await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/getMe`, {
+            signal: controller.signal
         });
-        const customFetch = (url: any, init: any) => {
-            const headers = {
-                ...(init?.headers || {}),
-                'Host': 'api.telegram.org',
+        clearTimeout(timeoutId);
+        // Any response code means the server is reachable
+        directOk = testRes.status !== 0;
+    } catch (err: any) {
+        logger.warn(`[startup] Direct connection test failed: ${err?.message || err}`);
+    }
+
+    if (directOk) {
+        logger.info('[startup] Direct connection to api.telegram.org is successful. Using direct connection.');
+        process.env.ACTIVE_TELEGRAM_API_ROOT = 'https://api.telegram.org';
+    } else {
+        logger.warn('[startup] Direct connection failed. Checking for fallback configurations...');
+        if (process.env.TELEGRAM_API_ROOT) {
+            const apiRoot = process.env.TELEGRAM_API_ROOT.replace(/\/$/, '');
+            process.env.ACTIVE_TELEGRAM_API_ROOT = apiRoot;
+            botConfig = {
+                client: {
+                    apiRoot: apiRoot,
+                },
             };
-            return fetch(url, {
-                ...init,
-                agent,
-                headers,
-            });
-        };
-        botConfig = {
-            client: {
-                apiRoot: `https://${fallbackIps[0]}`,
-                fetch: customFetch as any,
-            },
-        };
-        logger.warn(`[Bot] Using Telegram fallback IP: ${fallbackIps[0]} with Host header and SNI mapping via custom fetch.`);
+            logger.info(`[Bot] Using custom Telegram API Root proxy: ${apiRoot}`);
+        } else {
+            const fallbackIpsRaw = process.env.TELEGRAM_FALLBACK_IPS || '';
+            const fallbackIps = fallbackIpsRaw.split(',').map(ip => ip.trim()).filter(Boolean);
+            if (fallbackIps.length > 0) {
+                process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+                const agent = new https.Agent({
+                    keepAlive: true,
+                    rejectUnauthorized: false,
+                    servername: 'api.telegram.org',
+                });
+                const customFetch = (url: any, init: any) => {
+                    const headers = {
+                        ...(init?.headers || {}),
+                        'Host': 'api.telegram.org',
+                    };
+                    return fetch(url, {
+                        ...init,
+                        agent,
+                        headers,
+                    });
+                };
+                botConfig = {
+                    client: {
+                        apiRoot: `https://${fallbackIps[0]}`,
+                        fetch: customFetch as any,
+                    },
+                };
+                logger.warn(`[Bot] Using Telegram fallback IP: ${fallbackIps[0]} with Host header and SNI mapping via custom fetch.`);
+            } else {
+                logger.error('[Bot] No TELEGRAM_API_ROOT or TELEGRAM_FALLBACK_IPS configured and direct connection failed. The bot will likely fail.');
+            }
+        }
     }
     const bot = new Bot(config.telegramBotToken, botConfig);
     const topicManager = new TelegramTopicManager(bot.api, 0);
@@ -378,6 +414,22 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
             if (!cdp.isConnected()) return;
             try {
                 if (promptDispatcher.isBusy(channel, cdp)) return;
+
+                const conf = loadConfig();
+                const mirrorMode = conf.mirrorMode || (conf.onlyActiveWorkspaceMessages ? 'active' : 'all');
+
+                if (mirrorMode === 'telegram_only') {
+                    // In telegram_only mode, we only mirror generations that were triggered from Telegram.
+                    // If promptDispatcher is NOT busy, it means this was NOT triggered from Telegram,
+                    // so we do not mirror.
+                    return;
+                } else if (mirrorMode === 'active') {
+                    const binding = workspaceBindingRepo.findByChannelId(channelKey(channel));
+                    const activeProjectName = binding ? bridge.pool.extractProjectName(binding.workspacePath) : null;
+                    if (activeProjectName !== projectName) {
+                        return;
+                    }
+                }
 
                 // If a new user message is detected in the DOM, let UserMessageDetector handle it
                 const detector = bridge.pool.getUserMessageDetector(projectName);
@@ -793,9 +845,7 @@ export const startBot = async (cliLogLevel?: LogLevel) => {
                             sessionInfo = cdpInfo?.sessionInfo || null;
                         }
                         // 1. Parse project name from title first
-                        const titleParts = title.split(/\s[—–-]\s/);
-                        const parsedProjectName = titleParts.length >= 2 ? titleParts[titleParts.length - 2] : (titleParts[0] || 'Unknown');
-                        const cleanParsedName = parsedProjectName.replace(/\s*\([^)]+\)$/, '').replace(/\.code-workspace$/i, '').trim();
+                        const cleanParsedName = parseProjectNameFromTitle(title).replace(/\s*\([^)]+\)$/, '').replace(/\.code-workspace$/i, '').trim();
 
                         let projectName = '';
 
